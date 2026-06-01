@@ -1,0 +1,43 @@
+# 环境配置（含密钥）
+.env.development
+.env.production
+.env.local
+backend/.env.development
+backend/.env.production
+frontend/.env.development
+frontend/.env.production
+frontend/.env.local
+
+# Python（后端；venv 只建在 backend/ 下）
+backend/.venv/
+backend/venv/
+backend/.pytest_cache/
+backend/**/__pycache__/
+# 以下为迁移前遗留，可删除根目录 .venv 后仅保留 backend/.venv
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+
+# IDE / 日志
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.log
+.DS_Store
+
+# 本地数据
+*.db
+.coverage
+htmlcov/

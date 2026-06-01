@@ -1,0 +1,24 @@
+# 问数 API（公司/本机 Docker 部署）
+# MySQL 5.7 在宿主机：Windows/Mac 用 host.docker.internal
+# 使用前：在 backend/ 下复制 .env.example → .env.production 并填写
+
+services:
+  data-copilot:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: data-copilot
+    restart: unless-stopped
+    env_file:
+      - ../.env.production
+    environment:
+      APP_ENV: production
+      # 覆盖 .env 中的 host，使容器能访问宿主机 MySQL
+      MYSQL_COPILOT_HOST: host.docker.internal
+      MYSQL_BUSINESS_HOST: host.docker.internal
+      # 容器内访问宿主机 Ollama
+      LLM_API_BASE: http://host.docker.internal:11434/v1
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
