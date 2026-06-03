@@ -44,6 +44,7 @@ async function onSubmit() {
       password: form.password,
     })
     localStorage.setItem('accessToken', res.accessToken)
+    localStorage.setItem('userRole', res.user.role)
     ElMessage.success('登录成功')
     router.push('/')
   } finally {

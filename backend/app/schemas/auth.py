@@ -27,6 +27,7 @@ class UserInfo(CamelModel):
     username: str
     role: UserRole
     display_name: str | None = None
+    status: int | None = None  # 1 启用 0 禁用（用户管理列表展示）
     bound_schools: list[BoundSchool] | None = None
     active_sch_id: int | None = None
 

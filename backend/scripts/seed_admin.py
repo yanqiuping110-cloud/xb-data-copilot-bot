@@ -34,7 +34,7 @@ async def main() -> None:
     engine = create_async_engine(settings.copilot_database_url, echo=True)
     async with engine.begin() as conn:
         row = await conn.execute(
-            text("SELECT COUNT(*) AS c FROM copilot_sys_user WHERE role = 'ADMIN'")
+            text("SELECT COUNT(*) AS c FROM copilot_sys_user WHERE role = 'ADMIN' AND deleted = 0")
         )
         count = row.scalar()
         if count and count > 0:

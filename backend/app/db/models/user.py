@@ -6,7 +6,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, SmallInteger, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -34,10 +34,15 @@ class SysUser(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+    deleted: Mapped[int] = mapped_column(
+        SmallInteger,
+        default=0,
+        server_default="0",
+        comment="逻辑删除：0未删除 1已删除",
+    )
 
     schools: Mapped[list["SysUserSchool"]] = relationship(
         back_populates="user",
-        cascade="all, delete-orphan",
     )
 
 
@@ -53,5 +58,11 @@ class SysUserSchool(Base):
     )
     sch_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     sch_name: Mapped[str | None] = mapped_column(String(128))  # 展示用，非权限依据
+    deleted: Mapped[int] = mapped_column(
+        SmallInteger,
+        default=0,
+        server_default="0",
+        comment="逻辑删除：0未删除 1已删除",
+    )
 
     user: Mapped[SysUser] = relationship(back_populates="schools")

@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="qwen2.5-coder:7b", alias="LLM_MODEL")
     llm_timeout_sec: int = Field(default=120, alias="LLM_TIMEOUT_SEC")
 
+    # ---------- Embedding（OpenAI 兼容，本机多为 Ollama，与 LLM 可同 base）----------
+    embedding_api_base: str = Field(
+        default="http://127.0.0.1:11434/v1",
+        alias="EMBEDDING_API_BASE",
+    )
+    embedding_api_key: str = Field(default="ollama", alias="EMBEDDING_API_KEY")
+    embedding_model: str = Field(
+        default="qwen3-embedding:4b",
+        alias="EMBEDDING_MODEL",
+    )
+
     # ---------- MySQL：智慧体育业务库（只读账号）----------
     mysql_business_host: str = Field(default="127.0.0.1", alias="MYSQL_BUSINESS_HOST")
     mysql_business_port: int = Field(default=3306, alias="MYSQL_BUSINESS_PORT")

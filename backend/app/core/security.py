@@ -90,3 +90,12 @@ async def require_admin(
     if ctx.role != UserRole.ADMIN:
         raise AuthError("FORBIDDEN", "需要管理员权限", 403)
     return ctx
+
+
+async def require_meta_manager(
+    ctx: Annotated[UserContext, Depends(get_current_user)],
+) -> UserContext:
+    """元数据管理：ADMIN 或 OPERATOR。"""
+    if ctx.role not in (UserRole.ADMIN, UserRole.OPERATOR):
+        raise AuthError("FORBIDDEN", "需要管理员或运营权限", 403)
+    return ctx

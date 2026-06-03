@@ -1,5 +1,6 @@
 -- 问数库 copilot（MySQL 5.7+）
--- 表名统一前缀 copilot_，与业务库表区分
+-- ⚠️ 表结构变更请使用 scripts/sql/copilot/V*.sql 版本文件，人工执行（见 docs/DATABASE_CHANGE_POLICY.md）
+-- 本文件与 V001 内容同步，保留兼容；新变更请新增 V002、V003…
 -- 执行前：CREATE DATABASE copilot DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 USE copilot;
@@ -15,6 +16,7 @@ CREATE TABLE IF NOT EXISTS copilot_sys_user (
     created_by BIGINT NULL COMMENT '创建人 copilot_sys_user.id，超管种子为 NULL',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删除 1已删除',
     UNIQUE KEY uk_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='问数系统登录账户';
 
@@ -22,6 +24,7 @@ CREATE TABLE IF NOT EXISTS copilot_sys_user_school (
     user_id BIGINT NOT NULL COMMENT '用户 ID，FK copilot_sys_user.id',
     sch_id INT NOT NULL COMMENT '学校 ID，对应业务库学校主键',
     sch_name VARCHAR(128) NULL COMMENT '学校名称（展示用，非权限依据）',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删除 1已删除',
     PRIMARY KEY (user_id, sch_id),
     CONSTRAINT fk_copilot_user_school_user FOREIGN KEY (user_id) REFERENCES copilot_sys_user (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='学校账户与学校多对多绑定';
@@ -33,6 +36,7 @@ CREATE TABLE IF NOT EXISTS copilot_ask_session (
     role VARCHAR(32) NOT NULL COMMENT '提问时角色快照',
     active_sch_id INT NULL COMMENT '提问时当前校 ID（学校账户）',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '会话创建时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删除 1已删除',
     KEY idx_user_created (user_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='问数会话（多轮对话分组）';
 
@@ -60,6 +64,7 @@ CREATE TABLE IF NOT EXISTS copilot_ask_turn (
     is_badcase TINYINT NOT NULL DEFAULT 0 COMMENT '是否标记为 badcase：0 否，1 是',
     human_corrected_sql TEXT NULL COMMENT '人工修正后的 SQL',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '提问时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删除 1已删除',
     UNIQUE KEY uk_trace (trace_id),
     KEY idx_user_created (user_id, created_at),
     KEY idx_status_created (status, created_at)
@@ -73,6 +78,7 @@ CREATE TABLE IF NOT EXISTS copilot_ask_span (
     duration_ms INT NOT NULL COMMENT '节点耗时（毫秒）',
     status VARCHAR(32) NOT NULL COMMENT '节点状态：success|fail 等',
     detail_json TEXT NULL COMMENT '节点详情 JSON',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删除 1已删除',
     KEY idx_trace (trace_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='问数流水线节点 Span';
 
@@ -88,6 +94,7 @@ CREATE TABLE IF NOT EXISTS copilot_audit_log (
     row_count INT NULL COMMENT '返回行数',
     client_ip VARCHAR(64) NULL COMMENT '客户端 IP',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '审计时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删除 1已删除',
     KEY idx_user_created (user_id, created_at),
     KEY idx_trace (trace_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='问数合规审计日志';
@@ -103,6 +110,7 @@ CREATE TABLE IF NOT EXISTS copilot_metric_definition (
     alias_json TEXT NULL COMMENT '别名 JSON 数组，用于问句匹配',
     status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1 启用，0 停用',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删除 1已删除',
     UNIQUE KEY uk_metric_code (metric_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='指标定义（结构化语义层）';
 
@@ -110,8 +118,10 @@ CREATE TABLE IF NOT EXISTS copilot_sql_example (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
     question_pattern VARCHAR(512) NOT NULL COMMENT '问题模式或示例问句',
     sql_text TEXT NOT NULL COMMENT '对应 SQL',
+    meta_json TEXT NULL COMMENT 'JSON：answerTemplate、matchAll、matchAny、adminOnly 等',
     role_scope VARCHAR(32) NULL COMMENT '适用角色，NULL 表示全部',
     degrade_priority INT NOT NULL DEFAULT 100 COMMENT 'L1 降级优先级，越小越优先',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0未删除 1已删除',
     KEY idx_role (role_scope)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='样例 SQL（L1 降级匹配）';

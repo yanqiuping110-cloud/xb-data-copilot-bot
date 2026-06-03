@@ -10,9 +10,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin_users, auth, errors, health
+from app.api import admin_meta, admin_users, ask, auth, errors, health
+from app.ask.exceptions import AskError
 from app.auth import jwt_tokens
 from app.auth.service import AuthError
+from app.meta.exceptions import MetaError
 from app.policy.role_policy import PolicyError
 from config.settings import get_settings
 
@@ -45,10 +47,14 @@ def create_app() -> FastAPI:
     app.add_exception_handler(AuthError, errors.auth_error_handler)
     app.add_exception_handler(jwt_tokens.TokenError, errors.token_error_handler)
     app.add_exception_handler(PolicyError, errors.policy_error_handler)
+    app.add_exception_handler(AskError, errors.ask_error_handler)
+    app.add_exception_handler(MetaError, errors.meta_error_handler)
 
     app.include_router(health.router, tags=["health"])
     app.include_router(auth.router)
     app.include_router(admin_users.router)
+    app.include_router(admin_meta.router)
+    app.include_router(ask.router)
     return app
 
 

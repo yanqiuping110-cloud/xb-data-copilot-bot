@@ -12,8 +12,14 @@ const routes = [
   },
   {
     path: '/',
-    name: 'Home',
-    component: () => import('../views/Home.vue'),
+    name: 'Ask',
+    component: () => import('../views/Ask.vue'),
+  },
+  {
+    path: '/admin/users',
+    name: 'AdminUsers',
+    component: () => import('../views/AdminUsers.vue'),
+    meta: { requiresAdmin: true },
   },
 ]
 
@@ -28,7 +34,10 @@ router.beforeEach((to) => {
     return { name: 'Login' }
   }
   if (to.name === 'Login' && token) {
-    return { name: 'Home' }
+    return { name: 'Ask' }
+  }
+  if (to.meta.requiresAdmin && localStorage.getItem('userRole') !== 'ADMIN') {
+    return { name: 'Ask' }
   }
 })
 

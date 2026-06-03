@@ -3,8 +3,9 @@
 > **公司**：湖南小奔体育科技有限公司  
 > **目标**：产品/运营/学校管理员用自然语言查 MySQL 数据，减少固定报表开发；第一期不上渠道商。  
 > **技术路线**：**纯 Python** 问数服务 + **自研用户/权限表**（不依赖 `youplus-base-api`；**不修改** `youplus-base`、`sport-plantform`）  
-> **运行环境**：**MySQL 5.7 在宿主机/公司库**；**RAGFlow 等中间件在 Docker**；本机先调试，配置区分 `development` / `production` 后上公司环境  
-> **周期**：约 4 周（业余开发），按企业可观测、可审计、可降级标准交付 MVP  
+> **运行环境**：**MySQL 5.7 在宿主机/公司库**；**Elasticsearch + Embedding 在 Docker/宿主机**；本机先调试，配置区分 `development` / `production` 后上公司环境  
+> **周期**：约 **6 周**（业余开发）：前 2 周地基与 LangGraph 基线已完成；**第 3～6 周**聚焦元数据知识库、语义库、混合召回与多阶段推理；按企业可观测、可审计、可降级标准交付 MVP  
+> **问数核心路线**：**元数据知识库 + 语义库（前端可配置）→ 向量 + 全文混合召回 → 多阶段 LangGraph 推理 → LLM 生成 SQL**（L1 样例仅作高频快路径，不追求全覆盖）
 
 ---
 
@@ -59,7 +60,7 @@
 | **MySQL 5.7 客户端** | 建库、迁移、调试 | 连公司业务库 + 建 `copilot` |
 | **Git** | 版本管理 | |
 
-**第一期不必单独再装**：Qdrant、PostgreSQL；字段/指标召回先用 **MySQL 表 + 术语 JSON**，需要时再对接 RAGFlow/ES。
+**检索栈（第 3 周起）**：结构化元数据存 **copilot MySQL**；字段/指标 **向量索引** 走 **Elasticsearch dense_vector**（复用 Docker `:1200`）或独立 Qdrant（二选一，默认 ES）；字段取值 **全文检索** 走 **Elasticsearch**；Embedding 走 **Ollama 兼容 API**（与 LLM 可同 base）。RAGFlow 文档 RAG 与问数元数据**解耦**，问数不依赖 RAGFlow 控制台。
 
 ### 整体拓扑图（本机）
 
@@ -69,12 +70,13 @@
 │  · Ollama :11434          ← LLM（4070）                                   │
 │  · MySQL 5.7 :3306        ← 业务库 + copilot 库                           │
 │  · Python Uvicorn :8000   ← data-copilot-bot（开发期）                     │
-│  · Vite :5173             ← 前端（开发期）                                 │
+│  · Vite :5173             ← 前端（开发期，含元数据/语义库管理页）            │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │ host.docker.internal（容器访问宿主机）
 ┌───────────────────────────────▼─────────────────────────────────────────┐
-│ Docker Compose（RAGFlow 栈）                                               │
-│  ragflow:443  │  elasticsearch:1200  │  redis:6379  │  minio:9000       │
+│ Docker / 检索服务                                                          │
+│  elasticsearch:1200  ← 问数字段向量 + 字段取值全文（第 3 周接入）            │
+│  （可选）ragflow:443 / redis / minio — 文档 RAG，与问数元数据解耦           │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -121,7 +123,10 @@
 
 | 能力 | 说明 |
 |------|------|
-| 自然语言问数 | 中文提问 → 生成 **只读 SELECT** → 表格结果 + 简短解读 |
+| 自然语言问数 | 中文提问 → **混合召回上下文** → 多阶段推理 → 只读 SELECT → 表格 + 解读 |
+| 元数据知识库 | 业务表/字段/表关系结构化存储；支持从 `information_schema` 半自动同步 + **前端人工维护** |
+| 语义库 | 指标口径、别名、与字段/表的关联；**前端可配置**，驱动 LLM Prompt 与召回 |
+| 混合召回 | 问句 → 字段/指标 **向量召回** + 字段取值 **全文召回** + MySQL 结构化补全 |
 | 角色与数据隔离 | 超管 / 运营 / 学校管理员看到的数据范围不同 |
 | 企业可观测 | 每次提问可追溯：延迟、成功率、降级、badcase、审计 |
 | 账号与权限 | 自研三类账户（超管 / 运营 / 学校），JWT 登录；学校账户可绑定多个 `sch_id` |
@@ -131,7 +136,8 @@
 
 - 渠道商、代理商（`QYDLYYRY22`、`YJDLS` 等）
 - 复杂图表大屏、自助拖拽 BI
-- 全库任意表问答（仅 **表白名单 + 15～20 条高频问法**）
+- 全库任意表问答（仅 **表白名单 5～15 张表** + 元数据覆盖范围内问答）
+- 仅靠无限堆叠 L1 SQL 样例覆盖全部业务（L1 只保留 **Top 高频 20～30 条**）
 - 写库、DDL、导出超大量数据
 - 替换现有 `SportActivityNewReportController` 等固定报表接口
 
@@ -165,7 +171,10 @@
 | 查全部业务库（白名单表） | ✅ | ✅ | ❌（仅绑定校） |
 | 创建/禁用用户 | ✅ | ❌ | ❌ |
 | 为学校账户绑定/解绑 `sch_id` | ✅ | ❌ | ❌ |
-| 管理 badcase / 样例 SQL（一期可都给运营） | ✅ | ✅（可选） | ❌（可选） |
+| 管理 badcase / 样例 SQL | ✅ | ✅（可选） | ❌（可选） |
+| **元数据知识库**（表/字段/关系） | ✅ | ✅ | ❌ |
+| **语义库**（指标/字段取值/别名） | ✅ | ✅ | ❌ |
+| **触发索引重建**（同步 ES 向量/全文） | ✅ | ✅ | ❌ |
 
 ### 2.2 学校账户与多 `sch_id`
 
@@ -325,24 +334,27 @@ data-copilot-bot (Python FastAPI)
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
 │ 问数前端（Vue3，data-copilot-bot/frontend）                        │
-│  · Vite dev :5173（本机） / Nginx 静态资源（公司）                  │
+│  · 问数对话页  · 超管用户管理  · **元数据/语义库管理**（ADMIN/OPERATOR）│
 │  · POST /api/v1/auth/login  ·  /api/v1/ask  ·  /api/v1/admin/*   │
 └────────────────────────────┬────────────────────────────────────┘
                              │ JWT + question
 ┌────────────────────────────▼────────────────────────────────────┐
 │  data-copilot-bot（Python 3.11 + FastAPI，默认 :8000）              │
-│  Auth(JWT) → LangGraph(Text2SQL) → PolicyService + sql_guard      │
-│  Observability → MySQL copilot（copilot_ask_* / copilot_audit_log）               │
+│  Auth(JWT) → LangGraph（多阶段推理 + Text2SQL）→ Policy + sql_guard │
+│  MetaKnowledgeService：MySQL 元数据 ↔ ES 向量/全文索引              │
+│  Observability → MySQL copilot（copilot_ask_* / copilot_audit_log） │
 └──────┬──────────────────────────────┬───────────────────────────┘
        │                              │
        ▼                              ▼
- MySQL 5.7（宿主机/公司）          Ollama :11434（宿主机 LLM）
- · copilot 库                      或 公司 LLM API
+ MySQL 5.7（宿主机/公司）          Ollama :11434（LLM + Embedding）
+ · copilot 库：用户/审计/元数据/语义
  · 业务库只读
 
-       │ （二期可选）RAG 文档 / 字段取值
+       │
        ▼
- Docker：RAGFlow + Elasticsearch:1200 + Redis:6379 + MinIO:9000
+ Elasticsearch :1200（Docker）
+ · 字段/指标向量索引（dense_vector）
+ · 字段取值全文索引（keyword/text）
 ```
 
 ---
@@ -353,15 +365,19 @@ data-copilot-bot (Python FastAPI)
 |------|------|------|
 | 语言 | Python 3.11+ | Agent / NL2SQL 生态 |
 | Web | FastAPI + Uvicorn | 异步、OpenAPI |
-| Agent | LangGraph + LangChain | 固定有向图，节点可 Trace |
-| LLM | OpenAI 兼容 API | 通义 / DeepSeek / 私部署均可 |
+| Agent | LangGraph + LangChain | **多阶段有向图**：召回 → 合并过滤 → 生成 → 校验 → 执行 |
+| LLM | OpenAI 兼容 API | 通义 / DeepSeek / Ollama 等 |
+| Embedding | OpenAI 兼容 API | 与 LLM 可同 Ollama base；字段/指标/问句向量化 |
+| 向量检索 | **Elasticsearch dense_vector**（默认） | 复用 Docker ES `:1200`；可选 Qdrant |
+| 全文检索 | **Elasticsearch** | 字段取值、枚举、校名/项目名等 |
+| 元数据存储 | **MySQL copilot_*** | 表/字段/关系/指标/取值权威数据源 |
 | SQL 安全 | sqlglot + 自研规则 | 仅 SELECT、表白名单、强制 sch_id |
 | DB 驱动 | SQLAlchemy / aiomysql | 连接池、超时 |
 | 配置 | pydantic-settings + `.env` | 环境隔离 |
 | 日志 | structlog 或 JSON logging | 每行带 `trace_id` |
 | 认证 | **PyJWT** 或 **python-jose** + **passlib[bcrypt]** | 登录签发、密码哈希 |
 | ORM / 迁移 | **SQLAlchemy 2** + **Alembic**（可选） | `copilot_sys_user` 等表 |
-| 文档 RAG（已有） | **RAGFlow v0.24** + ES + MinIO + Valkey | Docker；问数 MVP 可不接 |
+| 文档 RAG（可选） | **RAGFlow v0.24** + MinIO + Valkey | 与问数元数据**解耦**；问数检索直连 ES |
 | 部署 | 本机进程 / **Docker Compose**（公司） | MySQL 始终在宿主机；问数服务可容器化 |
 | 配置 | `.env.development` / `.env.production` | `APP_ENV` 切换 |
 
@@ -374,20 +390,23 @@ data-copilot-bot/
 ├── docs/                            # 设计与规范（仓库级）
 │   ├── DEVELOPMENT_PLAN.md
 │   ├── ROLE_PERMISSION.md           # 待写
-│   ├── TABLE_WHITELIST.md           # 待写
+│   ├── TABLE_WHITELIST.md           # 初始表白名单参考（逐步迁入 copilot_table_meta）
+│   ├── META_KNOWLEDGE.md            # 元数据/语义库字段说明与维护规范
 │   └── EVAL_QUESTIONS.md            # 待写
 ├── backend/                         # Python 问数 API
 │   ├── app/
 │   │   ├── main.py
-│   │   ├── api/                     # auth、admin_users、ask、health…
+│   │   ├── api/                     # auth、admin_users、ask、admin_meta…
 │   │   ├── core/                    # context、security
 │   │   ├── auth/
 │   │   ├── policy/
-│   │   ├── agent/                   # LangGraph（待实现）
+│   │   ├── agent/                   # LangGraph 多阶段节点
+│   │   ├── meta/                    # 元数据/语义库 Repository + 索引构建
+│   │   ├── retrieval/               # 混合召回（向量 + 全文 + MySQL 补全）
 │   │   ├── db/
 │   │   └── observability/
 │   ├── config/settings.py
-│   ├── scripts/                     # ddl_copilot.sql、seed_admin.py
+│   ├── scripts/                     # ddl、seed、sync_table_meta、build_search_index
 │   ├── tests/
 │   ├── deploy/docker-compose.yml
 │   ├── pyproject.toml
@@ -397,9 +416,9 @@ data-copilot-bot/
 │   └── .env.production              # gitignore
 ├── frontend/                        # Vue3 + Vite 问数前端
 │   ├── src/
-│   │   ├── api/                     # 封装 REST
+│   │   ├── api/                     # 封装 REST（含 adminMeta.js）
 │   │   ├── router/
-│   │   ├── views/                   # login、ask、admin
+│   │   ├── views/                   # login、ask、admin、AdminMetaTables…
 │   │   └── utils/request.js
 │   ├── package.json
 │   ├── vite.config.js
@@ -436,18 +455,44 @@ def require_school_scope(ctx: UserContext) -> int:
 
 ---
 
-## 6. LangGraph 流水线（固定 7 节点）
+## 6. LangGraph 流水线（多阶段推理 + L1 快路径）
 
-| 节点 | 职责 | 失败处理 |
+> 对标电商问数「检索 → 过滤 → 生成 → 校验 → 执行」；在保留企业 **L1 样例快路径** 与 **sch_id 策略** 的前提下扩展节点。  
+> **第 2 周基线**（7 节点）已实现；**第 5 周**将 `retrieve_context` 拆分为下列召回/合并子阶段。
+
+### 6.1 目标流水线（第 5 周完整版）
+
+| 阶段 | 节点 | 职责 | 失败处理 |
+|------|------|------|----------|
+| 预处理 | `normalize_question` | 清洗、截断长度 | 记 `copilot_ask_span` |
+| 召回 | `extract_keywords` | LLM/规则抽取问句关键词 | 降级为整句检索 |
+| 召回 | `recall_columns` | 字段向量召回（ES） | 空结果仍继续 |
+| 召回 | `recall_metrics` | 指标向量召回（ES） | 空结果仍继续 |
+| 召回 | `recall_field_values` | 字段取值全文召回（ES） | 空结果仍继续 |
+| 合并 | `merge_retrieved_info` | 合并三路召回 + MySQL 补全表/关系 | 记 span detail |
+| 过滤 | `filter_tables` | 按召回得分筛候选表（Top-N） | |
+| 过滤 | `filter_metrics` | 筛候选指标与口径 | |
+| 上下文 | `build_llm_context` | 拼表说明、JOIN 提示、指标公式、取值映射 | 无检索仍用白名单兜底 |
+| 快路径 | `match_curated` | L1 样例命中则 **跳过 LLM 生成** | 命中 → `degrade_level=1` |
+| 生成 | `generate_sql` | LLM 生成 SQL | 超时/失败 → L2 精简重试 1 次 |
+| 校验 | `validate_sql` | SELECT only、表白名单、LIMIT | 失败 → 可选 `correct_sql` 1 次 → L3 |
+| 策略 | `apply_policy` | 按角色注入 `sch_id`、LIMIT | 失败 → L3 |
+| 执行 | `execute_sql` | 只读库执行，超时 10s，max 5000 行 | timeout → 记指标 |
+| 回答 | `format_answer` | 表格 + 一句话总结 | 流式可选（Phase 2） |
+
+**路由要点**：
+
+- `match_curated` 在 `build_llm_context` 之后：L1 命中则直接进入 `validate_sql`。
+- `validate_sql` 失败且 `retry_count < 1` 时走 `correct_sql`（带错误信息重生成），仍失败则 L3 拒答。
+
+### 6.2 当前已落地（第 2 周基线，待演进）
+
+| 节点 | 现状 | 演进方向 |
 |------|------|----------|
-| `normalize_question` | 清洗、截断长度 | 记 `copilot_ask_span` |
-| `retrieve_context` | 术语 + 表说明 + 相似样例 SQL | 无检索仍继续 |
-| `match_curated` | 与预置问句相似度 | 命中 → **L1 降级**，跳过 LLM 生成 |
-| `generate_sql` | LLM 生成 SQL | 超时 → 重试 1 次 → L2 |
-| `validate_sql` | SELECT only、表白名单、禁多语句 | 失败 → L3 拒答 |
-| `apply_policy` | 按角色注入 `sch_id`、LIMIT | 失败 → L3 |
-| `execute_sql` | 只读库执行，超时 10s，max 5000 行 | timeout → 记指标 |
-| `format_answer` | 表格 + 一句话总结 | 流式可选 |
+| `retrieve_context` | 全量指标 + 关键词 Top-K 样例 | 拆为 §6.1 召回/合并/过滤链 |
+| `match_curated` | L1 + MVP | 保留；样例来源含前端维护的 `copilot_sql_example` |
+| `generate_sql` | 单次 LLM + L2 重试 | 接入 `build_llm_context` 结构化 Prompt |
+| 其余节点 | 已实现 | 增加 `correct_sql`（第 5 周） |
 
 **任务完成率**：`format_answer` 成功且 `execute_sql` 无异常 / 总请求。
 
@@ -520,49 +565,214 @@ def require_school_scope(ctx: UserContext) -> int:
 ### 8.4 人工干预闭环
 
 1. 运营在管理页对某 `trace_id` 标记 **badcase**。  
-2. 填写 **正确 SQL** → 写入 `copilot_sql_example`（按 `role` + 场景分类）。  
-3. 每周跑 `scripts/replay_eval.py` 回归评测集。
+2. 优先补 **元数据/指标/字段取值**；必要时填写 **正确 SQL** → 写入 `copilot_sql_example`。  
+3. 触发 **索引重建**（若改了 alias/取值）。  
+4. 每周跑 `scripts/replay_eval.py` 回归评测集。
 
 ---
 
-## 9. 数据与语义层（第一期）
+## 9. 元数据知识库与语义库
 
-### 9.1 MySQL 连接
+> **原则**：MySQL `copilot_*` 为**权威数据源**（前端可 CRUD）；Elasticsearch 为**检索索引**（由后端脚本/管理页触发重建）；业务库 `information_schema` 仅用于**只读拉取**表/字段备注与类型，**不反向写入业务库**。  
+> **表/字段「有效定义」**：自动读取业务库 COMMENT 为底稿；运营可在前端**人工补充/覆盖**；**人工非空时优先级高于自动备注**（见 §9.2.5）。  
+> 参考 [shopkeeper-agent](https://github.com/didilili/shopkeeper-agent) 的 `table_info` / `column_info` / `metric_info` 分层，并增加 **表关系**、**字段取值**、**前端管理** 等企业字段。
+
+### 9.1 MySQL 连接（不变）
 
 - **部署**：MySQL **5.7 在宿主机/公司服务器**，不进 Docker。  
-- **业务库**：只读账号，`max_execution_time` / 连接级 timeout；方言在 Prompt 中注明 **MySQL 5.7**（避免 8.0 专属语法）。  
-- **问数库 `copilot`**：与业务可**同实例不同 database**；存 `copilot_sys_user`、`copilot_ask_*`、指标目录等；**表名统一前缀 `copilot_`**。  
-- **本机**：`MYSQL_*_HOST=127.0.0.1`；问数服务在 Docker 内时用 `host.docker.internal`（Windows Docker Desktop）。
+- **业务库**：只读账号；方言 Prompt 注明 **MySQL 5.7**。  
+- **问数库 `copilot`**：用户/审计/**元数据/语义**；表名统一 **`copilot_` 前缀**。  
+- **Elasticsearch**：Docker `:1200`；索引名前缀 `copilot_ask_`（与 RAGFlow 索引隔离）。
 
-### 9.2 表白名单（待业务确认，示例方向）
+### 9.2 元数据知识库（结构层 · MySQL）
 
-与现有报表域对齐，优先活动/参与/stat 类表（参考 `SportActivityNewReportController` 所用 Service）：
+#### 9.2.1 表清单
 
-| 域 | 可能表/视图 | 关键字段 |
-|----|-------------|----------|
-| 活动参与 | `sport_activity_*_stat*` | `activity_id`, `sch_id`, `stat_day` |
+| 表名 | 说明 | 前端管理 |
+|------|------|----------|
+| `copilot_table_meta` | 业务表注册：表名、fact/dim、业务域、粒度、sch_id 字段 | ✅ 表管理页 |
+| `copilot_column_meta` | 字段：类型、角色(pk/fk/measure/dim/time)、描述、别名 | ✅ 字段管理页（按表） |
+| `copilot_table_relation` | 表间 JOIN：from/to 列、关系类型、JOIN 提示 | ✅ 关系管理页 |
+| `copilot_field_value` | 字段枚举/取值：value、展示名、别名（如 project_id=1→跳绳） | ✅ 取值管理页 |
+
+#### 9.2.2 `copilot_table_meta` 核心字段（DDL 见 `V004__meta_knowledge.sql`）
+
+| 字段 | 说明 |
+|------|------|
+| `table_name` | 业务表名，问数白名单权威来源 |
+| `table_role` | `fact` / `dim` / `bridge` |
+| `biz_domain` | 活动参与 / 打卡 / 学校 等 |
+| `table_comment_auto` | **自动**：从业务库 `information_schema.TABLES.TABLE_COMMENT` 读取 |
+| `description_manual` | **人工**：运营填写的表业务定义；**非空时覆盖** `table_comment_auto` |
+| `grain` | 数据粒度说明（通常人工填写） |
+| `sch_id_column` | 学校隔离字段，默认 `sch_id` |
+| `last_introspected_at` | 最近一次从业务库拉取结构的时间 |
+| `status` | 1 启用（可问数）0 停用 |
+
+**有效表描述（问数/Prompt/索引用）**：
+
+```text
+effective_table_description =
+  TRIM(description_manual) 非空 ? description_manual : table_comment_auto
+```
+
+#### 9.2.3 `copilot_column_meta` 核心字段
+
+| 字段 | 说明 |
+|------|------|
+| `column_name` | 字段名 |
+| `data_type` | **自动**：业务库 `COLUMN_TYPE`（如 `bigint(20)`），同步时更新 |
+| `column_comment_auto` | **自动**：业务库 `COLUMN_COMMENT` |
+| `description_manual` | **人工**：运营补充的业务定义；**非空时覆盖** `column_comment_auto` |
+| `column_role` | `pk` / `fk` / `measure` / `dimension` / `filter` / `time`（人工维护） |
+| `alias_json` | 别名数组（人工维护） |
+| `sample_values_json` | 示例值（人工或后续采样脚本） |
+| `is_nullable` | **自动**：来自 `information_schema` |
+
+**有效字段描述**：
+
+```text
+effective_column_description =
+  TRIM(description_manual) 非空 ? description_manual : column_comment_auto
+```
+
+#### 9.2.4 构建流程（后端脚本 + 前端触发）
+
+```text
+① 前端输入表名 → GET /admin/meta/introspect/tables/{tableName}
+   只读 business information_schema：表 COMMENT + 各字段 COLUMN_TYPE / COLUMN_COMMENT
+   （不落库，供运营预览）
+
+② 运营在预览页补充 description_manual、grain、column_role、alias 等 → 保存
+   POST /admin/meta/tables 或 PUT /admin/meta/tables/{id}
+   POST /admin/meta/tables/{id}/columns（批量）
+
+③ 后续「刷新结构」→ POST /admin/meta/tables/{id}/refresh-from-business
+   仅更新 data_type、column_comment_auto、table_comment_auto、is_nullable
+   **绝不覆盖** 已有非空 description_manual / alias_json / column_role
+
+④ scripts/sync_table_meta_from_business.py（CLI 批量，规则同③）
+
+⑤ POST /api/v1/admin/meta/rebuild-index → ES 向量/全文（用 effective_* 描述）
+
+⑥ /ask 问数时 HybridRetriever 读 ES + MySQL 补全 JOIN
+```
+
+#### 9.2.5 自动读取 vs 人工定义（优先级规则）
+
+| 场景 | 行为 |
+|------|------|
+| 首次录入表名 | 拉取业务库备注/类型 → 写入 `*_auto` 字段；人工列可留空 |
+| 运营填写 `description_manual` | 问数 Prompt、混合召回、索引文本均用 **人工定义** |
+| 运营清空 `description_manual` | 回退为 `*_auto`（业务库 COMMENT） |
+| 业务库 COMMENT 变更后点「刷新结构」 | 更新 `*_auto`；**不改动** 非空 `description_manual` |
+| 业务库新增字段 | 刷新后追加新字段行（仅 auto）；已有字段保留人工内容 |
+| 业务库删除字段 | 刷新标记 `column_meta.status=0` 或逻辑删除，不物理删（保留审计） |
+
+**前端展示约定**：
+
+- 两列对照：**业务库备注（只读）** | **问数定义（可编辑，优先生效）**
+- 有效定义列灰字预览：`effective = 人工 ?? 自动`
+- 字段列表必显：`column_name`、`data_type`、业务库备注、问数定义、有效定义
+
+**初始表白名单**（与现有种子对齐，逐步迁入 `copilot_table_meta`）：
+
+| 域 | 优先表 | 关键字段 |
+|----|--------|----------|
+| 活动打卡 | `sport_activity_qzs_record` | `people_id`, `sch_id`, `project_id`, `create_time` |
+| 活动参与 stat | `sport_activity_*_stat*` | `activity_id`, `sch_id`, `stat_day` |
 | 学校 | 学校维度表 | `sch_id`, `sch_name` |
 | 打卡/完成 | `sport_activity_done_*` | `sch_id`, `student_id` |
 
-> 详细表名在 `docs/TABLE_WHITELIST.md` 中维护（开发第 1 周完成）。
+### 9.3 语义库（口径层 · MySQL）
 
-### 9.3 术语库（示例）
+在现有表上扩展，并增加指标-字段关联：
 
-| 术语 | 定义 |
+| 表名 | 说明 | 前端管理 |
+|------|------|----------|
+| `copilot_metric_definition` | 指标：名称、口径、公式、时间字段、别名（**已有，扩展字段**） | ✅ 指标管理页 |
+| `copilot_metric_column` | 指标 ↔ 字段 多对多（measure/filter/group_by/join_key） | ✅ 指标详情内关联 |
+| `copilot_sql_example` | L1 样例 SQL（**已有**）；可由 badcase 闭环或前端录入 | ✅ 样例管理页 |
+
+#### 9.3.1 `copilot_metric_definition` 扩展字段（V004）
+
+| 字段 | 说明 |
 |------|------|
-| 参与人数 | 周期内至少完成 1 次有效记录的去重学生数 |
-| 本校 | 当前会话 `active_sch_id` 对应学校（学校账户） |
-| 活动 | `activity_id` 指向的 `sport_activity_new` 配置 |
+| `formula_text` | 口径公式，如 `COUNT(DISTINCT people_id)` |
+| `filter_hint` | 默认过滤条件说明 |
+| `time_column` | 默认时间字段 |
+| `agg_type` | `count_distinct` / `sum` / `rate` 等 |
+| `unit` | 人 / 次 / % |
+| `admin_only` | 是否仅超管/运营可查 |
+| `sql_template` | 参考 SQL 片段（非 L1 全句，供 Prompt few-shot） |
 
-### 9.4 第一期评测问句（示例 5 条）
+#### 9.3.2 语义库示例（智慧体育）
 
-1. 本校本月跳绳活动参与人数是多少？  
+| metric_code | 名称 | 公式 | 关联表/字段 |
+|-------------|------|------|-------------|
+| `participation_count` | 参与人数 | `COUNT(DISTINCT people_id)` | `sport_activity_qzs_record.people_id` |
+| `checkin_times` | 打卡人次 | `COUNT(*)` | `sport_activity_qzs_record` |
+| `checkin_completion_rate` | 打卡完成率 | 完成人数 / 应参与人数 | 完成表 + 参与表 |
+
+术语与 `alias_json` 配合混合召回；**不再**依赖 `docs/TABLE_WHITELIST.md` 长期手工维护（文档仅作迁移参考）。
+
+### 9.4 混合召回（向量 + 全文）
+
+| 召回类型 | 数据源 | 索引 | 用途 |
+|----------|--------|------|------|
+| 字段语义 | `copilot_column_meta`（**effective** 描述 + alias） | ES `copilot_ask_column` | 「参与人数」→ `people_id` |
+| 指标语义 | `copilot_metric_definition` | ES `copilot_ask_metric`（dense_vector） | 「打卡完成率」→ 指标口径 |
+| 字段取值 | `copilot_field_value` | ES `copilot_ask_value`（text/keyword） | 「跳绳」→ `project_id=1` |
+| 结构化补全 | `copilot_table_meta` / `copilot_table_relation` | MySQL 直查 | JOIN 路径、sch_id 列 |
+
+**召回参数**（`settings.py` / 前端系统配置页只读展示）：
+
+- `RECALL_TOP_K_COLUMN=8`
+- `RECALL_TOP_K_METRIC=5`
+- `RECALL_TOP_K_VALUE=10`
+- `EMBEDDING_MODEL` 与 LLM 可同 Ollama base
+
+**降级**：ES 不可用时回退 MySQL 关键词匹配（`alias_json` LIKE），记 span `recall_mode=keyword_fallback`。
+
+### 9.5 前端配置（必须实现）
+
+> **目标**：运营/超管**不写 SQL、不改代码**即可维护问数知识库；学校账户**只读问数**，不可进管理页。
+
+#### 9.5.1 页面清单
+
+| 路由 | 角色 | 功能 |
+|------|------|------|
+| `/admin/meta/tables` | ADMIN / OPERATOR | 表列表 CRUD；**输入表名读取业务库**；启用/停用 |
+| `/admin/meta/tables/:id/columns` | ADMIN / OPERATOR | 字段列表：**类型+业务库备注只读**；**问数定义可编辑**；别名、角色 |
+| `/admin/meta/tables/new` | ADMIN / OPERATOR | 向导：表名 →  introspect 预览 → 补人工定义 → 保存 |
+| `/admin/meta/relations` | ADMIN / OPERATOR | 表关系 CRUD |
+| `/admin/meta/field-values` | ADMIN / OPERATOR | 字段取值/枚举 CRUD |
+| `/admin/meta/metrics` | ADMIN / OPERATOR | 指标 CRUD、关联字段、别名 |
+| `/admin/meta/sql-examples` | ADMIN / OPERATOR | L1 样例 CRUD（含 match 规则 JSON） |
+| `/admin/meta/index` | ADMIN / OPERATOR | 索引状态、一键重建、最近构建日志 |
+
+#### 9.5.2 交互要求
+
+- **录入新表**：输入 `tableName` → 点击「从业务库读取」→ 展示表 COMMENT 与字段列表（**字段名、类型、COLUMN_COMMENT**）→ 运营逐字段补充「问数定义」→ 保存入库。
+- **已注册表**：「刷新结构」仅更新 auto 字段与新增列；人工定义不被覆盖（§9.2.5）。
+- 字段页表格列：`字段名` | `类型(自动)` | `业务库备注(自动)` | `问数定义(人工)` | `有效定义(预览)` | `角色/别名`。
+- 指标编辑支持 **可视化关联字段**（多选 `copilot_column_meta`）。
+- 保存表/字段/指标/取值后提示 **「是否重建检索索引」**；索引重建异步任务，前端轮询状态。
+- 所有写操作写 **审计日志**（`copilot_audit_log` 或独立 `copilot_meta_change_log`）。
+
+### 9.6 评测问句（开放域为主）
+
+L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **15～30 条** → `docs/EVAL_QUESTIONS.md`）：
+
+1. 本校本月跳绳活动参与人数是多少？（可 L1 或 LLM）  
 2. 本校最近 7 天每日参与人数趋势？  
 3. 指定活动 ID 下各班级参与人数排名（前 10）？  
 4. 本校今日完成打卡的学生人数？  
 5. （超管）昨日全平台活动参与人次汇总？  
+6. 本校跑步项目上周打卡人次？（字段取值召回）  
+7. 对比本月跳绳与跑步参与人数？（多指标 + 过滤）  
 
-完整列表目标 **15～20 条** → `docs/EVAL_QUESTIONS.md`。
+**月验收**：开放域评测完成率 ≥ **60%**（第 4 周基线 70% 针对含 L1 命中；第 6 周单独统计 `degrade_level=0` 路径）。
 
 ---
 
@@ -650,7 +860,63 @@ def require_school_scope(ctx: UserContext) -> int:
 }
 ```
 
-### 10.6 健康检查
+### 10.6 元数据 / 语义库管理 API（`ADMIN` / `OPERATOR`）
+
+前缀：`/api/v1/admin/meta`；均需 JWT；写操作记审计。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/introspect/tables/{tableName}` | **只读**拉取业务库：表 COMMENT + 字段类型/备注（**不落库**） |
+| GET | `/tables` | 表元数据分页列表（含 effective 描述） |
+| POST | `/tables` | 新增表（可带 columns 批量，含 manual 字段） |
+| PUT | `/tables/{id}` | 更新 `description_manual`、grain、status 等 |
+| POST | `/tables/{id}/refresh-from-business` | 刷新 auto 字段；**不覆盖**非空 manual |
+| DELETE | `/tables/{id}` | 逻辑删除 |
+| GET | `/tables/{id}/columns` | 字段列表（auto + manual + effective） |
+| POST | `/tables/{id}/columns` | 批量保存字段（含 manual） |
+| PUT | `/columns/{id}` | 更新 `description_manual`、别名、角色 |
+| GET | `/relations` | 表关系列表 |
+| POST | `/relations` | 新增关系 |
+| GET | `/field-values` | 字段取值列表（可按 column_id 过滤） |
+| POST | `/field-values` | 新增取值 |
+| GET | `/metrics` | 指标列表 |
+| POST | `/metrics` | 新增指标（含关联 column_ids） |
+| PUT | `/metrics/{id}` | 更新指标与字段关联 |
+| GET | `/sql-examples` | L1 样例列表 |
+| POST | `/sql-examples` | 新增样例 |
+| POST | `/sync-from-business` | 从 `information_schema` 增量同步 |
+| POST | `/rebuild-index` | 异步重建 ES 向量/全文索引 |
+| GET | `/index-jobs/{jobId}` | 查询索引构建状态 |
+
+**`GET /introspect/tables/{tableName}` 响应示例**（只读预览，不写 copilot 库）：
+
+```json
+{
+  "tableName": "sport_activity_qzs_record",
+  "tableCommentAuto": "亲子活动打卡记录表",
+  "existsInCopilot": false,
+  "columns": [
+    {
+      "columnName": "people_id",
+      "dataType": "bigint(20)",
+      "columnCommentAuto": "学生ID",
+      "isNullable": false,
+      "ordinalPosition": 3
+    },
+    {
+      "columnName": "sch_id",
+      "dataType": "int(11)",
+      "columnCommentAuto": "学校ID",
+      "isNullable": true,
+      "ordinalPosition": 5
+    }
+  ]
+}
+```
+
+保存时前端提交 `descriptionManual`（表/字段）；后端持久化到 `description_manual`，检索与 Prompt 使用 **effective** 合并结果（§9.2.5）。
+
+### 10.7 健康检查
 
 `GET /health`、`GET /ready`（MySQL `copilot` + 业务只读库连通）。
 
@@ -669,68 +935,91 @@ def require_school_scope(ctx: UserContext) -> int:
 | `PUT .../schools` | 维护学校账户的 `sch_id` 列表 |
 | `role_policy` | ADMIN/OPERATOR 不注入 sch；SCHOOL 强制 `active_sch_id` |
 | 单元测试 | 运营调 admin API → 403；学校查别校 → SQL 网关拒绝 |
+| **`V004__meta_knowledge.sql`** | 表/字段/关系/取值/指标关联 DDL |
+| **`/admin/meta/*`** | 元数据与语义库 CRUD + 同步 + 重建索引 |
+| **`BusinessSchemaIntrospector`** | 只读 information_schema；供 introspect / refresh |
+| **`description_manual` 优先级** | 同步/刷新不覆盖非空人工定义；effective 合并单测 |
+| **`MetaKnowledgeService`** | MySQL → ES 向量/全文索引构建（索引用 effective 描述） |
+| **`HybridRetriever`** | 问句混合召回，接入 LangGraph |
+| **前端 meta 管理页** | §9.5 路由清单 |
 
 ---
 
-## 12. 四周开发计划
+## 12. 开发计划（6 周）
 
-### 第 1 周：地基 + 可观测
+> **第 1～2 周已完成**（见 [PROGRESS.md](./PROGRESS.md)）。以下 **第 3～6 周** 为当前主攻：元数据知识库、语义库、前端配置、混合召回、多阶段推理。
 
-| 天 | 任务 | 交付物 |
-|----|------|--------|
-| 1～2 | 初始化 `backend/` + `frontend/`：FastAPI、Vite、Docker | 前后端可启动 |
-| 2～3 | `ddl_analytics.sql` 建表；`tracer` 写 `copilot_ask_turn/copilot_ask_span/copilot_audit_log` | 打一条假请求有记录 |
-| 2～3 | `ddl_copilot.sql` + `copilot_sys_user` + `seed_admin` | 默认超管可登录 |
-| 3～4 | JWT 登录 + `role_policy` 单测 | ADMIN/OPERATOR/SCHOOL 策略通过 |
-| 4～5 | MySQL 业务只读 + 硬编码 SQL | `/ask` 假用户返回结果 |
-| 5～7 | `/admin/users` 创建运营/校账户 + `/ask` JWT | Postman 端到端 |
+### 第 1～2 周：地基 + LangGraph 基线 ✅
 
-**周验收**：超管登录 → 创建学校账户并绑定 `sch_id` → 该校账户仅能查绑定校；审计表有记录。
-
----
-
-### 第 2 周：SQL 安全 + LangGraph
-
-| 天 | 任务 | 交付物 |
-|----|------|--------|
-| 1～2 | `sql_guard`：SELECT only、表白名单、LIMIT | `test_sql_guard` 通过 |
-| 2～3 | `sch_id` 强制注入（仅 `SCHOOL`） | **串校回归测试** 5 用例 |
-| 3～5 | LangGraph 7 节点打通 + LLM 配置 | 真实问句出 SQL |
-| 5～7 | L1 样例降级 + 术语/样例 JSON | 评测问句命中样例 |
-
-**周验收**：校管无法查他校；指标表有 `latency_*`、`status`。
+| 天 | 任务 | 交付物 | 状态 |
+|----|------|--------|------|
+| 1～2 | FastAPI + Vue + Docker 骨架 | 前后端可启动 | ✅ |
+| 2～3 | `ddl_copilot.sql` + tracer + seed_admin | 审计可写 | ✅ |
+| 3～4 | JWT + `role_policy` | 单测通过 | ✅ |
+| 4～5 | `/ask` LangGraph 7 节点 + LLM | 问数可用 | ✅ |
+| 5～7 | L1 样例 + 前端问数/用户管理 | 端到端 | ✅ |
 
 ---
 
-### 第 3 周：RAG + 前端 + 降级
+### 第 3 周：元数据知识库 + 语义库（后端 + DDL）
 
 | 天 | 任务 | 交付物 |
 |----|------|--------|
-| 1～2 | 表/字段 metadata + 检索 | `TABLE_WHITELIST.md` |
-| 2～3 | L2/L3 降级与重试 | `degrade_level` 正确 |
-| 3～5 | 极简前端：登录 + 问数 + 超管用户管理页 | 内网可演示 |
-| 5～7 | `feedback` API + badcase 标记 | 人工修正 SQL 入库 |
+| 1～2 | `V004__meta_knowledge.sql`：含 `table_comment_auto` / `description_manual` / `column_comment_auto` 等 | 迁移脚本 |
+| 2～3 | `BusinessSchemaIntrospector` + `GET /introspect/tables/{tableName}` | 前端可输入表名读字段类型与备注 |
+| 3～4 | `refresh-from-business`（仅更新 auto，保护 manual）+ `seed_semantic_meta.py` | 优先级规则单测 |
+| 4～5 | `MetaKnowledgeService` + ES client；`build_search_index.py` | 向量/全文索引可构建 |
+| 5～7 | `/admin/meta/*` CRUD API（表/字段/关系/取值/指标） | Postman 可维护元数据 |
 
-**周验收**：运营/校管各 2 人试用；能标记 badcase。
+**周验收**：copilot 库有完整 meta 表；首表字段 ≥15 条；ES 索引构建成功；白名单改读 `copilot_table_meta`。
 
 ---
 
-### 第 4 周：评测 + 试点 + 文档
+### 第 4 周：前端元数据/语义库管理页
 
 | 天 | 任务 | 交付物 |
 |----|------|--------|
-| 1～2 | `EVAL_QUESTIONS` 15～20 条 + `replay_eval.py` | 完成率基线报告 |
-| 2～3 | 限流、请求大小限制、错误码统一 | 防刷 |
-| 3～4 | 周报 SQL：P95、降级率、异常率 | `docs/WEEKLY_METRICS.md` 模板 |
-| 4～5 | 部署文档、`.env.example` | 同事可复现 |
-| 5～7 | 修 Top5 badcase；写 Phase2  backlog | **MVP 演示** |
+| 1～2 | `AdminMetaTables.vue`：**表名输入 + introspect 预览** + 双列备注（自动/人工） | 表/字段 CRUD |
+| 2～3 | 字段子页：类型与业务库备注只读；问数定义可编辑；有效定义预览 | 人工优先规则可见 |
+| 3～4 | 关系页 + 字段取值页 + 指标页（含字段关联） | 语义库可前端维护 |
+| 4～5 | L1 样例管理页 + 索引重建页；路由守卫 ADMIN/OPERATOR | 运营自助闭环 |
+| 5～7 | `feedback` API + badcase → 补 meta 或样例 | badcase 闭环 |
 
-**月验收标准**：
+**周验收**：运营输入表名 → 读取业务库字段类型/备注 → 补充人工定义 → 保存 → 重建索引 → 问数验证；刷新结构后人工定义仍保留。
 
-- [ ] 三类账户可用；运营**无法**进用户管理；学校账户**零串校**（自动化覆盖）  
-- [ ] 每次提问可查 `trace_id`、审计、span  
-- [ ] 15 条评测问句完成率 ≥ 70%（可调整）  
-- [ ] 有 badcase → 样例 SQL 闭环  
+---
+
+### 第 5 周：混合召回 + 多阶段 LangGraph
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1～2 | `app/retrieval/`：`HybridRetriever`（向量 + 全文 + MySQL 补全） | 单测：问句召回字段/指标/取值 |
+| 2～3 | LangGraph 拆分：`extract_keywords` → 三路 `recall_*` → `merge` → `filter` → `build_llm_context` | span 可观测 |
+| 3～4 | 改造 `generate_sql` Prompt；保留 L1 路由 | LLM 路径用结构化上下文 |
+| 4～5 | `correct_sql` 节点（校验失败重试 1 次） | 降低幻觉 SQL |
+| 5～7 | ES 不可用 keyword_fallback；`degrade_level` / 召回 detail 写入 span | 降级可追踪 |
+
+**周验收**：开放域问句（非 L1）span 含 `recall_columns` / `recall_metrics` / `recall_values`；召回命中率可人工 spot check。
+
+---
+
+### 第 6 周：评测 + 试点 + 文档
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1～2 | `EVAL_QUESTIONS.md` 15～30 条 + `replay_eval.py`（分 L1 / LLM 路径统计） | 基线报告 |
+| 2～3 | 限流、错误码统一；`META_KNOWLEDGE.md` 维护规范 | 运营文档 |
+| 3～4 | 周报 SQL：P95、降级率、召回 fallback 率 | `WEEKLY_METRICS` 模板 |
+| 4～5 | 部署文档、`.env.example` 补 Embedding/ES 变量 | 同事可复现 |
+| 5～7 | 修 Top5 badcase（优先补 meta/指标，而非堆 L1） | **MVP 演示** |
+
+**月验收标准（第 6 周末）**：
+
+- [ ] 三类账户可用；学校账户**零串校**  
+- [ ] 元数据/语义库可**前端完整维护**；索引可一键重建  
+- [ ] 混合召回链路 span 完整；ES 故障可 keyword 降级  
+- [ ] 评测集总完成率 ≥ 70%；**纯 LLM 路径（degrade_level=0）≥ 60%**  
+- [ ] badcase → 补 meta/指标或 L1 样例闭环  
 
 ---
 
@@ -738,9 +1027,12 @@ def require_school_scope(ctx: UserContext) -> int:
 
 | 风险 | 对策 |
 |------|------|
-| 业余时间不足 | 严格砍功能；L1 样例覆盖高频问 |
-| LLM 成本高 | 限流、每日配额、L1 优先 |
-| 表结构复杂 | 白名单仅 5～8 张表；视图封装 |
+| 业余时间不足 | 第 3 周先跑通**单表** meta + ES；暂缓多表 JOIN |
+| LLM 成本高 | L1 保留 Top 高频；混合召回减少 Prompt 长度；限流 |
+| 表结构复杂 | 白名单 5～15 张；`copilot_table_relation` 显式维护 JOIN |
+| **元数据陈旧** | 前端「从业务库同步」+ 变更审计；badcase 优先补 meta |
+| **召回不准** | 运营维护 alias/取值；span 记录 recall detail；A/B 调 Top-K |
+| **ES 不可用** | keyword_fallback；/ready 探测 ES；索引重建 job 告警 |
 | 学校账户未选校 | `active_sch_id` 为空 → 400，引导 `switch-school` |
 | 默认超管密码泄露 | 生产必须改 `SEED_ADMIN_PASSWORD`；首次登录强制改密（二期） |
 | 与体育后台账号两套 | 文档写清；避免用户混淆；二期再评估 SSO |
@@ -750,15 +1042,16 @@ def require_school_scope(ctx: UserContext) -> int:
 
 ---
 
-## 14. Phase 2  backlog（一个月后）
+## 14. Phase 2 backlog（MVP 之后）
 
-- 对接 `youplus-base-api` / 体育后台 SSO（单点登录）  
-- 学校账户：跨绑定校汇总问数（`sch_id IN (...)`）  
+- 对接体育后台 SSO  
+- 学校账户跨绑定校汇总（`sch_id IN (...)`）  
 - 渠道商租户模型  
-- 流式输出 + 首 token 指标  
-- Langfuse / OpenTelemetry 接入  
+- **SSE 流式**问数进度（对标 shopkeeper `/api/query`）  
+- Langfuse / OpenTelemetry  
 - 图表（AntV）  
-- 与 `SportActivityNewReportController` 部分报表「问数替代」评估  
+- 可选 Qdrant 替代 ES 向量（大规模字段时）  
+- RAGFlow 文档问答与问数并列（仍与 meta 库解耦）  
 
 ---
 
@@ -794,6 +1087,19 @@ LLM_API_KEY=ollama
 LLM_MODEL=qwen2.5-coder:7b
 LLM_TIMEOUT_SEC=120
 
+# ---------- Embedding（字段/指标向量，与 LLM 可同 Ollama）----------
+EMBEDDING_API_BASE=http://127.0.0.1:11434/v1
+EMBEDDING_API_KEY=ollama
+EMBEDDING_MODEL=qwen3-embedding:4b
+
+# ---------- 混合召回 ----------
+ELASTICSEARCH_URL=http://127.0.0.1:1200
+ELASTICSEARCH_INDEX_PREFIX=copilot_ask_
+RECALL_TOP_K_COLUMN=8
+RECALL_TOP_K_METRIC=5
+RECALL_TOP_K_VALUE=10
+RECALL_KEYWORD_FALLBACK=true
+
 # ---------- MySQL 5.7（宿主机/公司，非 Docker）----------
 # 业务库（只读）
 MYSQL_BUSINESS_HOST=127.0.0.1
@@ -821,13 +1127,9 @@ SQL_MAX_ROWS=5000
 SQL_TIMEOUT_SEC=10
 ASK_RATE_LIMIT_PER_USER_PER_MIN=20
 
-# ---------- RAGFlow 栈（Docker，二期对接可选）----------
+# ---------- RAGFlow（可选，与问数 meta 解耦）----------
 RAGFLOW_ENABLED=false
 RAGFLOW_BASE_URL=https://127.0.0.1
-# RAGFlow 内配置 Ollama 时填：http://host.docker.internal:11434
-ELASTICSEARCH_URL=http://127.0.0.1:1200
-REDIS_URL=redis://127.0.0.1:6379/0
-MINIO_ENDPOINT=http://127.0.0.1:9000
 ```
 
 ### 15.3 本机 `development` 要点
@@ -839,8 +1141,9 @@ LLM_API_BASE=http://127.0.0.1:11434/v1
 LLM_MODEL=qwen2.5-coder:7b
 MYSQL_BUSINESS_HOST=127.0.0.1
 MYSQL_COPILOT_HOST=127.0.0.1
-RAGFLOW_ENABLED=false
 ELASTICSEARCH_URL=http://127.0.0.1:1200
+EMBEDDING_API_BASE=http://127.0.0.1:11434/v1
+RAGFLOW_ENABLED=false
 ```
 
 前端 `vite.config.ts` 将 `/api` 代理到 `http://127.0.0.1:8000`。
@@ -865,12 +1168,17 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 
 问数服务若用 Docker 部署在公司机：`MYSQL_*_HOST` 填 MySQL 服务器 IP，**不要**填 `127.0.0.1`（除非 MySQL 与容器同机且用 host 网络）。
 
-### 15.5 RAGFlow 与 Ollama 联调说明
+### 15.5 Embedding / ES 联调说明
 
-1. 在 RAGFlow 控制台添加模型供应商：**OpenAI-API-Compatible**。  
-2. Base URL：`http://host.docker.internal:11434/v1`（容器访问宿主机 Ollama）。  
-3. Embedding 可在 RAGFlow 内选 `bge-m3` 等（走 Ollama 或内置），与问数 **copilot 库无关**。  
-4. 问数 MVP 的 Text2SQL **直接调 Ollama**，不依赖 RAGFlow 也能跑通。
+1. 确保 Docker ES `:1200` 已启动；问数索引与 RAGFlow 索引通过 `ELASTICSEARCH_INDEX_PREFIX=copilot_ask_` 隔离。  
+2. Embedding 默认走宿主机 Ollama（`EMBEDDING_*` 与 `LLM_*` 可同 base）。  
+3. 首次或 meta 变更后：前端「重建索引」或 `python scripts/build_search_index.py`。  
+4. Text2SQL **直接调 Ollama**；不依赖 RAGFlow 控制台。
+
+### 15.6 RAGFlow 与 Ollama（可选）
+
+1. RAGFlow 仅用于文档 RAG 实验，问数 meta 不入 RAGFlow 知识库。  
+2. 容器访问宿主机 Ollama：`http://host.docker.internal:11434/v1`。
 
 ---
 
@@ -879,10 +1187,11 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 | 组件 | 本机 | 公司 |
 |------|------|------|
 | MySQL 5.7 | 已安装，建 `copilot` + 只读账号 | 同左，用内网地址 |
-| RAGFlow + ES + Redis + MinIO | Docker 已运行 | Docker 或运维统一部署 |
-| Ollama + 模型 | 宿主机安装 | 内网 GPU 机或改云端 API |
+| Elasticsearch | Docker `:1200` | 运维统一部署 |
+| Ollama + LLM + Embedding 模型 | 宿主机 | 内网 GPU 机或改云端 API |
 | 问数 API | `uvicorn` 宿主机 :8000 | Docker / systemd |
-| 问数前端 | `npm run dev` :5173 | Nginx 静态 + 反代 API |
+| 问数前端 | `npm run dev` :5173（含 meta 管理页） | Nginx 静态 + 反代 API |
+| RAGFlow（可选） | Docker | 与问数解耦 |
 
 ---
 
@@ -898,9 +1207,10 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 
 ---
 
-**文档版本**：v1.6  
-**变更**：问数表统一 `copilot_` 前缀，DDL 字段 COMMENT；开发进度见 [PROGRESS.md](./PROGRESS.md)。  
-**维护**：随表白名单、评测集、公司 IP 更新同步改第 9、12、15 节；每完成里程碑更新 PROGRESS。
+**文档版本**：v2.1  
+**变更（v2.0）**：明确问数核心路线为 **元数据知识库 + 语义库（前端可配置）+ 向量/全文混合召回 + 多阶段 LangGraph**；计划由 4 周扩展为 **6 周**（第 3～6 周详述）；新增 §9  meta/语义库、§10.6 管理 API、§6.1 多阶段节点。  
+**变更（v2.1）**：§9.2 区分 **自动读取**（`table_comment_auto` / `column_comment_auto` / `data_type`）与 **人工定义**（`description_manual`）；人工非空优先；新增 `GET /introspect/tables/{tableName}` 与前端表名录入向导。  
+**维护**：随 meta 表结构、ES 索引、评测集更新同步改第 9、12、15 节；每完成里程碑更新 [PROGRESS.md](./PROGRESS.md)。
 
 ---
 

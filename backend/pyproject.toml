@@ -1,7 +1,7 @@
 [project]
 name = "data-copilot-bot"
 version = "0.1.0"
-description = "小奔智慧体育 · 企业级智能问数"
+description = "企业级智能问数"
 readme = "../README.md"
 requires-python = ">=3.10"
 dependencies = [

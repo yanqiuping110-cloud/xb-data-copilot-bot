@@ -44,6 +44,7 @@ def _user_info(user) -> UserInfo:
         username=user.username,
         role=UserRole(user.role),
         display_name=user.display_name,
+        status=user.status,
     )
     if user.role == UserRole.SCHOOL.value:
         info.bound_schools = [
