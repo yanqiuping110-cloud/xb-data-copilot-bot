@@ -28,6 +28,7 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { login } from '../api/auth'
+import { defaultHomePath } from '../utils/roleHome'
 
 const router = useRouter()
 const loading = ref(false)
@@ -46,7 +47,7 @@ async function onSubmit() {
     localStorage.setItem('accessToken', res.accessToken)
     localStorage.setItem('userRole', res.user.role)
     ElMessage.success('登录成功')
-    router.push('/')
+    router.push(defaultHomePath(res.user.role))
   } finally {
     loading.value = false
   }

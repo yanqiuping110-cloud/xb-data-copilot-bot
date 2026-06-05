@@ -96,6 +96,7 @@ _METRIC_UPDATES = [
         "time_column": "create_time",
         "agg_type": "count_distinct",
         "unit": "人",
+        "admin_only": None,
     },
     {
         "metric_code": "qzs_weekly_trend",
@@ -104,6 +105,7 @@ _METRIC_UPDATES = [
         "time_column": "create_time",
         "agg_type": "count_distinct",
         "unit": "人",
+        "admin_only": None,
     },
     {
         "metric_code": "qzs_platform_yesterday",

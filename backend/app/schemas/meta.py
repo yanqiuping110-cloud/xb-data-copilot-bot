@@ -102,3 +102,167 @@ class RebuildIndexResponse(CamelModel):
     metrics: int
     field_values: int
     embedding_dims: int
+
+
+class RelationResponse(CamelModel):
+    id: int
+    from_table_id: int
+    from_table_name: str
+    from_column: str
+    to_table_id: int
+    to_table_name: str
+    to_column: str
+    relation_type: str
+    join_hint: str | None = None
+    cardinality: str | None = None
+    status: int
+
+
+class CreateRelationRequest(CamelModel):
+    from_table_id: int
+    from_column: str
+    to_table_id: int
+    to_column: str
+    relation_type: str = "logical_join"
+    join_hint: str | None = None
+    cardinality: str | None = None
+    status: int = 1
+
+
+class UpdateRelationRequest(CamelModel):
+    from_column: str | None = None
+    to_column: str | None = None
+    relation_type: str | None = None
+    join_hint: str | None = None
+    cardinality: str | None = None
+    status: int | None = None
+
+
+class FieldValueResponse(CamelModel):
+    id: int
+    column_id: int
+    table_name: str
+    column_name: str
+    value_text: str
+    display_label: str | None = None
+    aliases: list[str] = []
+    status: int
+
+
+class CreateFieldValueRequest(CamelModel):
+    column_id: int
+    value_text: str
+    display_label: str | None = None
+    aliases: list[str] | None = None
+    status: int = 1
+
+
+class UpdateFieldValueRequest(CamelModel):
+    value_text: str | None = None
+    display_label: str | None = None
+    aliases: list[str] | None = None
+    status: int | None = None
+
+
+class MetricColumnLinkResponse(CamelModel):
+    column_id: int
+    table_name: str
+    column_name: str
+    usage_type: str
+
+
+class MetricResponse(CamelModel):
+    id: int
+    metric_code: str
+    metric_name: str
+    description: str | None = None
+    sql_template: str | None = None
+    relevant_tables: str | None = None
+    aliases: list[str] = []
+    formula_text: str | None = None
+    filter_hint: str | None = None
+    time_column: str | None = None
+    agg_type: str | None = None
+    unit: str | None = None
+    admin_only: bool = False
+    status: int
+    column_links: list[MetricColumnLinkResponse] = []
+
+
+class MetricColumnInput(CamelModel):
+    column_id: int
+    usage_type: str = "measure"
+
+
+class CreateMetricRequest(CamelModel):
+    metric_code: str
+    metric_name: str
+    description: str | None = None
+    sql_template: str | None = None
+    relevant_tables: str | None = None
+    aliases: list[str] | None = None
+    formula_text: str | None = None
+    filter_hint: str | None = None
+    time_column: str | None = None
+    agg_type: str | None = None
+    unit: str | None = None
+    admin_only: bool = False
+    status: int = 1
+    column_links: list[MetricColumnInput] | None = None
+
+
+class UpdateMetricRequest(CamelModel):
+    metric_name: str | None = None
+    description: str | None = None
+    sql_template: str | None = None
+    relevant_tables: str | None = None
+    aliases: list[str] | None = None
+    formula_text: str | None = None
+    filter_hint: str | None = None
+    time_column: str | None = None
+    agg_type: str | None = None
+    unit: str | None = None
+    admin_only: bool | None = None
+    status: int | None = None
+    column_links: list[MetricColumnInput] | None = None
+
+
+class SqlExampleResponse(CamelModel):
+    id: int
+    question_pattern: str
+    sql_text: str
+    meta_json: dict | None = None
+    role_scope: str | None = None
+    degrade_priority: int
+
+
+class CreateSqlExampleRequest(CamelModel):
+    question_pattern: str
+    sql_text: str
+    meta_json: dict | None = None
+    role_scope: str | None = None
+    degrade_priority: int = 100
+
+
+class UpdateSqlExampleRequest(CamelModel):
+    question_pattern: str | None = None
+    sql_text: str | None = None
+    meta_json: dict | None = None
+    role_scope: str | None = None
+    degrade_priority: int | None = None
+
+
+class BadcaseResponse(CamelModel):
+    trace_id: str
+    question: str
+    final_sql: str | None = None
+    status: str
+    user_feedback: str | None = None
+    is_badcase: bool
+    human_corrected_sql: str | None = None
+    created_at: str
+
+
+class BadcaseListResponse(CamelModel):
+    items: list[BadcaseResponse]
+    total: int

@@ -1,13 +1,14 @@
 """
-问数 HTTP 接口：POST /api/v1/ask（LangGraph 7 节点 + L1 + LLM）。
+问数 HTTP 接口：POST /api/v1/ask（LangGraph + L1 + LLM，可选 SSE 流式进度）。
 """
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ask.service import handle_ask
+from app.ask.service import handle_ask, handle_ask_stream, wants_stream
 from app.core.context import UserContext
 from app.core.security import get_current_user
 from app.db.copilot import get_copilot_session
@@ -17,12 +18,41 @@ from config.settings import Settings, get_settings
 router = APIRouter(prefix="/api/v1", tags=["ask"])
 
 
-@router.post("/ask", response_model=AskResponse, response_model_by_alias=True)
+@router.post(
+    "/ask",
+    response_model=AskResponse,
+    response_model_by_alias=True,
+    responses={
+        200: {
+            "description": "问数结果 JSON，或 options.stream=true 时 SSE 流",
+            "content": {
+                "application/json": {},
+                "text/event-stream": {},
+            },
+        }
+    },
+)
 async def ask(
     body: AskRequest,
     ctx: Annotated[UserContext, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_copilot_session)],
     settings: Annotated[Settings, Depends(get_settings)],
-) -> AskResponse:
-    """自然语言问数（LangGraph：retrieve_context → L1/MVP → LLM generate_sql）。"""
+):
+    """
+    自然语言问数。
+
+    - 默认：一次性返回 JSON（`AskResponse`）
+    - `options.stream=true`：SSE 推送节点进度（`progress`）与最终结果（`done`）
+    """
+    if wants_stream(body):
+        return StreamingResponse(
+            handle_ask_stream(body, ctx, session, settings),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     return await handle_ask(body, ctx, session, settings)

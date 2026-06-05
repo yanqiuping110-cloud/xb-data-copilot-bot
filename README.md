@@ -12,9 +12,7 @@
 data-copilot-bot/
 ├── backend/          # Python 问数 API（FastAPI）
 ├── frontend/         # Vue3 + Vite 问数前端
-├── docs/               # 设计与规范
-├── sport-plantform/    # 业务参考（勿改）
-└── youplus-base/       # 业务参考（勿改）
+└── docs/               # 设计与规范
 ```
 
 ## 环境要求
@@ -93,4 +91,4 @@ POST /api/v1/admin/users
 GET  /api/v1/admin/users
 ```
 
-`POST /api/v1/ask` 与 LangGraph 流水线待实现。
+`POST /api/v1/ask` 已接入多阶段 LangGraph（混合召回 + L1 + LLM + correct_sql）。

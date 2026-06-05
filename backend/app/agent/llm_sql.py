@@ -48,6 +48,8 @@ async def generate_sql_from_llm(
     question: str,
     context_text: str,
     compact: bool = False,
+    correction_hint: str | None = None,
+    previous_sql: str | None = None,
 ) -> tuple[str | None, int | None, int | None]:
     """
     调用 LLM 生成 SQL。
@@ -60,7 +62,17 @@ async def generate_sql_from_llm(
         "你是企业问数系统的 SQL 生成助手，只为智慧体育业务库生成只读查询。"
         "严格遵守上下文中的表白名单与 MySQL 5.7 语法。"
     )
-    user_parts = [context_text, "", f"用户问题：{question}", "", "请生成一条 SELECT 语句："]
+    user_parts = [context_text, "", f"用户问题：{question}"]
+    if correction_hint and previous_sql:
+        user_parts.extend(
+            [
+                "",
+                f"上次生成的 SQL 未通过校验：{correction_hint}",
+                f"上次 SQL：{previous_sql}",
+                "请根据错误信息修正后重新生成 SELECT。",
+            ]
+        )
+    user_parts.extend(["", "请生成一条 SELECT 语句："])
     if compact:
         user_parts.insert(0, "（精简模式：仅输出 SQL，不要注释）")
     messages = [SystemMessage(content=system), HumanMessage(content="\n".join(user_parts))]

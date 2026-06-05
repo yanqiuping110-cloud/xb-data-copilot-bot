@@ -1,5 +1,5 @@
 """
-LangGraph 7 节点实现。
+LangGraph 问数节点：L1 匹配、LLM 生成、校验、策略、执行与 correct_sql。
 """
 
 from __future__ import annotations
@@ -11,11 +11,9 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from app.agent.context_retriever import build_retrieval_context
 from app.agent.llm_sql import generate_sql_from_llm
 from app.agent.state import AskGraphState
 from app.ask.query_match import ensure_can_run, match_question_async
-from app.ask.semantic_repository import SemanticRepository
 from app.core.context import UserContext, UserRole
 from app.observability import tracer
 from app.policy.role_policy import PolicyError, applies_sch_id_filter, require_school_scope
@@ -58,22 +56,6 @@ async def normalize_question(state: AskGraphState, config: RunnableConfig) -> di
     normalized = q[:_MAX_QUESTION_LEN]
     await _span(config, "normalize_question", t0, "success", {"length": len(normalized)})
     return {"normalized_question": normalized, "status": "running"}
-
-
-async def retrieve_context(state: AskGraphState, config: RunnableConfig) -> dict:
-    """术语 + 表说明 + 相似样例 SQL。"""
-    t0 = time.perf_counter()
-    c = _cfg(config)
-    repo = SemanticRepository(c["copilot_session"])
-    question = state.get("normalized_question") or state.get("question") or ""
-    try:
-        context_text = await build_retrieval_context(question, repo)
-        status = "success"
-    except Exception as exc:
-        context_text = "【检索失败，仅依赖表白名单】\n" + str(exc)
-        status = "degraded"
-    await _span(config, "retrieve_context", t0, status, {"chars": len(context_text)})
-    return {"context_text": context_text}
 
 
 async def match_curated(state: AskGraphState, config: RunnableConfig) -> dict:
@@ -208,6 +190,7 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
             "status": "fail",
             "error_code": exc.code,
             "error_message": exc.message,
+            "validation_error": exc.message,
             "degrade_level": 3,
         }
 
@@ -331,7 +314,75 @@ def route_after_match(state: AskGraphState) -> str:
     return "generate_sql"
 
 
+_CORRECTABLE_CODES = frozenset(
+    {
+        "PARSE_ERROR",
+        "NOT_SELECT",
+        "NO_TABLE",
+        "TABLE_NOT_ALLOWED",
+        "MISSING_SCH_ID",
+    }
+)
+
+
+async def correct_sql(state: AskGraphState, config: RunnableConfig) -> dict:
+    """校验失败时带错误信息重生成 SQL（最多 1 次）。"""
+    t0 = time.perf_counter()
+    c = _cfg(config)
+    settings: Settings = c["settings"]
+    question = state.get("normalized_question") or ""
+    context_text = state.get("context_text") or ""
+    previous_sql = state.get("raw_sql") or ""
+    error_msg = state.get("validation_error") or state.get("error_message") or "SQL 校验失败"
+    correct_count = (state.get("correct_sql_count") or 0) + 1
+
+    sql, token_in, token_out = await generate_sql_from_llm(
+        settings=settings,
+        question=question,
+        context_text=context_text,
+        compact=False,
+        correction_hint=error_msg,
+        previous_sql=previous_sql,
+    )
+
+    await _span(
+        config,
+        "correct_sql",
+        t0,
+        "success" if sql else "fail",
+        {"correct_sql_count": correct_count, "has_sql": bool(sql)},
+    )
+
+    if not sql:
+        return {
+            "status": "fail",
+            "error_code": "LLM_NO_SQL",
+            "error_message": "SQL 修正失败，请换种问法或标记 badcase",
+            "correct_sql_count": correct_count,
+            "degrade_level": 3,
+        }
+
+    return {
+        "raw_sql": sql,
+        "final_sql": None,
+        "error_code": None,
+        "error_message": None,
+        "validation_error": None,
+        "status": "running",
+        "correct_sql_count": correct_count,
+        "token_in": (state.get("token_in") or 0) + (token_in or 0),
+        "token_out": (state.get("token_out") or 0) + (token_out or 0),
+    }
+
+
 def route_after_validate(state: AskGraphState) -> str:
     if state.get("error_code"):
+        code = state.get("error_code") or ""
+        if (
+            state.get("matched") is None
+            and (state.get("correct_sql_count") or 0) < 1
+            and code in _CORRECTABLE_CODES
+        ):
+            return "correct_sql"
         return "format_answer"
     return "apply_policy"

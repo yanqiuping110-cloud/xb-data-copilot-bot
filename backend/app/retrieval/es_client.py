@@ -84,3 +84,58 @@ class AskElasticsearchClient:
         actions = [{"_index": index, "_source": doc} for doc in docs]
         success, _ = await async_bulk(self._client, actions, refresh=True)
         return int(success)
+
+    async def search_vector(
+        self,
+        suffix: str,
+        query_vector: list[float],
+        *,
+        top_k: int,
+    ) -> list[dict]:
+        """dense_vector kNN 检索，返回 _source + _score。"""
+        index = self.index_name(suffix)
+        if not await self._client.indices.exists(index=index):
+            return []
+
+        resp = await self._client.search(
+            index=index,
+            knn={
+                "field": "embedding",
+                "query_vector": query_vector,
+                "k": top_k,
+                "num_candidates": max(top_k * 10, top_k),
+            },
+            size=top_k,
+        )
+        hits = resp.get("hits", {}).get("hits", [])
+        results: list[dict] = []
+        for hit in hits:
+            src = dict(hit.get("_source") or {})
+            src["_score"] = float(hit.get("_score") or 0.0)
+            results.append(src)
+        return results
+
+    async def search_fulltext(
+        self,
+        suffix: str,
+        query_text: str,
+        *,
+        top_k: int,
+    ) -> list[dict]:
+        """全文检索 search_text 字段。"""
+        index = self.index_name(suffix)
+        if not query_text.strip() or not await self._client.indices.exists(index=index):
+            return []
+
+        resp = await self._client.search(
+            index=index,
+            query={"match": {"search_text": {"query": query_text, "operator": "or"}}},
+            size=top_k,
+        )
+        hits = resp.get("hits", {}).get("hits", [])
+        results: list[dict] = []
+        for hit in hits:
+            src = dict(hit.get("_source") or {})
+            src["_score"] = float(hit.get("_score") or 0.0)
+            results.append(src)
+        return results

@@ -3,7 +3,7 @@
     <header class="header">
       <span class="title">用户管理</span>
       <div class="actions">
-        <el-button link type="primary" @click="router.push('/')">返回问数</el-button>
+        <el-button link type="primary" @click="router.push('/ask')">返回问数</el-button>
         <el-button link type="primary" @click="logout">退出</el-button>
       </div>
     </header>

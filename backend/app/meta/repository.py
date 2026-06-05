@@ -72,6 +72,93 @@ class IndexableFieldValueRow:
 
 
 @dataclass
+class RelationRow:
+    """copilot_table_relation 一行。"""
+
+    id: int
+    from_table_id: int
+    from_table_name: str
+    from_column: str
+    to_table_id: int
+    to_table_name: str
+    to_column: str
+    relation_type: str
+    join_hint: str | None
+    cardinality: str | None
+    status: int
+
+
+@dataclass
+class FieldValueRow:
+    """copilot_field_value 一行（含表/字段名）。"""
+
+    id: int
+    column_id: int
+    table_name: str
+    column_name: str
+    value_text: str
+    display_label: str | None
+    alias_json: str | None
+    status: int
+
+
+@dataclass
+class MetricRow:
+    """copilot_metric_definition 一行。"""
+
+    id: int
+    metric_code: str
+    metric_name: str
+    description: str | None
+    sql_template: str | None
+    relevant_tables: str | None
+    alias_json: str | None
+    formula_text: str | None
+    filter_hint: str | None
+    time_column: str | None
+    agg_type: str | None
+    unit: str | None
+    admin_only: int
+    status: int
+
+
+@dataclass
+class MetricColumnLink:
+    """指标 ↔ 字段关联。"""
+
+    column_id: int
+    table_name: str
+    column_name: str
+    usage_type: str
+
+
+@dataclass
+class SqlExampleRow:
+    """copilot_sql_example 一行。"""
+
+    id: int
+    question_pattern: str
+    sql_text: str
+    meta_json: str | None
+    role_scope: str | None
+    degrade_priority: int
+
+
+@dataclass
+class BadcaseRow:
+    """问数 badcase 记录。"""
+
+    trace_id: str
+    question: str
+    final_sql: str | None
+    status: str
+    user_feedback: str | None
+    is_badcase: int
+    human_corrected_sql: str | None
+    created_at: datetime
+
+
+@dataclass
 class ColumnMetaRow:
     """copilot_column_meta 一行。"""
 
@@ -534,6 +621,532 @@ class MetaRepository:
             )
             for r in result.mappings().all()
         ]
+
+    async def list_relations(self, *, from_table_id: int | None = None) -> list[RelationRow]:
+        sql = """
+            SELECT r.id, r.from_table_id, ft.table_name AS from_table_name,
+                   r.from_column, r.to_table_id, tt.table_name AS to_table_name,
+                   r.to_column, r.relation_type, r.join_hint, r.cardinality, r.status
+            FROM copilot_table_relation r
+            INNER JOIN copilot_table_meta ft ON ft.id = r.from_table_id
+            INNER JOIN copilot_table_meta tt ON tt.id = r.to_table_id
+            WHERE r.deleted = 0 AND ft.deleted = 0 AND tt.deleted = 0
+        """
+        params: dict = {}
+        if from_table_id is not None:
+            sql += " AND r.from_table_id = :from_table_id"
+            params["from_table_id"] = from_table_id
+        sql += " ORDER BY ft.table_name, r.from_column"
+        result = await self._session.execute(text(sql), params)
+        return [_map_relation(r) for r in result.mappings().all()]
+
+    async def insert_relation(
+        self,
+        *,
+        from_table_id: int,
+        from_column: str,
+        to_table_id: int,
+        to_column: str,
+        relation_type: str = "logical_join",
+        join_hint: str | None = None,
+        cardinality: str | None = None,
+        status: int = 1,
+    ) -> int:
+        result = await self._session.execute(
+            text(
+                """
+                INSERT INTO copilot_table_relation (
+                    from_table_id, from_column, to_table_id, to_column,
+                    relation_type, join_hint, cardinality, status, deleted
+                ) VALUES (
+                    :from_table_id, :from_column, :to_table_id, :to_column,
+                    :relation_type, :join_hint, :cardinality, :status, 0
+                )
+                """
+            ),
+            {
+                "from_table_id": from_table_id,
+                "from_column": from_column,
+                "to_table_id": to_table_id,
+                "to_column": to_column,
+                "relation_type": relation_type,
+                "join_hint": join_hint,
+                "cardinality": cardinality,
+                "status": status,
+            },
+        )
+        return int(result.lastrowid)
+
+    async def update_relation(
+        self,
+        relation_id: int,
+        *,
+        from_column: str | None = None,
+        to_column: str | None = None,
+        relation_type: str | None = None,
+        join_hint: str | None = None,
+        cardinality: str | None = None,
+        status: int | None = None,
+    ) -> None:
+        await self._session.execute(
+            text(
+                """
+                UPDATE copilot_table_relation SET
+                    from_column = COALESCE(:from_column, from_column),
+                    to_column = COALESCE(:to_column, to_column),
+                    relation_type = COALESCE(:relation_type, relation_type),
+                    join_hint = COALESCE(:join_hint, join_hint),
+                    cardinality = COALESCE(:cardinality, cardinality),
+                    status = COALESCE(:status, status)
+                WHERE id = :id AND deleted = 0
+                """
+            ),
+            {
+                "id": relation_id,
+                "from_column": from_column,
+                "to_column": to_column,
+                "relation_type": relation_type,
+                "join_hint": join_hint,
+                "cardinality": cardinality,
+                "status": status,
+            },
+        )
+
+    async def delete_relation(self, relation_id: int) -> None:
+        await self._session.execute(
+            text("UPDATE copilot_table_relation SET deleted = 1 WHERE id = :id"),
+            {"id": relation_id},
+        )
+
+    async def list_field_values(
+        self,
+        *,
+        column_id: int | None = None,
+        table_id: int | None = None,
+    ) -> list[FieldValueRow]:
+        sql = """
+            SELECT fv.id, fv.column_id, t.table_name, c.column_name,
+                   fv.value_text, fv.display_label, fv.alias_json, fv.status
+            FROM copilot_field_value fv
+            INNER JOIN copilot_column_meta c ON c.id = fv.column_id
+            INNER JOIN copilot_table_meta t ON t.id = c.table_id
+            WHERE fv.deleted = 0 AND c.deleted = 0 AND t.deleted = 0
+        """
+        params: dict = {}
+        if column_id is not None:
+            sql += " AND fv.column_id = :column_id"
+            params["column_id"] = column_id
+        if table_id is not None:
+            sql += " AND c.table_id = :table_id"
+            params["table_id"] = table_id
+        sql += " ORDER BY t.table_name, c.column_name, fv.value_text"
+        result = await self._session.execute(text(sql), params)
+        return [_map_field_value(r) for r in result.mappings().all()]
+
+    async def update_field_value(
+        self,
+        field_value_id: int,
+        *,
+        value_text: str | None = None,
+        display_label: str | None = None,
+        alias_json: str | None = None,
+        status: int | None = None,
+    ) -> None:
+        await self._session.execute(
+            text(
+                """
+                UPDATE copilot_field_value SET
+                    value_text = COALESCE(:value_text, value_text),
+                    display_label = COALESCE(:display_label, display_label),
+                    alias_json = COALESCE(:alias_json, alias_json),
+                    status = COALESCE(:status, status)
+                WHERE id = :id AND deleted = 0
+                """
+            ),
+            {
+                "id": field_value_id,
+                "value_text": value_text,
+                "display_label": display_label,
+                "alias_json": alias_json,
+                "status": status,
+            },
+        )
+
+    async def delete_field_value(self, field_value_id: int) -> None:
+        await self._session.execute(
+            text("UPDATE copilot_field_value SET deleted = 1 WHERE id = :id"),
+            {"id": field_value_id},
+        )
+
+    async def list_metrics(self) -> list[MetricRow]:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, metric_code, metric_name, description, sql_template,
+                       relevant_tables, alias_json, formula_text, filter_hint,
+                       time_column, agg_type, unit, admin_only, status
+                FROM copilot_metric_definition
+                WHERE deleted = 0
+                ORDER BY metric_code
+                """
+            )
+        )
+        return [_map_metric(r) for r in result.mappings().all()]
+
+    async def get_metric(self, metric_id: int) -> MetricRow | None:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, metric_code, metric_name, description, sql_template,
+                       relevant_tables, alias_json, formula_text, filter_hint,
+                       time_column, agg_type, unit, admin_only, status
+                FROM copilot_metric_definition
+                WHERE id = :id AND deleted = 0
+                """
+            ),
+            {"id": metric_id},
+        )
+        row = result.mappings().first()
+        return _map_metric(row) if row else None
+
+    async def insert_metric(
+        self,
+        *,
+        metric_code: str,
+        metric_name: str,
+        description: str | None = None,
+        sql_template: str | None = None,
+        relevant_tables: str | None = None,
+        alias_json: str | None = None,
+        formula_text: str | None = None,
+        filter_hint: str | None = None,
+        time_column: str | None = None,
+        agg_type: str | None = None,
+        unit: str | None = None,
+        admin_only: int = 0,
+        status: int = 1,
+    ) -> int:
+        result = await self._session.execute(
+            text(
+                """
+                INSERT INTO copilot_metric_definition (
+                    metric_code, metric_name, description, sql_template, relevant_tables,
+                    alias_json, formula_text, filter_hint, time_column, agg_type, unit,
+                    admin_only, status, deleted
+                ) VALUES (
+                    :metric_code, :metric_name, :description, :sql_template, :relevant_tables,
+                    :alias_json, :formula_text, :filter_hint, :time_column, :agg_type, :unit,
+                    :admin_only, :status, 0
+                )
+                """
+            ),
+            {
+                "metric_code": metric_code,
+                "metric_name": metric_name,
+                "description": description,
+                "sql_template": sql_template,
+                "relevant_tables": relevant_tables,
+                "alias_json": alias_json,
+                "formula_text": formula_text,
+                "filter_hint": filter_hint,
+                "time_column": time_column,
+                "agg_type": agg_type,
+                "unit": unit,
+                "admin_only": admin_only,
+                "status": status,
+            },
+        )
+        return int(result.lastrowid)
+
+    async def update_metric(
+        self,
+        metric_id: int,
+        *,
+        metric_name: str | None = None,
+        description: str | None = None,
+        sql_template: str | None = None,
+        relevant_tables: str | None = None,
+        alias_json: str | None = None,
+        formula_text: str | None = None,
+        filter_hint: str | None = None,
+        time_column: str | None = None,
+        agg_type: str | None = None,
+        unit: str | None = None,
+        admin_only: int | None = None,
+        status: int | None = None,
+    ) -> None:
+        await self._session.execute(
+            text(
+                """
+                UPDATE copilot_metric_definition SET
+                    metric_name = COALESCE(:metric_name, metric_name),
+                    description = COALESCE(:description, description),
+                    sql_template = COALESCE(:sql_template, sql_template),
+                    relevant_tables = COALESCE(:relevant_tables, relevant_tables),
+                    alias_json = COALESCE(:alias_json, alias_json),
+                    formula_text = COALESCE(:formula_text, formula_text),
+                    filter_hint = COALESCE(:filter_hint, filter_hint),
+                    time_column = COALESCE(:time_column, time_column),
+                    agg_type = COALESCE(:agg_type, agg_type),
+                    unit = COALESCE(:unit, unit),
+                    admin_only = COALESCE(:admin_only, admin_only),
+                    status = COALESCE(:status, status)
+                WHERE id = :id AND deleted = 0
+                """
+            ),
+            {
+                "id": metric_id,
+                "metric_name": metric_name,
+                "description": description,
+                "sql_template": sql_template,
+                "relevant_tables": relevant_tables,
+                "alias_json": alias_json,
+                "formula_text": formula_text,
+                "filter_hint": filter_hint,
+                "time_column": time_column,
+                "agg_type": agg_type,
+                "unit": unit,
+                "admin_only": admin_only,
+                "status": status,
+            },
+        )
+
+    async def delete_metric(self, metric_id: int) -> None:
+        await self._session.execute(
+            text("UPDATE copilot_metric_definition SET deleted = 1 WHERE id = :id"),
+            {"id": metric_id},
+        )
+        await self._session.execute(
+            text("DELETE FROM copilot_metric_column WHERE metric_id = :id"),
+            {"id": metric_id},
+        )
+
+    async def list_metric_columns(self, metric_id: int) -> list[MetricColumnLink]:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT mc.column_id, t.table_name, c.column_name, mc.usage_type
+                FROM copilot_metric_column mc
+                INNER JOIN copilot_column_meta c ON c.id = mc.column_id
+                INNER JOIN copilot_table_meta t ON t.id = c.table_id
+                WHERE mc.metric_id = :metric_id AND c.deleted = 0 AND t.deleted = 0
+                ORDER BY t.table_name, c.column_name
+                """
+            ),
+            {"metric_id": metric_id},
+        )
+        return [
+            MetricColumnLink(
+                column_id=int(r["column_id"]),
+                table_name=str(r["table_name"]),
+                column_name=str(r["column_name"]),
+                usage_type=str(r["usage_type"]),
+            )
+            for r in result.mappings().all()
+        ]
+
+    async def replace_metric_columns(
+        self,
+        metric_id: int,
+        links: list[tuple[int, str]],
+    ) -> None:
+        """全量替换指标字段关联。links: [(column_id, usage_type), ...]"""
+        await self._session.execute(
+            text("DELETE FROM copilot_metric_column WHERE metric_id = :id"),
+            {"id": metric_id},
+        )
+        for column_id, usage_type in links:
+            await self._session.execute(
+                text(
+                    """
+                    INSERT INTO copilot_metric_column (metric_id, column_id, usage_type)
+                    VALUES (:metric_id, :column_id, :usage_type)
+                    """
+                ),
+                {"metric_id": metric_id, "column_id": column_id, "usage_type": usage_type},
+            )
+
+    async def list_sql_examples(self) -> list[SqlExampleRow]:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, question_pattern, sql_text, meta_json, role_scope, degrade_priority
+                FROM copilot_sql_example
+                WHERE deleted = 0
+                ORDER BY degrade_priority, id
+                """
+            )
+        )
+        return [_map_sql_example(r) for r in result.mappings().all()]
+
+    async def get_sql_example(self, example_id: int) -> SqlExampleRow | None:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, question_pattern, sql_text, meta_json, role_scope, degrade_priority
+                FROM copilot_sql_example
+                WHERE id = :id AND deleted = 0
+                """
+            ),
+            {"id": example_id},
+        )
+        row = result.mappings().first()
+        return _map_sql_example(row) if row else None
+
+    async def insert_sql_example(
+        self,
+        *,
+        question_pattern: str,
+        sql_text: str,
+        meta_json: str | None = None,
+        role_scope: str | None = None,
+        degrade_priority: int = 100,
+    ) -> int:
+        result = await self._session.execute(
+            text(
+                """
+                INSERT INTO copilot_sql_example (
+                    question_pattern, sql_text, meta_json, role_scope, degrade_priority, deleted
+                ) VALUES (
+                    :question_pattern, :sql_text, :meta_json, :role_scope, :degrade_priority, 0
+                )
+                """
+            ),
+            {
+                "question_pattern": question_pattern,
+                "sql_text": sql_text,
+                "meta_json": meta_json,
+                "role_scope": role_scope,
+                "degrade_priority": degrade_priority,
+            },
+        )
+        return int(result.lastrowid)
+
+    async def update_sql_example(
+        self,
+        example_id: int,
+        *,
+        question_pattern: str | None = None,
+        sql_text: str | None = None,
+        meta_json: str | None = None,
+        role_scope: str | None = None,
+        degrade_priority: int | None = None,
+    ) -> None:
+        await self._session.execute(
+            text(
+                """
+                UPDATE copilot_sql_example SET
+                    question_pattern = COALESCE(:question_pattern, question_pattern),
+                    sql_text = COALESCE(:sql_text, sql_text),
+                    meta_json = COALESCE(:meta_json, meta_json),
+                    role_scope = COALESCE(:role_scope, role_scope),
+                    degrade_priority = COALESCE(:degrade_priority, degrade_priority)
+                WHERE id = :id AND deleted = 0
+                """
+            ),
+            {
+                "id": example_id,
+                "question_pattern": question_pattern,
+                "sql_text": sql_text,
+                "meta_json": meta_json,
+                "role_scope": role_scope,
+                "degrade_priority": degrade_priority,
+            },
+        )
+
+    async def delete_sql_example(self, example_id: int) -> None:
+        await self._session.execute(
+            text("UPDATE copilot_sql_example SET deleted = 1 WHERE id = :id"),
+            {"id": example_id},
+        )
+
+    async def list_badcases(self, *, limit: int = 50, offset: int = 0) -> list[BadcaseRow]:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT trace_id, question, final_sql, status, user_feedback,
+                       is_badcase, human_corrected_sql, created_at
+                FROM copilot_ask_turn
+                WHERE deleted = 0 AND (is_badcase = 1 OR user_feedback = 'down')
+                ORDER BY created_at DESC
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            {"limit": limit, "offset": offset},
+        )
+        return [_map_badcase(r) for r in result.mappings().all()]
+
+
+def _map_relation(row) -> RelationRow:
+    return RelationRow(
+        id=int(row["id"]),
+        from_table_id=int(row["from_table_id"]),
+        from_table_name=str(row["from_table_name"]),
+        from_column=str(row["from_column"]),
+        to_table_id=int(row["to_table_id"]),
+        to_table_name=str(row["to_table_name"]),
+        to_column=str(row["to_column"]),
+        relation_type=str(row["relation_type"]),
+        join_hint=row.get("join_hint"),
+        cardinality=row.get("cardinality"),
+        status=int(row["status"]),
+    )
+
+
+def _map_field_value(row) -> FieldValueRow:
+    return FieldValueRow(
+        id=int(row["id"]),
+        column_id=int(row["column_id"]),
+        table_name=str(row["table_name"]),
+        column_name=str(row["column_name"]),
+        value_text=str(row["value_text"]),
+        display_label=row.get("display_label"),
+        alias_json=row.get("alias_json"),
+        status=int(row["status"]),
+    )
+
+
+def _map_metric(row) -> MetricRow:
+    return MetricRow(
+        id=int(row["id"]),
+        metric_code=str(row["metric_code"]),
+        metric_name=str(row["metric_name"]),
+        description=row.get("description"),
+        sql_template=row.get("sql_template"),
+        relevant_tables=row.get("relevant_tables"),
+        alias_json=row.get("alias_json"),
+        formula_text=row.get("formula_text"),
+        filter_hint=row.get("filter_hint"),
+        time_column=row.get("time_column"),
+        agg_type=row.get("agg_type"),
+        unit=row.get("unit"),
+        admin_only=int(row.get("admin_only") or 0),
+        status=int(row["status"]),
+    )
+
+
+def _map_sql_example(row) -> SqlExampleRow:
+    return SqlExampleRow(
+        id=int(row["id"]),
+        question_pattern=str(row["question_pattern"]),
+        sql_text=str(row["sql_text"]),
+        meta_json=row.get("meta_json"),
+        role_scope=row.get("role_scope"),
+        degrade_priority=int(row["degrade_priority"]),
+    )
+
+
+def _map_badcase(row) -> BadcaseRow:
+    return BadcaseRow(
+        trace_id=str(row["trace_id"]),
+        question=str(row["question"]),
+        final_sql=row.get("final_sql"),
+        status=str(row["status"]),
+        user_feedback=row.get("user_feedback"),
+        is_badcase=int(row["is_badcase"]),
+        human_corrected_sql=row.get("human_corrected_sql"),
+        created_at=row["created_at"],
+    )
 
 
 def _map_table(row) -> TableMetaRow:

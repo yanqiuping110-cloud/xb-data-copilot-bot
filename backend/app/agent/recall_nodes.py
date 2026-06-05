@@ -1,0 +1,197 @@
+"""
+LangGraph 多阶段召回节点：关键词 → 三路召回 → 合并过滤 → 构建 LLM 上下文。
+"""
+
+from __future__ import annotations
+
+import time
+
+from langchain_core.runnables import RunnableConfig
+
+from app.agent.context_builder import (
+    MergedRecallContext,
+    build_llm_context_text,
+    enrich_tables_from_mysql,
+    filter_metrics,
+    filter_tables,
+    merge_retrieved_info,
+    span_detail_from_merged,
+)
+from app.agent.nodes import _cfg, _span
+from app.agent.state import AskGraphState
+from app.meta.repository import MetaRepository
+from app.retrieval.hybrid import HybridRetriever
+from app.retrieval.keyword_extractor import extract_keywords
+from config.settings import Settings
+
+
+def _get_merged(state: AskGraphState) -> MergedRecallContext | None:
+    raw = state.get("merged_recall")
+    if raw is None:
+        return None
+    if isinstance(raw, MergedRecallContext):
+        return raw
+    return None
+
+
+async def extract_keywords_node(state: AskGraphState, config: RunnableConfig) -> dict:
+    """从问句抽取关键词，供混合召回使用。"""
+    t0 = time.perf_counter()
+    question = state.get("normalized_question") or state.get("question") or ""
+    keywords = extract_keywords(question)
+    await _span(config, "extract_keywords", t0, "success", {"keywords": keywords, "count": len(keywords)})
+    return {"keywords": keywords}
+
+
+async def recall_columns(state: AskGraphState, config: RunnableConfig) -> dict:
+    """字段向量/关键词召回。"""
+    t0 = time.perf_counter()
+    c = _cfg(config)
+    settings: Settings = c["settings"]
+    question = state.get("normalized_question") or ""
+    keywords = state.get("keywords") or []
+
+    retriever = HybridRetriever(c["copilot_session"], settings)
+    try:
+        columns, recall_mode = await retriever.recall_columns_only(question, keywords)
+        status = "success" if columns else "empty"
+        detail = {
+            "count": len(columns),
+            "recall_mode": recall_mode,
+            "items": [
+                {"table": col.table_name, "column": col.column_name, "score": col.score}
+                for col in columns[:8]
+            ],
+        }
+        await _span(config, "recall_columns", t0, status, detail)
+        return {"recall_columns": columns, "recall_mode": recall_mode}
+    finally:
+        await retriever.close()
+
+
+async def recall_metrics(state: AskGraphState, config: RunnableConfig) -> dict:
+    """指标向量/关键词召回。"""
+    t0 = time.perf_counter()
+    c = _cfg(config)
+    settings: Settings = c["settings"]
+    question = state.get("normalized_question") or ""
+    keywords = state.get("keywords") or []
+
+    retriever = HybridRetriever(c["copilot_session"], settings)
+    try:
+        metrics = await retriever.recall_metrics_only(question, keywords)
+        status = "success" if metrics else "empty"
+        detail = {
+            "count": len(metrics),
+            "items": [{"code": m.metric_code, "score": m.score} for m in metrics[:5]],
+        }
+        await _span(config, "recall_metrics", t0, status, detail)
+        return {"recall_metrics": metrics}
+    finally:
+        await retriever.close()
+
+
+async def recall_field_values(state: AskGraphState, config: RunnableConfig) -> dict:
+    """字段取值全文/关键词召回。"""
+    t0 = time.perf_counter()
+    c = _cfg(config)
+    settings: Settings = c["settings"]
+    question = state.get("normalized_question") or ""
+    keywords = state.get("keywords") or []
+
+    retriever = HybridRetriever(c["copilot_session"], settings)
+    try:
+        values = await retriever.recall_field_values_only(question, keywords)
+        status = "success" if values else "empty"
+        detail = {
+            "count": len(values),
+            "items": [
+                {"table": v.table_name, "column": v.column_name, "value": v.value_text}
+                for v in values[:5]
+            ],
+        }
+        await _span(config, "recall_field_values", t0, status, detail)
+        return {"recall_field_values": values}
+    finally:
+        await retriever.close()
+
+
+async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig) -> dict:
+    """合并三路召回结果。"""
+    t0 = time.perf_counter()
+    from app.retrieval.hybrid import HybridRecallResult
+
+    recall = HybridRecallResult(
+        keywords=state.get("keywords") or [],
+        columns=state.get("recall_columns") or [],
+        metrics=state.get("recall_metrics") or [],
+        field_values=state.get("recall_field_values") or [],
+        recall_mode=state.get("recall_mode") or "hybrid",
+    )
+    merged = merge_retrieved_info(recall)
+    await _span(
+        config,
+        "merge_retrieved_info",
+        t0,
+        "success",
+        {
+            "column_count": len(merged.columns),
+            "metric_count": len(merged.metrics),
+            "value_count": len(merged.field_values),
+        },
+    )
+    return {"merged_recall": merged}
+
+
+async def filter_tables_node(state: AskGraphState, config: RunnableConfig) -> dict:
+    """按召回得分筛选候选表。"""
+    t0 = time.perf_counter()
+    merged = _get_merged(state)
+    if merged is None:
+        await _span(config, "filter_tables", t0, "empty")
+        return {}
+
+    merged = filter_tables(merged, top_n=5)
+    await _span(config, "filter_tables", t0, "success", {"table_names": merged.table_names})
+    return {"merged_recall": merged}
+
+
+async def filter_metrics_node(state: AskGraphState, config: RunnableConfig) -> dict:
+    """筛选 Top 指标。"""
+    t0 = time.perf_counter()
+    merged = _get_merged(state)
+    if merged is None:
+        await _span(config, "filter_metrics", t0, "empty")
+        return {}
+
+    merged = filter_metrics(merged, top_n=5)
+    await _span(config, "filter_metrics", t0, "success", {"metric_count": len(merged.metrics)})
+    return {"merged_recall": merged}
+
+
+async def build_llm_context(state: AskGraphState, config: RunnableConfig) -> dict:
+    """拼装结构化 Prompt 上下文，替代基线 retrieve_context。"""
+    t0 = time.perf_counter()
+    c = _cfg(config)
+    question = state.get("normalized_question") or state.get("question") or ""
+    merged = _get_merged(state)
+
+    try:
+        if merged is not None:
+            repo = MetaRepository(c["copilot_session"])
+            merged = await enrich_tables_from_mysql(merged, repo)
+            context_text = await build_llm_context_text(question, merged, c["copilot_session"])
+            detail = span_detail_from_merged(merged)
+            detail["chars"] = len(context_text)
+            status = "success"
+        else:
+            context_text = "【检索失败，仅依赖表白名单】\n"
+            detail = {"chars": len(context_text)}
+            status = "degraded"
+
+        await _span(config, "build_llm_context", t0, status, detail)
+        return {"context_text": context_text, "merged_recall": merged}
+    except Exception as exc:
+        context_text = "【检索失败，仅依赖表白名单】\n" + str(exc)
+        await _span(config, "build_llm_context", t0, "degraded", {"error": str(exc)})
+        return {"context_text": context_text}

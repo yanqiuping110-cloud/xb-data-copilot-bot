@@ -20,15 +20,15 @@
 | 前端问数页 | ✅ 完成 | 对话页 + 学校切换 + 超管用户管理页 |
 | 动态语义 L1 | ✅ 完成 | `copilot_sql_example` + `copilot_metric_definition` |
 | LangGraph 7 节点基线 | ✅ 完成 | `app/agent/`；待拆分为多阶段召回链 |
-| `retrieve_context` | ⚠️ 基线 | 关键词 Top-K；**待升级混合召回** |
+| `retrieve_context` | ✅ 已演进 | 拆为 `extract_keywords` → 三路 `recall_*` → `build_llm_context` |
 | LLM `generate_sql` | ✅ 完成 | OpenAI 兼容 API，L2 精简重试 1 次 |
 | **V004 元数据 DDL** | ✅ 完成 | `scripts/sql/copilot/V004__meta_knowledge.sql` |
 | **元数据后端** | ✅ 完成 | `app/meta/` introspect + CRUD + refresh |
 | **`/admin/meta` API** | ✅ 完成 | introspect / tables / columns / refresh |
 | **白名单** | ✅ 更新 | 优先 `copilot_table_meta.status=1` |
-| **混合召回（ES）** | ⚠️ 索引构建 | `build_search_index` + rebuild API；召回接入待第 5 周 |
-| **多阶段 LangGraph** | ⬜ 未开始 | 见开发计划 §6.1 |
-| **前端 meta 管理页** | ⬜ 未开始 | 第 4 周 |
+| **混合召回（ES）** | ✅ 完成 | `HybridRetriever` + keyword 降级；接入 LangGraph |
+| **多阶段 LangGraph** | ✅ 完成 | 召回链 + `correct_sql`；见 §6.1 |
+| **前端 meta 管理页** | ✅ 完成 | 表/字段/关系/取值/指标/L1/badcase + 问数页反馈 |
 | 评测集 | ⬜ 未开始 | `docs/EVAL_QUESTIONS.md` |
 
 ---
@@ -65,16 +65,42 @@
 | `seed_semantic_meta.py` | ✅ | 首表 `sport_activity_qzs_record` + project_id 取值 |
 | `MetaKnowledgeService` | ✅ | `app/meta/index_service.py` + `app/retrieval/` |
 | ES `build_search_index` | ✅ | CLI + `POST /admin/meta/rebuild-index`（需 ES + Embedding） |
-| 本机 ES/Embedding 联调 | ⬜ | 无 Docker ES 时可跳过；问数仍走 L1/LLM |
+| 本机 ES/Embedding 联调 | ✅ | rebuild-index / build_search_index 已验证 |
 
 ---
 
-## 第 4～6 周（待开始）
+## 第 4 周（已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `AdminMetaTables.vue` | ✅ | 表列表、编辑、刷新结构、重建索引 |
+| `AdminMetaTableNew.vue` | ✅ | 表名 → introspect → 双列备注 → 保存 |
+| `AdminMetaColumns.vue` | ✅ | 字段双列、有效定义预览、逐字段保存 |
+| 关系 / 取值 / 指标 / L1 样例页 | ✅ | `/admin/meta/relations` 等 |
+| `POST /api/v1/feedback` + badcase 列表 | ✅ | 问数页 👍/👎/badcase；运营修正 SQL → 补 L1 |
+| 路由守卫 ADMIN/OPERATOR | ✅ | `/admin/meta/*` |
+
+---
+
+## 第 5 周（已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `HybridRetriever` | ✅ | `app/retrieval/hybrid.py`；ES 向量/全文 + MySQL keyword 降级 |
+| `extract_keywords` | ✅ | `app/retrieval/keyword_extractor.py` |
+| 三路 `recall_*` 节点 | ✅ | `app/agent/recall_nodes.py`；span 可观测 |
+| `merge` / `filter` / `build_llm_context` | ✅ | `app/agent/context_builder.py` |
+| `correct_sql` | ✅ | 校验失败重试 1 次；`route_after_validate` 路由 |
+| ES 降级追踪 | ✅ | `recall_mode=keyword_fallback` 写入 span |
+| `/ready` ES 探针 | ✅ | `checks.elasticsearch` |
+| `test_hybrid_retriever.py` | ✅ | 关键词/排序/路由单测（无需 ES） |
+
+---
+
+## 第 6 周（待开始）
 
 | 周 | 重点 | 状态 |
 |----|------|------|
-| 第 4 周 | 前端 meta 管理页、feedback/badcase | ⬜ |
-| 第 5 周 | 混合召回、多阶段 LangGraph、`correct_sql` | ⬜ |
 | 第 6 周 | 评测回归、文档、MVP 演示 | ⬜ |
 
 ---
@@ -94,14 +120,14 @@
 | `execute_sql` | `app/sql/executor.py` |
 | `format_answer` | `app/agent/nodes.py` |
 
-### 计划新增（第 5 周）
+### 已新增（第 5 周）
 
-| 节点 | 说明 |
-|------|------|
-| `extract_keywords` | 问句关键词 |
-| `recall_columns` / `recall_metrics` / `recall_field_values` | ES 混合召回 |
-| `merge_retrieved_info` / `filter_*` / `build_llm_context` | 多阶段上下文 |
-| `correct_sql` | 校验失败重试 |
+| 节点 | 实现位置 |
+|------|----------|
+| `extract_keywords` | `app/agent/recall_nodes.py` |
+| `recall_columns` / `recall_metrics` / `recall_field_values` | `app/agent/recall_nodes.py` + `app/retrieval/hybrid.py` |
+| `merge_retrieved_info` / `filter_tables` / `filter_metrics` / `build_llm_context` | `app/agent/recall_nodes.py` + `app/agent/context_builder.py` |
+| `correct_sql` | `app/agent/nodes.py` |
 
 入口：`POST /api/v1/ask` → `app/ask/service.py` → `app/agent/runner.py`。
 
@@ -138,7 +164,8 @@
 | 2026-06-02 | `POST /api/v1/ask` MVP、sql_guard、tracer、前端问数页 |
 | 2026-06-03 | LangGraph + LLM；开发计划 v2.0/v2.1 |
 | 2026-06-03 | **第 3 周启动**：V004 DDL、`app/meta`、`/admin/meta` API、白名单接 table_meta |
-| 2026-06-05 | `seed_semantic_meta.py`、`MetaKnowledgeService`、`build_search_index`、rebuild-index API |
+| 2026-06-05 | 语义库 CRUD API（关系/取值/指标/L1）+ feedback/badcase + 前端全套管理页 |
+| 2026-06-05 | **第 5 周**：`HybridRetriever`、多阶段 LangGraph 召回链、`correct_sql`、单测 53 通过 |
 
 ---
 
@@ -178,6 +205,5 @@ python scripts/build_search_index.py
 
 ## 下一步
 
-1. 本机执行 **V004** 迁移 → `seed_semantic_meta.py` → `build_search_index.py`。  
-2. 第 4 周：**前端** `AdminMetaTables.vue` 表名录入、双列备注、保存/刷新。  
-3. 第 5 周：`HybridRetriever` 接入 LangGraph 多阶段召回链。
+1. **第 6 周**：`EVAL_QUESTIONS.md` + `replay_eval.py` 评测基线。  
+2. 运营闭环验证：badcase → 补 meta/指标或 L1 → 重建索引 → 再问数（开放域问数 span 应含 `recall_columns` 等）。

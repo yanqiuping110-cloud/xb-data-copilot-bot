@@ -25,3 +25,12 @@ def test_route_format_on_error():
     state: AskGraphState = {"error_code": "LLM_NO_SQL"}
     assert route_after_match(state) == "format_answer"
     assert route_after_validate(state) == "format_answer"
+
+
+def test_route_correct_sql_when_correctable():
+    state: AskGraphState = {
+        "error_code": "PARSE_ERROR",
+        "matched": None,
+        "correct_sql_count": 0,
+    }
+    assert route_after_validate(state) == "correct_sql"
