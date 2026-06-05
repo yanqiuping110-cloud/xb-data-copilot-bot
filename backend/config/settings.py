@@ -64,6 +64,11 @@ class Settings(BaseSettings):
         default="qwen3-embedding:4b",
         alias="EMBEDDING_MODEL",
     )
+    embedding_dims: int = Field(
+        default=2560,
+        alias="EMBEDDING_DIMS",
+        description="向量维度（无数据 embed 时建索引占位；qwen3-embedding:4b 多为 2560）",
+    )
 
     # ---------- MySQL：智慧体育业务库（只读账号）----------
     mysql_business_host: str = Field(default="127.0.0.1", alias="MYSQL_BUSINESS_HOST")
@@ -101,6 +106,14 @@ class Settings(BaseSettings):
         default="http://127.0.0.1:1200",
         alias="ELASTICSEARCH_URL",
     )
+    elasticsearch_index_prefix: str = Field(
+        default="copilot_ask_",
+        alias="ELASTICSEARCH_INDEX_PREFIX",
+    )
+    recall_top_k_column: int = Field(default=8, alias="RECALL_TOP_K_COLUMN")
+    recall_top_k_metric: int = Field(default=5, alias="RECALL_TOP_K_METRIC")
+    recall_top_k_value: int = Field(default=10, alias="RECALL_TOP_K_VALUE")
+    recall_keyword_fallback: bool = Field(default=True, alias="RECALL_KEYWORD_FALLBACK")
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     minio_endpoint: str = Field(default="http://127.0.0.1:9000", alias="MINIO_ENDPOINT")
 

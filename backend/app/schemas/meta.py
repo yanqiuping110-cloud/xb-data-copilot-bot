@@ -93,3 +93,12 @@ class ColumnMetaResponse(CamelModel):
 class TableMetaListResponse(CamelModel):
     items: list[TableMetaResponse]
     total: int
+
+
+class RebuildIndexResponse(CamelModel):
+    """POST /admin/meta/rebuild-index 响应。"""
+
+    columns: int
+    metrics: int
+    field_values: int
+    embedding_dims: int

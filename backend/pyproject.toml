@@ -21,6 +21,7 @@ dependencies = [
     "langchain-core>=0.3,<0.4",
     "langchain-openai>=0.3,<0.4",
     "langgraph>=0.3,<0.4",
+    "elasticsearch[async]>=8.11,<9",
 ]
 
 [project.optional-dependencies]

@@ -22,10 +22,13 @@ from app.meta.service import (
     introspect_to_dict,
     table_to_dict,
 )
+from app.meta.index_service import MetaKnowledgeService
+from app.meta.exceptions import MetaError
 from app.schemas.meta import (
     ColumnMetaResponse,
     CreateTableMetaRequest,
     IntrospectTableResponse,
+    RebuildIndexResponse,
     TableMetaListResponse,
     TableMetaResponse,
     UpdateColumnMetaRequest,
@@ -236,3 +239,29 @@ async def update_column(
     updated = await repo.get_column(column_id)
     assert updated is not None
     return ColumnMetaResponse.model_validate(column_to_dict(updated))
+
+
+@router.post(
+    "/rebuild-index",
+    response_model=RebuildIndexResponse,
+    response_model_by_alias=True,
+)
+async def rebuild_search_index(
+    _: Annotated[UserContext, Depends(require_meta_manager)],
+    copilot: Annotated[AsyncSession, Depends(get_copilot_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RebuildIndexResponse:
+    """全量重建 ES 字段/指标向量索引与字段取值全文索引。"""
+    svc = MetaKnowledgeService(copilot, settings)
+    try:
+        if not await svc.ping_elasticsearch():
+            raise MetaError("ES_UNAVAILABLE", "Elasticsearch 不可达，请检查 ELASTICSEARCH_URL", 503)
+        result = await svc.rebuild_all()
+    finally:
+        await svc.close()
+    return RebuildIndexResponse(
+        columns=result.columns,
+        metrics=result.metrics,
+        field_values=result.field_values,
+        embedding_dims=result.embedding_dims,
+    )

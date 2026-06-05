@@ -29,6 +29,20 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 python scripts/seed_sql_examples.py
 ```
 
+元数据知识库种子（首表 + project_id 取值，需已执行 V004）：
+
+```powershell
+# 先人工执行 scripts/sql/copilot/V004__meta_knowledge.sql
+python scripts/seed_semantic_meta.py
+```
+
+ES 混合召回索引（需 Docker ES :1200 + Ollama embedding）：
+
+```powershell
+python scripts/build_search_index.py
+# 或 POST /api/v1/admin/meta/rebuild-index（ADMIN/OPERATOR JWT）
+```
+
 数据库变更策略：[docs/DATABASE_CHANGE_POLICY.md](../docs/DATABASE_CHANGE_POLICY.md)  
 问数库 DDL 版本目录：`scripts/sql/copilot/`（仅人工执行）
 

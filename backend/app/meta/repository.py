@@ -32,6 +32,46 @@ class TableMetaRow:
 
 
 @dataclass
+class IndexableColumnRow:
+    """ES 字段索引一行。"""
+
+    column_id: int
+    table_id: int
+    table_name: str
+    column_name: str
+    description_manual: str | None
+    column_comment_auto: str | None
+    alias_json: str | None
+    column_role: str | None
+
+
+@dataclass
+class IndexableMetricRow:
+    """ES 指标索引一行。"""
+
+    metric_id: int
+    metric_code: str
+    metric_name: str
+    description: str | None
+    formula_text: str | None
+    relevant_tables: str | None
+    alias_json: str | None
+
+
+@dataclass
+class IndexableFieldValueRow:
+    """ES 字段取值索引一行。"""
+
+    field_value_id: int
+    column_id: int
+    table_name: str
+    column_name: str
+    value_text: str
+    display_label: str | None
+    alias_json: str | None
+
+
+@dataclass
 class ColumnMetaRow:
     """copilot_column_meta 一行。"""
 
@@ -351,6 +391,149 @@ class MetaRepository:
             )
         )
         return {str(r["table_name"]).lower() for r in result.mappings().all()}
+
+    async def upsert_field_value(
+        self,
+        column_id: int,
+        *,
+        value_text: str,
+        display_label: str | None = None,
+        alias_json: str | None = None,
+    ) -> int:
+        """按 column_id + value_text 幂等写入字段取值。"""
+        existing = await self._session.execute(
+            text(
+                """
+                SELECT id FROM copilot_field_value
+                WHERE column_id = :column_id AND value_text = :value_text AND deleted = 0
+                """
+            ),
+            {"column_id": column_id, "value_text": value_text},
+        )
+        row = existing.mappings().first()
+        if row:
+            fid = int(row["id"])
+            await self._session.execute(
+                text(
+                    """
+                    UPDATE copilot_field_value SET
+                        display_label = :display_label,
+                        alias_json = :alias_json,
+                        status = 1
+                    WHERE id = :id AND deleted = 0
+                    """
+                ),
+                {
+                    "id": fid,
+                    "display_label": display_label,
+                    "alias_json": alias_json,
+                },
+            )
+            return fid
+
+        result = await self._session.execute(
+            text(
+                """
+                INSERT INTO copilot_field_value (
+                    column_id, value_text, display_label, alias_json, status, deleted
+                ) VALUES (
+                    :column_id, :value_text, :display_label, :alias_json, 1, 0
+                )
+                """
+            ),
+            {
+                "column_id": column_id,
+                "value_text": value_text,
+                "display_label": display_label,
+                "alias_json": alias_json,
+            },
+        )
+        return int(result.lastrowid)
+
+    async def list_indexable_columns(self) -> list[IndexableColumnRow]:
+        """启用表下有效字段，供 ES 向量索引。"""
+        result = await self._session.execute(
+            text(
+                """
+                SELECT c.id AS column_id, c.table_id, t.table_name, c.column_name,
+                       c.description_manual, c.column_comment_auto, c.alias_json, c.column_role
+                FROM copilot_column_meta c
+                INNER JOIN copilot_table_meta t ON t.id = c.table_id
+                WHERE c.deleted = 0 AND c.status = 1
+                  AND t.deleted = 0 AND t.status = 1
+                ORDER BY t.table_name, c.ordinal_position, c.column_name
+                """
+            )
+        )
+        return [
+            IndexableColumnRow(
+                column_id=int(r["column_id"]),
+                table_id=int(r["table_id"]),
+                table_name=str(r["table_name"]),
+                column_name=str(r["column_name"]),
+                description_manual=r.get("description_manual"),
+                column_comment_auto=r.get("column_comment_auto"),
+                alias_json=r.get("alias_json"),
+                column_role=r.get("column_role"),
+            )
+            for r in result.mappings().all()
+        ]
+
+    async def list_indexable_metrics(self) -> list[IndexableMetricRow]:
+        """启用指标，供 ES 向量索引。"""
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id AS metric_id, metric_code, metric_name, description,
+                       formula_text, relevant_tables, alias_json
+                FROM copilot_metric_definition
+                WHERE status = 1 AND deleted = 0
+                ORDER BY metric_code
+                """
+            )
+        )
+        return [
+            IndexableMetricRow(
+                metric_id=int(r["metric_id"]),
+                metric_code=str(r["metric_code"]),
+                metric_name=str(r["metric_name"]),
+                description=r.get("description"),
+                formula_text=r.get("formula_text"),
+                relevant_tables=r.get("relevant_tables"),
+                alias_json=r.get("alias_json"),
+            )
+            for r in result.mappings().all()
+        ]
+
+    async def list_indexable_field_values(self) -> list[IndexableFieldValueRow]:
+        """启用字段取值，供 ES 全文索引。"""
+        result = await self._session.execute(
+            text(
+                """
+                SELECT fv.id AS field_value_id, fv.column_id, t.table_name, c.column_name,
+                       fv.value_text, fv.display_label, fv.alias_json
+                FROM copilot_field_value fv
+                INNER JOIN copilot_column_meta c ON c.id = fv.column_id
+                INNER JOIN copilot_table_meta t ON t.id = c.table_id
+                WHERE fv.deleted = 0 AND fv.status = 1
+                  AND c.deleted = 0 AND c.status = 1
+                  AND t.deleted = 0 AND t.status = 1
+                ORDER BY t.table_name, c.column_name, fv.value_text
+                """
+            )
+        )
+        return [
+            IndexableFieldValueRow(
+                field_value_id=int(r["field_value_id"]),
+                column_id=int(r["column_id"]),
+                table_name=str(r["table_name"]),
+                column_name=str(r["column_name"]),
+                value_text=str(r["value_text"]),
+                display_label=r.get("display_label"),
+                alias_json=r.get("alias_json"),
+            )
+            for r in result.mappings().all()
+        ]
 
 
 def _map_table(row) -> TableMetaRow:

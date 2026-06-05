@@ -5,7 +5,7 @@
 
 ---
 
-## 总览（截至 2026-06-03）
+## 总览（截至 2026-06-05）
 
 | 模块 | 进度 | 说明 |
 |------|------|------|
@@ -26,7 +26,7 @@
 | **元数据后端** | ✅ 完成 | `app/meta/` introspect + CRUD + refresh |
 | **`/admin/meta` API** | ✅ 完成 | introspect / tables / columns / refresh |
 | **白名单** | ✅ 更新 | 优先 `copilot_table_meta.status=1` |
-| **混合召回（ES）** | ⬜ 未开始 | 向量 + 全文 + keyword fallback |
+| **混合召回（ES）** | ⚠️ 索引构建 | `build_search_index` + rebuild API；召回接入待第 5 周 |
 | **多阶段 LangGraph** | ⬜ 未开始 | 见开发计划 §6.1 |
 | **前端 meta 管理页** | ⬜ 未开始 | 第 4 周 |
 | 评测集 | ⬜ 未开始 | `docs/EVAL_QUESTIONS.md` |
@@ -48,7 +48,7 @@
 
 ---
 
-## 第 3 周（元数据知识库 · 进行中）
+## 第 3 周（元数据知识库 · 后端代码完成，待本机联调）
 
 | 任务 | 状态 | 备注 |
 |------|------|------|
@@ -60,9 +60,12 @@
 | `MetaRepository` + `MetaService` | ✅ | `app/meta/` |
 | `require_meta_manager` | ✅ | ADMIN / OPERATOR |
 | `test_meta_effective.py` | ✅ | effective + 表名校验 |
+| `test_meta_index_text.py` | ✅ | 索引 search_text 拼装单测（无需 ES） |
 | 本机执行 V004 迁移 | ⬜ | 需手工跑 SQL |
-| `seed_semantic_meta.py` | ⬜ | 首表种子 + project_id 取值 |
-| ES `build_search_index` | ⬜ | 第 3 周后半 |
+| `seed_semantic_meta.py` | ✅ | 首表 `sport_activity_qzs_record` + project_id 取值 |
+| `MetaKnowledgeService` | ✅ | `app/meta/index_service.py` + `app/retrieval/` |
+| ES `build_search_index` | ✅ | CLI + `POST /admin/meta/rebuild-index`（需 ES + Embedding） |
+| 本机 ES/Embedding 联调 | ⬜ | 无 Docker ES 时可跳过；问数仍走 L1/LLM |
 
 ---
 
@@ -112,6 +115,18 @@
 | GET/POST/PUT | `/api/v1/admin/meta/tables` | 表元数据 CRUD |
 | POST | `/api/v1/admin/meta/tables/{id}/refresh-from-business` | 刷新 auto，保护 manual |
 | GET/PUT | `/api/v1/admin/meta/tables/{id}/columns`、`/columns/{id}` | 字段列表与人工更新 |
+| POST | `/api/v1/admin/meta/rebuild-index` | 全量重建 ES 字段/指标/取值索引 |
+
+### 新增脚本与模块（2026-06-05）
+
+| 路径 | 说明 |
+|------|------|
+| `scripts/seed_semantic_meta.py` | 注册首表、人工字段定义、`copilot_field_value`（跳绳/跑步） |
+| `scripts/build_search_index.py` | MySQL 元数据 → ES 三索引（column/metric/value） |
+| `app/meta/index_text.py` | effective 描述 + 别名 → 索引文本 |
+| `app/meta/index_service.py` | `MetaKnowledgeService.rebuild_all()` |
+| `app/retrieval/embedding.py` | Ollama 兼容 Embedding 客户端 |
+| `app/retrieval/es_client.py` | ES 索引创建与 bulk 写入 |
 
 ---
 
@@ -123,34 +138,46 @@
 | 2026-06-02 | `POST /api/v1/ask` MVP、sql_guard、tracer、前端问数页 |
 | 2026-06-03 | LangGraph + LLM；开发计划 v2.0/v2.1 |
 | 2026-06-03 | **第 3 周启动**：V004 DDL、`app/meta`、`/admin/meta` API、白名单接 table_meta |
+| 2026-06-05 | `seed_semantic_meta.py`、`MetaKnowledgeService`、`build_search_index`、rebuild-index API |
 
 ---
 
 ## 本机验证
 
+**仅需 MySQL**（无 ES/Redis 也可跑 API、种子与单测）：
+
 ```powershell
 # 1. 执行迁移（copilot 库）
 mysql -u copilot -p copilot < backend/scripts/sql/copilot/V004__meta_knowledge.sql
 
-# 2. 启动 API
+# 2. 元数据种子（需业务库可连、表 sport_activity_qzs_record 存在）
 cd backend
 $env:APP_ENV = "development"
+python scripts/seed_semantic_meta.py
+
+# 3. 启动 API
 uvicorn app.main:app --reload --port 8000
 
-# 3. introspect 预览（需 ADMIN/OPERATOR JWT）
+# 4. introspect 预览（需 ADMIN/OPERATOR JWT）
 # GET /api/v1/admin/meta/introspect/tables/sport_activity_qzs_record
 ```
 
 ```powershell
 cd backend
-pytest tests/test_meta_effective.py -q
+pytest tests/test_meta_effective.py tests/test_meta_index_text.py -q
+```
+
+**有 Docker ES + Ollama Embedding 时**再执行索引构建：
+
+```powershell
+python scripts/build_search_index.py
+# 或 POST /api/v1/admin/meta/rebuild-index
 ```
 
 ---
 
 ## 下一步
 
-1. 本机执行 **V004** 迁移。  
-2. `seed_semantic_meta.py`：注册首表 + 人工定义 + `copilot_field_value`。  
-3. 第 4 周：**前端**表名录入、双列备注、保存/刷新。  
-4. `build_search_index.py` + ES 混合召回（第 3 周尾 / 第 5 周）。
+1. 本机执行 **V004** 迁移 → `seed_semantic_meta.py` → `build_search_index.py`。  
+2. 第 4 周：**前端** `AdminMetaTables.vue` 表名录入、双列备注、保存/刷新。  
+3. 第 5 周：`HybridRetriever` 接入 LangGraph 多阶段召回链。
