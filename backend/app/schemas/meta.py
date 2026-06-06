@@ -12,6 +12,7 @@ class ColumnManualInput(CamelModel):
     description_manual: str | None = None
     column_role: str | None = None
     aliases: list[str] | None = None
+    recall_enabled: bool = True
 
 
 class CreateTableMetaRequest(CamelModel):
@@ -44,6 +45,7 @@ class UpdateColumnMetaRequest(CamelModel):
     description_manual: str | None = None
     column_role: str | None = None
     aliases: list[str] | None = None
+    recall_enabled: bool | None = None
 
 
 class IntrospectColumnResponse(CamelModel):
@@ -88,6 +90,7 @@ class ColumnMetaResponse(CamelModel):
     aliases: list[str] = []
     is_nullable: bool
     status: int
+    recall_enabled: bool = True
 
 
 class TableMetaListResponse(CamelModel):

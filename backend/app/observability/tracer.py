@@ -89,12 +89,14 @@ async def finish_turn(
     latency_ms_total: int,
     latency_ms_sql_exec: int | None = None,
     latency_ms_sql_gen: int | None = None,
+    latency_ms_first_token: int | None = None,
     row_count: int | None = None,
     error_code: str | None = None,
     degrade_level: int = 0,
     retry_count: int = 0,
     token_in: int | None = None,
     token_out: int | None = None,
+    trace_log: str | None = None,
 ) -> None:
     """更新 copilot_ask_turn 为终态。"""
     await session.execute(
@@ -106,12 +108,14 @@ async def finish_turn(
                 degrade_level = :degrade_level,
                 error_code = :error_code,
                 latency_ms_total = :latency_ms_total,
+                latency_ms_first_token = :latency_ms_first_token,
                 latency_ms_sql_exec = :latency_ms_sql_exec,
                 latency_ms_sql_gen = :latency_ms_sql_gen,
                 row_count = :row_count,
                 retry_count = :retry_count,
                 token_in = :token_in,
-                token_out = :token_out
+                token_out = :token_out,
+                trace_log = :trace_log
             WHERE trace_id = :trace_id
             """
         ),
@@ -122,12 +126,14 @@ async def finish_turn(
             "degrade_level": degrade_level,
             "error_code": error_code,
             "latency_ms_total": latency_ms_total,
+            "latency_ms_first_token": latency_ms_first_token,
             "latency_ms_sql_exec": latency_ms_sql_exec,
             "latency_ms_sql_gen": latency_ms_sql_gen,
             "row_count": row_count,
             "retry_count": retry_count,
             "token_in": token_in,
             "token_out": token_out,
+            "trace_log": trace_log,
         },
     )
 

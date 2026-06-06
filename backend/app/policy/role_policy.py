@@ -6,6 +6,10 @@
 - SCHOOL：必须 active_sch_id ∈ bound_sch_ids，SQL 网关注入 sch_id 条件。
 """
 
+from __future__ import annotations
+
+import re
+
 from app.core.context import UserContext, UserRole
 
 
@@ -37,3 +41,86 @@ def require_school_scope(ctx: UserContext) -> int:
 def applies_sch_id_filter(ctx: UserContext) -> bool:
     """是否需要在生成/执行 SQL 时注入 sch_id 过滤。"""
     return ctx.role == UserRole.SCHOOL
+
+
+def build_role_context_header(ctx: UserContext) -> str:
+    """Prompt 首行：明确当前角色与 sch_id 策略。"""
+    role_label = {
+        UserRole.ADMIN: "超管",
+        UserRole.OPERATOR: "运营",
+        UserRole.SCHOOL: "学校",
+    }.get(ctx.role, ctx.role.value)
+    if applies_sch_id_filter(ctx):
+        return (
+            f"【当前用户角色】{role_label}（{ctx.role.value}）"
+            " — 必须在 WHERE 中使用 sch_id = :sch_id"
+        )
+    return (
+        f"【当前用户角色】{role_label}（{ctx.role.value}）"
+        " — 默认禁止添加 sch_id 条件，可查全平台"
+    )
+
+
+def build_llm_sch_id_constraints(ctx: UserContext) -> list[str]:
+    """按角色生成 LLM Prompt 中的 sch_id 约束说明。"""
+    if applies_sch_id_filter(ctx):
+        return [
+            "- 当前用户为学校账户：必须在 WHERE 中使用 sch_id = :sch_id（不要写具体数字）",
+        ]
+    return [
+        "- 当前用户为超管/运营：默认不要添加 sch_id 条件，可查全平台数据",
+        "- 仅当用户明确指定某所学校时，才在 WHERE 中加 sch_id 条件（可用具体数字）",
+    ]
+
+
+def build_llm_sql_generation_constraints(ctx: UserContext) -> list[str]:
+    """LLM Prompt【生成约束】：方言、表白名单、JOIN 别名、sch_id 等。"""
+    lines = [
+        "- 方言：MySQL 5.7，仅单条 SELECT，不要 INSERT/UPDATE/DELETE",
+        "- 只能使用上表白名单中的表",
+        (
+            "- 涉及多表 JOIN 时：FROM/JOIN 中每张表必须定义短别名"
+            "（如 sport_activity_qzs_record r、sport_project p）"
+        ),
+        (
+            "- 多表查询时 SELECT、WHERE、GROUP BY、ORDER BY、HAVING 中的字段"
+            "必须带表别名前缀（如 r.create_time、p.project_name），禁止裸写字段名"
+        ),
+        (
+            "- 按项目名称过滤时使用 sport_project.project_name（别名 p.project_name）；"
+            "运动值字段为 sport_activity_qzs_record.sport_value（别名 r.sport_value）"
+        ),
+    ]
+    lines.extend(build_llm_sch_id_constraints(ctx))
+    lines.append("- 字段取值映射中的值用于 WHERE 条件")
+    lines.append("- 输出仅包含 SQL，不要解释")
+    return lines
+
+
+LLM_JOIN_ALIAS_SYSTEM_HINT = (
+    "多表 JOIN 时每张表必须取短别名，"
+    "且 SELECT/WHERE/GROUP BY/ORDER BY/HAVING 中所有字段必须带表别名前缀，禁止裸写字段名。"
+)
+
+
+def strip_sch_id_for_broad_roles(sql: str, ctx: UserContext) -> str:
+    """
+    超管/运营不要求 sch_id；若 LLM 误加 :sch_id 占位符则移除对应条件。
+
+    避免 SQL 含 :sch_id 但未绑定参数导致执行失败。
+    """
+    if applies_sch_id_filter(ctx):
+        return sql
+    if ":sch_id" not in sql.lower():
+        return sql
+
+    cleaned = sql
+    cleaned = re.sub(r"\s+AND\s+sch_id\s*=\s*:sch_id\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\bWHERE\s+sch_id\s*=\s*:sch_id\s+AND\s+",
+        "WHERE ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\bWHERE\s+sch_id\s*=\s*:sch_id\b", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()

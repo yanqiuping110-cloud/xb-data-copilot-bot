@@ -9,7 +9,9 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ask.semantic_repository import CuratedSqlExample, SemanticRepository
+from app.core.context import UserContext
 from app.meta.effective import effective_description
+from app.policy.role_policy import build_llm_sql_generation_constraints, build_role_context_header
 from app.meta.repository import MetaRepository, TableMetaRow
 from app.retrieval.hybrid import (
     HybridRecallResult,
@@ -106,6 +108,7 @@ async def build_llm_context_text(
     question: str,
     merged: MergedRecallContext,
     copilot_session: AsyncSession,
+    ctx: UserContext,
     *,
     example_top_k: int = 3,
 ) -> str:
@@ -119,6 +122,8 @@ async def build_llm_context_text(
     allowed = sorted(get_allowed_tables())
 
     parts: list[str] = [
+        build_role_context_header(ctx),
+        "",
         f"【召回模式】{merged.recall_mode}",
         f"【问句关键词】{', '.join(merged.keywords) or '（整句）'}",
         "",
@@ -196,11 +201,7 @@ async def build_llm_context_text(
             parts.append("")
 
     parts.append("【生成约束】")
-    parts.append("- 方言：MySQL 5.7，仅单条 SELECT，不要 INSERT/UPDATE/DELETE")
-    parts.append("- 只能使用上表白名单中的表")
-    parts.append("- 学校账户须在 WHERE 中使用 sch_id = :sch_id（不要写具体数字）")
-    parts.append("- 字段取值映射中的值用于 WHERE 条件")
-    parts.append("- 输出仅包含 SQL，不要解释")
+    parts.extend(build_llm_sql_generation_constraints(ctx))
 
     return "\n".join(parts)
 

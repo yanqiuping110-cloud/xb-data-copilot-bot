@@ -116,6 +116,11 @@
                 <el-input v-model="row.aliasesText" size="small" placeholder="逗号分隔" />
               </template>
             </el-table-column>
+            <el-table-column label="参与召回" width="100" fixed="right">
+              <template #default="{ row }">
+                <el-switch v-model="row.recallEnabled" active-text="是" inactive-text="否" />
+              </template>
+            </el-table-column>
           </el-table>
 
           <div class="footer-actions">
@@ -231,6 +236,7 @@ async function onIntrospect() {
       descriptionManual: '',
       columnRole: '',
       aliasesText: '',
+      recallEnabled: true,
     }))
 
     step.value = 1
@@ -245,14 +251,13 @@ async function onIntrospect() {
 async function onSave() {
   saving.value = true
   try {
-    const columns = columnRows.value
-      .filter((c) => c.descriptionManual?.trim() || c.columnRole || c.aliasesText?.trim())
-      .map((c) => ({
-        columnName: c.columnName,
-        descriptionManual: c.descriptionManual?.trim() || null,
-        columnRole: c.columnRole || null,
-        aliases: parseAliases(c.aliasesText),
-      }))
+    const columns = columnRows.value.map((c) => ({
+      columnName: c.columnName,
+      descriptionManual: c.descriptionManual?.trim() || null,
+      columnRole: c.columnRole || null,
+      aliases: parseAliases(c.aliasesText),
+      recallEnabled: c.recallEnabled !== false,
+    }))
 
     const row = await createMetaTable({
       tableName: preview.tableName,
@@ -262,7 +267,7 @@ async function onSave() {
       grain: tableForm.grain.trim() || null,
       schIdColumn: tableForm.schIdColumn.trim() || 'sch_id',
       status: 1,
-      columns: columns.length ? columns : undefined,
+      columns,
     })
 
     ElMessage.success('表已注册')

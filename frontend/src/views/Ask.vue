@@ -36,7 +36,7 @@
 
     <main class="main">
       <el-card class="chat-card">
-        <div class="messages">
+        <div ref="messagesEl" class="messages" @scroll="onMessagesScroll">
           <div v-for="(msg, idx) in messages" :key="idx" :class="['msg', msg.role]">
             <div class="bubble">{{ msg.text }}</div>
             <ul v-if="msg.progress?.length" class="progress-list">
@@ -122,7 +122,7 @@
 
 <script setup>
 /** 问数对话页：学校切换 + SSE 流式 POST /api/v1/ask */
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchMe, switchSchool } from '../api/auth'
@@ -140,6 +140,10 @@ const lastResult = ref(null)
 const lastFeedback = ref(null)
 const feedbackLoading = ref(false)
 const sessionId = ref(`sess-${Date.now()}`)
+const messagesEl = ref(null)
+/** 用户未手动上滚时为 true，流式输出时自动贴底 */
+const stickToBottom = ref(true)
+const SCROLL_THRESHOLD = 32
 
 const needSelectSchool = computed(
   () => user.value?.role === 'SCHOOL' && boundSchools.value.length > 1 && !selectedSchId.value,
@@ -152,6 +156,30 @@ const tableRows = computed(() => {
   )
 })
 
+function isAtBottom(el) {
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_THRESHOLD
+}
+
+function scrollMessagesToBottom() {
+  const el = messagesEl.value
+  if (!el) return
+  el.scrollTop = el.scrollHeight
+}
+
+function onMessagesScroll() {
+  stickToBottom.value = isAtBottom(messagesEl.value)
+}
+
+watch(
+  messages,
+  () => {
+    if (!stickToBottom.value) return
+    nextTick(scrollMessagesToBottom)
+  },
+  { deep: true },
+)
+
 onMounted(async () => {
   try {
     const res = await fetchMe()
@@ -163,6 +191,8 @@ onMounted(async () => {
       role: 'assistant',
       text: '你好，我是问数助手。可尝试：「本校本月跳绳参与人数」「最近7天每日趋势」「昨日全平台活动参与人次」。',
     })
+    await nextTick()
+    scrollMessagesToBottom()
   } catch {
     router.push('/login')
   }
@@ -183,6 +213,7 @@ async function onSwitchSchool(schId) {
 async function onAsk() {
   const q = question.value.trim()
   if (!q) return
+  stickToBottom.value = true
   messages.value.push({ role: 'user', text: q })
   question.value = ''
   loading.value = true
@@ -222,7 +253,7 @@ async function onAsk() {
           msg.meta = res.traceId ? `trace: ${res.traceId} · ${res.latencyMs}ms` : undefined
         } else {
           msg.text = res.errorMessage || '未能回答该问题'
-          msg.meta = res.errorCode
+          msg.meta = res.traceId ? `trace: ${res.traceId}` : undefined
         }
         msg.progress?.forEach((step) => {
           step.active = false
@@ -231,8 +262,8 @@ async function onAsk() {
       },
       onError: (err) => {
         const msg = messages.value[assistantIdx]
-        msg.text = err.message || '问数失败'
-        msg.meta = err.code
+        msg.text = err.message || '问数失败，请稍后重试'
+        msg.meta = undefined
       },
     })
   } catch {

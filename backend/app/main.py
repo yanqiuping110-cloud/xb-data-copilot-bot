@@ -16,13 +16,18 @@ from app.auth import jwt_tokens
 from app.auth.service import AuthError
 from app.meta.exceptions import MetaError
 from app.policy.role_policy import PolicyError
+from app.core.log_config import get_logger, setup_logging
 from config.settings import get_settings
+
+
+http_logger = get_logger("http")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时加载配置到 app.state，供 /ready 等使用。"""
     settings = get_settings()
+    setup_logging(debug=settings.app_debug)
     app.state.settings = settings
     yield
 
@@ -30,6 +35,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """工厂函数：便于测试注入与多实例配置。"""
     settings = get_settings()
+    setup_logging(debug=settings.app_debug)
     app = FastAPI(
         title="小奔问数 Data Copilot",
         version="0.1.0",
@@ -56,6 +62,18 @@ def create_app() -> FastAPI:
     app.include_router(admin_meta.router)
     app.include_router(ask.router)
     app.include_router(feedback.router)
+
+    @app.middleware("http")
+    async def log_http_requests(request, call_next):
+        """每个 API 请求在终端打一行，便于确认流量是否打到当前进程。"""
+        path = request.url.path
+        if path.startswith("/api/v1/ask"):
+            http_logger.info(">>> %s %s", request.method, path)
+        response = await call_next(request)
+        if path.startswith("/api/v1/ask"):
+            http_logger.info("<<< %s %s status=%s", request.method, path, response.status_code)
+        return response
+
     return app
 
 

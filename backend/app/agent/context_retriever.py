@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 
 from app.ask.semantic_repository import CuratedSqlExample, MetricDefinition, SemanticRepository
+from app.core.context import UserContext
+from app.policy.role_policy import build_llm_sql_generation_constraints, build_role_context_header
 from app.sql.whitelist import get_allowed_tables
 
 
@@ -33,6 +35,7 @@ def _score_example_relevance(question: str, example: CuratedSqlExample) -> int:
 async def build_retrieval_context(
     question: str,
     repo: SemanticRepository,
+    ctx: UserContext,
     *,
     example_top_k: int = 5,
 ) -> str:
@@ -45,7 +48,13 @@ async def build_retrieval_context(
     examples = await repo.list_sql_examples()
     allowed = sorted(get_allowed_tables())
 
-    parts: list[str] = ["【允许查询的业务表】", ", ".join(allowed) or "（未配置，使用默认表）", ""]
+    parts: list[str] = [
+        build_role_context_header(ctx),
+        "",
+        "【允许查询的业务表】",
+        ", ".join(allowed) or "（未配置，使用默认表）",
+        "",
+    ]
 
     if metrics:
         parts.append("【指标与口径】")
@@ -78,9 +87,6 @@ async def build_retrieval_context(
             parts.append("")
 
     parts.append("【生成约束】")
-    parts.append("- 方言：MySQL 5.7，仅单条 SELECT，不要 INSERT/UPDATE/DELETE")
-    parts.append("- 只能使用上表白名单中的表")
-    parts.append("- 学校账户须在 WHERE 中使用 sch_id = :sch_id（不要写具体数字）")
-    parts.append("- 输出仅包含 SQL，不要解释")
+    parts.extend(build_llm_sql_generation_constraints(ctx))
 
     return "\n".join(parts)

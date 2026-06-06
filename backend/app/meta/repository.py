@@ -173,6 +173,7 @@ class ColumnMetaRow:
     alias_json: str | None
     is_nullable: int
     status: int
+    recall_enabled: int = 1
 
     @property
     def effective_description(self) -> str | None:
@@ -339,7 +340,7 @@ class MetaRepository:
                 """
                 SELECT id, table_id, column_name, ordinal_position, data_type,
                        column_comment_auto, description_manual, column_role, alias_json,
-                       is_nullable, status
+                       is_nullable, status, recall_enabled
                 FROM copilot_column_meta
                 WHERE table_id = :table_id AND deleted = 0
                 ORDER BY ordinal_position, column_name
@@ -361,16 +362,19 @@ class MetaRepository:
         description_manual: str | None = None,
         column_role: str | None = None,
         alias_json: str | None = None,
+        recall_enabled: int = 1,
     ) -> int:
         result = await self._session.execute(
             text(
                 """
                 INSERT INTO copilot_column_meta (
                     table_id, column_name, ordinal_position, data_type, column_comment_auto,
-                    description_manual, column_role, alias_json, is_nullable, status, deleted
+                    description_manual, column_role, alias_json, is_nullable, status,
+                    recall_enabled, deleted
                 ) VALUES (
                     :table_id, :column_name, :ordinal_position, :data_type, :column_comment_auto,
-                    :description_manual, :column_role, :alias_json, :is_nullable, 1, 0
+                    :description_manual, :column_role, :alias_json, :is_nullable, 1,
+                    :recall_enabled, 0
                 )
                 """
             ),
@@ -384,6 +388,7 @@ class MetaRepository:
                 "column_role": column_role,
                 "alias_json": alias_json,
                 "is_nullable": 1 if column.is_nullable else 0,
+                "recall_enabled": recall_enabled,
             },
         )
         return int(result.lastrowid)
@@ -431,7 +436,7 @@ class MetaRepository:
                 """
                 SELECT id, table_id, column_name, ordinal_position, data_type,
                        column_comment_auto, description_manual, column_role, alias_json,
-                       is_nullable, status
+                       is_nullable, status, recall_enabled
                 FROM copilot_column_meta
                 WHERE id = :id AND deleted = 0
                 """
@@ -448,6 +453,7 @@ class MetaRepository:
         description_manual: str | None = None,
         column_role: str | None = None,
         alias_json: str | None = None,
+        recall_enabled: int | None = None,
     ) -> None:
         await self._session.execute(
             text(
@@ -455,7 +461,8 @@ class MetaRepository:
                 UPDATE copilot_column_meta SET
                     description_manual = COALESCE(:description_manual, description_manual),
                     column_role = COALESCE(:column_role, column_role),
-                    alias_json = COALESCE(:alias_json, alias_json)
+                    alias_json = COALESCE(:alias_json, alias_json),
+                    recall_enabled = COALESCE(:recall_enabled, recall_enabled)
                 WHERE id = :id AND deleted = 0
                 """
             ),
@@ -464,6 +471,7 @@ class MetaRepository:
                 "description_manual": description_manual,
                 "column_role": column_role,
                 "alias_json": alias_json,
+                "recall_enabled": recall_enabled,
             },
         )
 
@@ -546,7 +554,7 @@ class MetaRepository:
                        c.description_manual, c.column_comment_auto, c.alias_json, c.column_role
                 FROM copilot_column_meta c
                 INNER JOIN copilot_table_meta t ON t.id = c.table_id
-                WHERE c.deleted = 0 AND c.status = 1
+                WHERE c.deleted = 0 AND c.status = 1 AND c.recall_enabled = 1
                   AND t.deleted = 0 AND t.status = 1
                 ORDER BY t.table_name, c.ordinal_position, c.column_name
                 """
@@ -603,7 +611,7 @@ class MetaRepository:
                 INNER JOIN copilot_column_meta c ON c.id = fv.column_id
                 INNER JOIN copilot_table_meta t ON t.id = c.table_id
                 WHERE fv.deleted = 0 AND fv.status = 1
-                  AND c.deleted = 0 AND c.status = 1
+                  AND c.deleted = 0 AND c.status = 1 AND c.recall_enabled = 1
                   AND t.deleted = 0 AND t.status = 1
                 ORDER BY t.table_name, c.column_name, fv.value_text
                 """
@@ -1177,6 +1185,7 @@ def _map_column(row) -> ColumnMetaRow:
         alias_json=row.get("alias_json"),
         is_nullable=int(row["is_nullable"]),
         status=int(row["status"]),
+        recall_enabled=int(row.get("recall_enabled", 1)),
     )
 
 

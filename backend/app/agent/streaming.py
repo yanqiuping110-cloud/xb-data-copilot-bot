@@ -7,27 +7,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.agent.log_utils import NODE_LABELS, get_node_label
 from app.schemas.ask import AskResponse
-
-# LangGraph 节点 → 前端展示文案
-NODE_LABELS: dict[str, str] = {
-    "normalize_question": "清洗问句",
-    "extract_keywords": "抽取关键词",
-    "recall_columns": "召回相关字段",
-    "recall_metrics": "召回相关指标",
-    "recall_field_values": "召回字段取值",
-    "merge_retrieved_info": "合并召回结果",
-    "filter_tables": "筛选候选表",
-    "filter_metrics": "筛选指标",
-    "build_llm_context": "构建问数上下文",
-    "match_curated": "匹配样例 SQL",
-    "generate_sql": "生成 SQL",
-    "validate_sql": "校验 SQL",
-    "correct_sql": "修正 SQL",
-    "apply_policy": "应用权限策略",
-    "execute_sql": "执行查询",
-    "format_answer": "生成回答",
-}
 
 
 def format_sse(event: str, payload: dict[str, Any]) -> str:
@@ -40,7 +21,7 @@ def progress_event(node: str, *, detail: dict[str, Any] | None = None) -> str:
     """节点进度事件。"""
     body: dict[str, Any] = {
         "node": node,
-        "label": NODE_LABELS.get(node, node),
+        "label": get_node_label(node),
     }
     if detail:
         body["detail"] = detail

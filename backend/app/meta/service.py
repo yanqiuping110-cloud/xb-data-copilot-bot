@@ -24,6 +24,7 @@ class ColumnInput:
     description_manual: str | None = None
     column_role: str | None = None
     aliases: list[str] | None = None
+    recall_enabled: bool = True
 
 
 @dataclass
@@ -93,6 +94,7 @@ class MetaService:
                 description_manual=inp.description_manual if inp else None,
                 column_role=inp.column_role if inp else None,
                 alias_json=dump_alias_json(inp.aliases if inp else None),
+                recall_enabled=0 if inp and not inp.recall_enabled else 1,
             )
 
         row = await self._repo.get_table(table_id)
@@ -172,6 +174,7 @@ def column_to_dict(col: ColumnMetaRow) -> dict:
         "aliases": parse_alias_json(col.alias_json),
         "isNullable": col.is_nullable == 1,
         "status": col.status,
+        "recallEnabled": col.recall_enabled == 1,
     }
 
 

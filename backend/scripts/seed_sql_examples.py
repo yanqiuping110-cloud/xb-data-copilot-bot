@@ -115,6 +115,23 @@ _EXAMPLES = [
             "tables": [_QZS],
         },
     },
+    {
+        "question_pattern": "2025年跑步项目运动值",
+        "sql_text": (
+            "SELECT r.sport_value AS 运动值 "
+            f"FROM {_QZS} r "
+            "JOIN sport_project p ON r.project_id = p.id "
+            "WHERE p.project_name = '跑步' AND YEAR(r.create_time) = 2025"
+        ),
+        "role_scope": None,
+        "degrade_priority": 15,
+        "meta": {
+            "matchAllGroups": [["跑步"], ["运动值"]],
+            "answerTemplate": "已返回 {row_count} 条运动值记录。",
+            "valueColumn": "运动值",
+            "tables": [_QZS, "sport_project"],
+        },
+    },
 ]
 
 

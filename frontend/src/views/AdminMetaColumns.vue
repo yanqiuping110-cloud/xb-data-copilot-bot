@@ -25,10 +25,26 @@
           <div class="toolbar">
             <el-button type="primary" @click="openTableEdit">编辑表定义</el-button>
             <el-button :loading="refreshing" @click="onRefresh">刷新结构</el-button>
+            <el-button
+              type="primary"
+              :loading="columnsSaving"
+              :disabled="!hasDirtyColumns"
+              @click="saveAllColumns"
+            >
+              保存字段定义{{ dirtyCount ? `（${dirtyCount}）` : '' }}
+            </el-button>
+            <el-checkbox v-model="hideDeprecated">隐藏废弃字段</el-checkbox>
           </div>
         </template>
 
-        <el-table :data="columns" border size="small" style="margin-top: 16px" max-height="520">
+        <el-table
+          :data="visibleColumns"
+          border
+          size="small"
+          class="columns-table"
+          :max-height="tableMaxHeight"
+          :row-class-name="rowClassName"
+        >
           <el-table-column prop="columnName" label="字段名" width="140" fixed />
           <el-table-column prop="dataType" label="类型(自动)" width="110" />
           <el-table-column label="业务库备注(自动)" min-width="130" show-overflow-tooltip>
@@ -59,17 +75,12 @@
               <el-input v-model="row._aliasesText" size="small" placeholder="逗号分隔" />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="80" fixed="right">
+          <el-table-column label="参与召回" width="132" align="center" fixed="right">
             <template #default="{ row }">
-              <el-button
-                link
-                type="primary"
-                :loading="savingId === row.id"
-                :disabled="!isDirty(row)"
-                @click="saveColumn(row)"
-              >
-                保存
-              </el-button>
+              <div class="recall-cell">
+                <el-switch v-model="row._recallEnabled" :disabled="row.status === 0" />
+                <span class="recall-label">{{ row._recallEnabled ? '是' : '否' }}</span>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -107,7 +118,7 @@
 
 <script setup>
 /** 字段元数据页：双列备注、人工定义编辑、有效定义预览 */
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchMe } from '../api/auth'
@@ -124,13 +135,21 @@ import {
 const route = useRoute()
 const router = useRouter()
 const tableId = Number(route.params.id)
+const tableMaxHeight = 'calc(100vh - 260px)'
 
 const loading = ref(false)
 const refreshing = ref(false)
 const tableSaving = ref(false)
-const savingId = ref(null)
+const columnsSaving = ref(false)
+const hideDeprecated = ref(false)
 const table = ref(null)
 const columns = ref([])
+
+const dirtyCount = computed(() => columns.value.filter(isDirty).length)
+const hasDirtyColumns = computed(() => dirtyCount.value > 0)
+const visibleColumns = computed(() =>
+  hideDeprecated.value ? columns.value.filter((row) => row._recallEnabled) : columns.value,
+)
 
 const tableEditVisible = ref(false)
 const tableEditForm = reactive({
@@ -168,7 +187,14 @@ function bindColumnRow(row) {
     _descriptionManual: row.descriptionManual || '',
     _columnRole: row.columnRole || '',
     _aliasesText: aliasesToText(row.aliases),
+    _recallEnabled: row.recallEnabled !== false,
   }
+}
+
+function rowClassName({ row }) {
+  if (!row._recallEnabled) return 'row-deprecated'
+  if (row.status === 0) return 'row-removed'
+  return ''
 }
 
 function effectiveDesc(row) {
@@ -182,10 +208,12 @@ function isDirty(row) {
   const origAliases = row.aliases || []
   const aliasesChanged =
     aliases.length !== origAliases.length || aliases.some((a, i) => a !== origAliases[i])
+  const recallChanged = row._recallEnabled !== (row.recallEnabled !== false)
   return (
     (row._descriptionManual || '') !== (row.descriptionManual || '') ||
     (row._columnRole || '') !== (row.columnRole || '') ||
-    aliasesChanged
+    aliasesChanged ||
+    recallChanged
   )
 }
 
@@ -260,6 +288,7 @@ async function onRefresh() {
         bound._descriptionManual = prev._descriptionManual
         bound._columnRole = prev._columnRole
         bound._aliasesText = prev._aliasesText
+        bound._recallEnabled = prev._recallEnabled
       }
       return bound
     })
@@ -270,19 +299,29 @@ async function onRefresh() {
   }
 }
 
-async function saveColumn(row) {
-  savingId.value = row.id
+async function saveAllColumns() {
+  const dirty = columns.value.filter(isDirty)
+  if (!dirty.length) return
+
+  columnsSaving.value = true
   try {
-    const updated = await updateMetaColumn(row.id, {
-      descriptionManual: row._descriptionManual.trim() || null,
-      columnRole: row._columnRole || null,
-      aliases: parseAliases(row._aliasesText),
+    const updatedList = await Promise.all(
+      dirty.map((row) =>
+        updateMetaColumn(row.id, {
+          descriptionManual: row._descriptionManual.trim() || null,
+          columnRole: row._columnRole || null,
+          aliases: parseAliases(row._aliasesText),
+          recallEnabled: row._recallEnabled,
+        }),
+      ),
+    )
+    updatedList.forEach((updated, index) => {
+      Object.assign(dirty[index], bindColumnRow(updated))
     })
-    Object.assign(row, bindColumnRow(updated))
-    ElMessage.success(`已保存 ${row.columnName}`)
-    await promptRebuild(`字段 ${row.columnName} 已更新`)
+    ElMessage.success(`已保存 ${dirty.length} 个字段`)
+    await promptRebuild(`${dirty.length} 个字段已更新`)
   } finally {
-    savingId.value = null
+    columnsSaving.value = false
   }
 }
 
@@ -327,12 +366,37 @@ function logout() {
   font-size: 18px;
 }
 .main {
-  max-width: 1200px;
+  max-width: min(1680px, calc(100vw - 32px));
   margin: 24px auto;
   padding: 0 16px;
+}
+.columns-table {
+  margin-top: 16px;
+  width: 100%;
 }
 .toolbar {
   display: flex;
   gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.recall-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 88px;
+}
+.recall-label {
+  font-size: 12px;
+  color: #606266;
+  min-width: 14px;
+}
+:deep(.row-deprecated) {
+  --el-table-tr-bg-color: #fafafa;
+  color: #909399;
+}
+:deep(.row-removed) {
+  --el-table-tr-bg-color: #fef0f0;
 }
 </style>

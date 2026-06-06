@@ -51,9 +51,9 @@ def test_all_graph_nodes_have_labels():
     expected = {
         "normalize_question",
         "extract_keywords",
-        "recall_columns",
-        "recall_metrics",
-        "recall_field_values",
+        "do_recall_columns",
+        "do_recall_metrics",
+        "do_recall_field_values",
         "merge_retrieved_info",
         "filter_tables",
         "filter_metrics",

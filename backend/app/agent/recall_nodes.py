@@ -20,8 +20,10 @@ from app.agent.context_builder import (
 from app.agent.nodes import _cfg, _span
 from app.agent.state import AskGraphState
 from app.meta.repository import MetaRepository
+from app.policy.role_policy import build_role_context_header
 from app.retrieval.hybrid import HybridRetriever
 from app.retrieval.keyword_extractor import extract_keywords
+from app.sql.whitelist import get_allowed_tables
 from config.settings import Settings
 
 
@@ -180,12 +182,22 @@ async def build_llm_context(state: AskGraphState, config: RunnableConfig) -> dic
         if merged is not None:
             repo = MetaRepository(c["copilot_session"])
             merged = await enrich_tables_from_mysql(merged, repo)
-            context_text = await build_llm_context_text(question, merged, c["copilot_session"])
+            context_text = await build_llm_context_text(
+                question,
+                merged,
+                c["copilot_session"],
+                c["ctx"],
+            )
             detail = span_detail_from_merged(merged)
             detail["chars"] = len(context_text)
             status = "success"
         else:
-            context_text = "【检索失败，仅依赖表白名单】\n"
+            ctx = c["ctx"]
+            allowed = ", ".join(sorted(get_allowed_tables())) or "（未配置）"
+            context_text = (
+                f"{build_role_context_header(ctx)}\n\n"
+                f"【检索失败，仅依赖表白名单】\n{allowed}\n"
+            )
             detail = {"chars": len(context_text)}
             status = "degraded"
 

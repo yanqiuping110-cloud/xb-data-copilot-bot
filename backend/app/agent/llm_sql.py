@@ -9,6 +9,7 @@ import re
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
+from app.policy.role_policy import LLM_JOIN_ALIAS_SYSTEM_HINT
 from config.settings import Settings
 
 _SQL_BLOCK_RE = re.compile(r"```(?:sql)?\s*([\s\S]*?)```", re.IGNORECASE)
@@ -61,6 +62,9 @@ async def generate_sql_from_llm(
     system = (
         "你是企业问数系统的 SQL 生成助手，只为智慧体育业务库生成只读查询。"
         "严格遵守上下文中的表白名单与 MySQL 5.7 语法。"
+        "SELECT 列别名优先使用中文（如 AS 年份、AS 总人数）；"
+        "仅当用户明确要求英文表头时才使用英文别名。"
+        f"{LLM_JOIN_ALIAS_SYSTEM_HINT}"
     )
     user_parts = [context_text, "", f"用户问题：{question}"]
     if correction_hint and previous_sql:

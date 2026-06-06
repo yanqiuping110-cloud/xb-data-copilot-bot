@@ -213,6 +213,7 @@ async def create_table(
                 description_manual=c.description_manual,
                 column_role=c.column_role,
                 aliases=c.aliases,
+                recall_enabled=c.recall_enabled,
             )
             for c in body.columns
         ]
@@ -338,11 +339,15 @@ async def update_column(
         from app.meta.exceptions import MetaError
 
         raise MetaError("COLUMN_NOT_FOUND", "字段元数据不存在", 404)
+    recall_enabled = None
+    if body.recall_enabled is not None:
+        recall_enabled = 1 if body.recall_enabled else 0
     await repo.update_column_manual(
         column_id,
         description_manual=body.description_manual,
         column_role=body.column_role,
         alias_json=dump_alias_json(body.aliases) if body.aliases is not None else None,
+        recall_enabled=recall_enabled,
     )
     await copilot.commit()
     updated = await repo.get_column(column_id)

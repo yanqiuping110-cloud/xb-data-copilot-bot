@@ -4,7 +4,7 @@
 > **目标**：产品/运营/学校管理员用自然语言查 MySQL 数据，减少固定报表开发；第一期不上渠道商。  
 > **技术路线**：**纯 Python** 问数服务 + **自研用户/权限表**（不依赖 `youplus-base-api`；**不修改** `youplus-base`、`sport-plantform`）  
 > **运行环境**：**MySQL 5.7 在宿主机/公司库**；**Elasticsearch + Embedding 在 Docker/宿主机**；本机先调试，配置区分 `development` / `production` 后上公司环境  
-> **周期**：约 **6 周**（业余开发）：前 2 周地基与 LangGraph 基线已完成；**第 3～6 周**聚焦元数据知识库、语义库、混合召回与多阶段推理；按企业可观测、可审计、可降级标准交付 MVP  
+> **周期**：约 **8 周**（业余开发）：前 2 周地基与 LangGraph 基线已完成；**第 3～5 周**元数据、混合召回、多阶段 LangGraph；**第 6 周** Agent Memory（**仅 `user_id` 维度，与权限解耦**）；**第 7 周**动态数据权限（DataScope + 表/字段策略）；**第 8 周**评测、试点与 MVP 文档；按企业可观测、可审计、可降级标准交付  
 > **问数核心路线**：**元数据知识库 + 语义库（前端可配置）→ 向量 + 全文混合召回 → 多阶段 LangGraph 推理 → LLM 生成 SQL**（L1 样例仅作高频快路径，不追求全覆盖）
 
 ---
@@ -186,7 +186,9 @@
   - SQL 策略：`sch_id = active_sch_id`（单校问数，与现有报表 `setSchId` 一致）；二期可加「跨绑定校汇总」→ `sch_id IN (...)`。
 - **禁止**在 `/ask` body 里传 `schId` 作为权限依据；`active_sch_id` 只能来自服务端会话/JWT 声明（切换接口校验必须在绑定列表内）。
 
-### 2.3 权限策略表（`PolicyService`）
+### 2.3 权限策略表（`PolicyService` · 当前 MVP 已落地）
+
+> **演进说明**：下列为第 1～5 周已实现的 **角色 + sch_id 硬编码** 模型；**第 7 周**替换为 §2.6 动态 DataScope，并通过适配层兼容现有 SCHOOL 行为。
 
 ```text
 role == ADMIN      → 不注入 sch_id 条件（全平台业务数据，仍受表白名单约束）
@@ -327,6 +329,47 @@ data-copilot-bot (Python FastAPI)
 }
 ```
 
+### 2.6 动态数据权限（第 7 周目标 · 已拍板产品/安全决策）
+
+> **动机**：`sch_id` 只是业务库众多隔离维度之一；运营可能需要「3 个地区」或「6 所学校」等 **自由组合** 授权。权限拆为 **功能 RBAC**（`UserRole`）与 **数据/资源策略**（Grant）两层，互不硬编码。
+
+#### 2.6.1 已确认决策
+
+| # | 决策 | 说明 |
+|---|------|------|
+| 1 | **默认无数据** | 新建运营/学校账户 **无任何业务行级权限**，须超管在后台 **逐个授权** 后才可问数；种子 `ADMIN` 保留显式 `ALL` 或内置 bypass（仅超管） |
+| 2 | **跨维度 AND** | 用户同时拥有多个 **已注册维度** 的 grant 时，SQL 须同时满足各维度约束（AND）；**同一维度**内多值为 **IN** |
+| 3 | **一次问数** | 同一维度多值在 **单条 SQL** 内用 `IN (...)` 完成，不做分次问再合并 |
+| 4 | **敏感列 deny-list** | 字段默认可见；在 meta/授权中按 **`表名 + 字段名`** 配置 deny（名称来自 `copilot_column_meta`，**非代码枚举**） |
+| 5 | **零硬编码字段名** | 代码与 Prompt **不出现** `sch_id` / `region_id` 等字面量；行级维度、表绑列、列 deny 均读 **`copilot_scope_dimension` / `table_scope_binding` / `column_deny`** |
+
+#### 2.6.2 三正交维度
+
+| 维度 | 回答的问题 | 第 7 周实现 |
+|------|------------|-------------|
+| **功能 RBAC** | 能否问数、管用户、管 meta | 保留 `ADMIN` / `OPERATOR` / `SCHOOL` |
+| **DataScope（行级）** | 能看哪些行 | `copilot_user_data_grant`（**dimension_code** + IN 值；code 来自维度注册表） |
+| **ResourcePolicy（表/字段）** | 能查哪些表、哪些列 | 表 allow grant + 列 deny（**表名/列名均来自 meta 配置**） |
+
+业务上的「学校 / 地区 / 渠道」等仅为 **运营在后台注册的 dimension 实例**（如 `code=school`、`code=region`），**不是**代码里的固定字段；每张表通过 **`table_scope_binding`** 声明「该维度在本表对应哪一列」。
+
+#### 2.6.3 与 Agent Memory 的边界（第 6 / 7 周分工）
+
+| 模块 | 隔离键 | 第 6 周 | 第 7 周 |
+|------|--------|---------|---------|
+| **Agent Memory** | 仅 `user_id`（+ session 归属） | 实现；**不读 grant、不分 sch** | **不改表结构**；避免与权限重构耦合 |
+| **DataScope / SQL 网关** | `user_id` + grant | 仍用 MVP `role_policy` | 统一 `EffectivePolicy` + Scope 注入 |
+
+Memory 中的 `last_sql` 等槽位 **不得** 绕过 Scope 校验；第 7 周只改 **问数权限链路**，不回溯改 Memory DDL/API。
+
+#### 2.6.4 运行时原则（与 MVP 一致）
+
+- **永远不信任** 前端 body 或 LLM 输出的 scope 值；只信任 **DB grant + JWT active_scope**。
+- 行级条件优先 **服务端 AST 注入/校验**，不只靠 Prompt 约束。
+- 无 grant 用户问数 → **403 / 明确错误码**（非空结果）。
+
+详细 DDL、节点与 API 见 **§11.6**。
+
 ---
 
 ## 3. 系统架构
@@ -392,6 +435,8 @@ data-copilot-bot/
 │   ├── ROLE_PERMISSION.md           # 待写
 │   ├── TABLE_WHITELIST.md           # 初始表白名单参考（逐步迁入 copilot_table_meta）
 │   ├── META_KNOWLEDGE.md            # 元数据/语义库字段说明与维护规范
+│   ├── MEMORY_OPS.md                # Agent Memory 运营规范（第 8 周）
+│   ├── DATA_SCOPE.md                # 动态数据权限运营规范（第 7～8 周）
 │   └── EVAL_QUESTIONS.md            # 待写
 ├── backend/                         # Python 问数 API
 │   ├── app/
@@ -399,8 +444,9 @@ data-copilot-bot/
 │   │   ├── api/                     # auth、admin_users、ask、admin_meta…
 │   │   ├── core/                    # context、security
 │   │   ├── auth/
-│   │   ├── policy/
+│   │   ├── policy/                  # role_policy + effective_policy / scope（第 7 周）
 │   │   ├── agent/                   # LangGraph 多阶段节点
+│   │   ├── memory/                  # Agent Memory：会话槽位、用户偏好（第 6 周）
 │   │   ├── meta/                    # 元数据/语义库 Repository + 索引构建
 │   │   ├── retrieval/               # 混合召回（向量 + 全文 + MySQL 补全）
 │   │   ├── db/
@@ -458,13 +504,17 @@ def require_school_scope(ctx: UserContext) -> int:
 ## 6. LangGraph 流水线（多阶段推理 + L1 快路径）
 
 > 对标电商问数「检索 → 过滤 → 生成 → 校验 → 执行」；在保留企业 **L1 样例快路径** 与 **sch_id 策略** 的前提下扩展节点。  
-> **第 2 周基线**（7 节点）已实现；**第 5 周**将 `retrieve_context` 拆分为下列召回/合并子阶段。
+> **第 2 周基线**（7 节点）已实现；**第 5 周**将 `retrieve_context` 拆分为下列召回/合并子阶段；**第 6 周**前置 Agent Memory（§11.5）；**第 7 周**在问数入口加载 `EffectivePolicy` 并改造 `validate_sql` / `apply_policy`（§11.6）。
 
-### 6.1 目标流水线（第 5 周完整版）
+### 6.1 目标流水线（第 8 周完整版）
 
 | 阶段 | 节点 | 职责 | 失败处理 |
 |------|------|------|----------|
 | 预处理 | `normalize_question` | 清洗、截断长度 | 记 `copilot_ask_span` |
+| **记忆** | **`load_session_memory`** | **读 session 槽位（P0，§11.5）** | **Fail-open** |
+| **记忆** | **`load_user_preference`** | **用户显式偏好（P2）** | **Fail-open** |
+| **记忆** | **`resolve_references`** | **指代消解（P1，可选）** | **失败则原问句不变** |
+| **权限** | **`load_effective_policy`** | **解析 grant → EffectivePolicy（§11.6）** | **Fail-closed：无 grant → 403** |
 | 召回 | `extract_keywords` | LLM/规则抽取问句关键词 | 降级为整句检索 |
 | 召回 | `recall_columns` | 字段向量召回（ES） | 空结果仍继续 |
 | 召回 | `recall_metrics` | 指标向量召回（ES） | 空结果仍继续 |
@@ -475,15 +525,17 @@ def require_school_scope(ctx: UserContext) -> int:
 | 上下文 | `build_llm_context` | 拼表说明、JOIN 提示、指标公式、取值映射 | 无检索仍用白名单兜底 |
 | 快路径 | `match_curated` | L1 样例命中则 **跳过 LLM 生成** | 命中 → `degrade_level=1` |
 | 生成 | `generate_sql` | LLM 生成 SQL | 超时/失败 → L2 精简重试 1 次 |
-| 校验 | `validate_sql` | SELECT only、表白名单、LIMIT | 失败 → 可选 `correct_sql` 1 次 → L3 |
-| 策略 | `apply_policy` | 按角色注入 `sch_id`、LIMIT | 失败 → L3 |
+| 校验 | `validate_sql` | SELECT only、**用户可见表**、**列 deny-list**、LIMIT | 失败 → `correct_sql` 1 次 → L3 |
+| 策略 | `apply_policy` | **Scope 注入/校验**（多维度 AND、同维 IN）、参数绑定 | 失败 → L3 |
 | 执行 | `execute_sql` | 只读库执行，超时 10s，max 5000 行 | timeout → 记指标 |
 | 回答 | `format_answer` | 表格 + 一句话总结 | 流式可选（Phase 2） |
 
 **路由要点**：
 
-- `match_curated` 在 `build_llm_context` 之后：L1 命中则直接进入 `validate_sql`。
+- `match_curated` 在 `build_llm_context` 之后：L1 命中则直接进入 `validate_sql`；**L1 命中时不注入会话 Memory**（第 6 周）。
 - `validate_sql` 失败且 `retry_count < 1` 时走 `correct_sql`（带错误信息重生成），仍失败则 L3 拒答。
+- Memory 节点 **Fail-open**；**权限节点 Fail-closed**（无 grant 拒绝问数，不降级为空查全库）。
+- **第 6 周 Memory 仅以 `user_id` 隔离**，不读取 grant；第 7 周 Scope 与 Memory **独立演进**（§2.6.3）。
 
 ### 6.2 当前已落地（第 2 周基线，待演进）
 
@@ -493,6 +545,8 @@ def require_school_scope(ctx: UserContext) -> int:
 | `match_curated` | L1 + MVP | 保留；样例来源含前端维护的 `copilot_sql_example` |
 | `generate_sql` | 单次 LLM + L2 重试 | 接入 `build_llm_context` 结构化 Prompt |
 | 其余节点 | 已实现 | 增加 `correct_sql`（第 5 周） |
+| Agent Memory | 未实现 | 第 6 周：§11.5（**与权限解耦**） |
+| EffectivePolicy / Scope | MVP `role_policy` | 第 7 周：`load_effective_policy` + Scope 注入（§11.6） |
 
 **任务完成率**：`format_answer` 成功且 `execute_sql` 无异常 / 总请求。
 
@@ -772,7 +826,7 @@ L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **1
 6. 本校跑步项目上周打卡人次？（字段取值召回）  
 7. 对比本月跳绳与跑步参与人数？（多指标 + 过滤）  
 
-**月验收**：开放域评测完成率 ≥ **60%**（第 4 周基线 70% 针对含 L1 命中；第 6 周单独统计 `degrade_level=0` 路径）。
+**月验收**：开放域评测完成率 ≥ **60%**（第 4 周基线 70% 针对含 L1 命中；**第 8 周**单独统计 `degrade_level=0` 路径）。
 
 ---
 
@@ -945,9 +999,247 @@ L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **1
 
 ---
 
-## 12. 开发计划（6 周）
+## 11.5 Agent Memory 设计（第 6 周）
 
-> **第 1～2 周已完成**（见 [PROGRESS.md](./PROGRESS.md)）。以下 **第 3～6 周** 为当前主攻：元数据知识库、语义库、前端配置、混合召回、多阶段推理。
+> **背景**：当前每轮 `/ask` 为无状态单轮——`session_id` 仅写入 `copilot_ask_turn` 做分组，**不会**读回历史；前端 `messages` 仅 UI 展示。第 6 周补齐 **P0～P3** 记忆能力（**不做 P4 向量 episodic memory**，成本与治理复杂度超出 MVP 范围）。
+
+### 11.5.1 记忆分层与边界（必读）
+
+| 层级 | 名称 | 存储 | 生命周期 | 进 Prompt 的内容 |
+|------|------|------|----------|------------------|
+| L0 | 请求上下文 | 进程内 `AskGraphState` + JWT | 单次请求 | 已有：召回、角色头、策略约束 |
+| L1 | 会话短期记忆 | `copilot_ask_turn`（按 `session_id` 读最近 N 轮） | 会话级；可配置 TTL | **结构化槽位**：`last_sql`、`tables_used`、问法摘要（非 raw 全量 chat） |
+| L2 | 用户偏好记忆 | 新表 `copilot_user_preference` | 跨会话；用户可删 | **显式**偏好：默认时间范围、常用维度、列别名习惯等 |
+| L3 | 组织级知识 | 已有 `copilot_sql_example` + badcase 审核入库 | 长期 | 审核通过的「问法 → SQL」样例（扩展现有 L1 链路） |
+
+**与数据权限的关系（第 6 周边界 · 必读）**：
+
+- Agent Memory **仅以 `user_id` 为隔离维度**（及 `session_id` 归属校验）；**不读取** grant、**不涉及**任何业务表字段或 scope dimension。
+- 第 6 周 **故意不接入** 权限体系，避免与第 7 周动态权限重构耦合；问数 SQL 仍走当时已落地的 MVP `role_policy`（第 7 周再统一替换为 `EffectivePolicy`）。
+- Memory 槽位中的 `last_sql` / `tables_used` 仅作 **问法指代**；第 7 月起每次执行仍须 **独立** 通过 Scope 注入与 sql_guard，**不得**因历史 SQL 绕过授权。
+- Memory 内容 **禁止**写入原始结果行数据（防 PII 扩散）；仅存问句、SQL、表名、行数等元信息。
+- **第 6 周文档与实现均不出现** 具体 scope 字段名（如 sch/region）；维度与列权限一律留待第 7 周 **配置驱动** 实现。
+
+### 11.5.2 鲁棒性设计（企业必选）
+
+| 原则 | 实现要求 |
+|------|----------|
+| **Fail-open** | 读会话/偏好/摘要任一环节失败 → **跳过 Memory 继续问数**，记 `copilot_ask_span`（`memory_skipped=true` + 原因），**不**升级为 5xx |
+| **Fail-closed（安全）** | Memory **永远不能**覆盖：SELECT-only、LIMIT；**不**负责行级/表级权限（属第 7 周 Scope） |
+| **归属校验** | `load_session_memory` 必须验证 `session_id` 下历史 turn 的 `user_id == ctx.user_id`；否则忽略并记 audit |
+| **Token 预算** | 会话槽位 + 摘要 + 偏好合计 **≤ `MEMORY_PROMPT_MAX_CHARS`（默认 2000）**；超出截断，优先级：**当前问句 > 策略/表白名单（第 7 周）> 槽位 > 偏好 > 摘要** |
+| **条数上限** | 会话最多读 **最近 3 轮**成功 turn；偏好 key 白名单（防垃圾 key 灌 Prompt） |
+| **Feature Flag** | `MEMORY_ENABLED`、`SESSION_MEMORY_ENABLED`、`USER_PREFERENCE_ENABLED` 独立开关；默认 development 全开，production 可灰度 |
+| **L1 快路径** | `match_curated` 命中时 **不注入**会话 Memory（避免样例 SQL 与历史 SQL 冲突）；仍写 turn 供下轮使用 |
+| **降级标记** | `degrade_level` 与 Memory 独立；Memory 加载失败 **不**抬高 degrade_level |
+| **可观测** | 新增 span 节点 `load_session_memory` / `load_user_preference`；`trace_log` 记录是否注入、截断字节数 |
+| **可删除** | 用户提供 `DELETE /api/v1/memory/preferences` 与「清空当前会话记忆」API（逻辑：前端换新 `sessionId` + 可选服务端标记 session 失效） |
+
+### 11.5.3 数据模型（DDL 草案）
+
+**复用** `copilot_ask_session`（第 6 周起 **写入**：首问 upsert；不再仅 DDL 占位）：
+
+```sql
+-- session 仅作 user 级分组；可选 context_snapshot_json 存审计快照（不参与 memory 过滤）
+INSERT INTO copilot_ask_session (session_id, user_id, role, context_snapshot_json, ...)
+ON DUPLICATE KEY UPDATE ...
+```
+
+> `context_snapshot_json` 为可选审计字段（如当时 JWT 上下文），**不参与** Memory 读写与过滤逻辑。
+
+**新增** `copilot_user_preference`（V007）：
+
+| 字段 | 说明 |
+|------|------|
+| `user_id` | 主隔离键 |
+| `pref_key` | 白名单 key，如 `default_time_range`、`preferred_grain` |
+| `pref_value` | JSON |
+| `source` | `explicit`（用户/运营设置）/ `inferred`（MVP **仅 explicit 进 Prompt**） |
+| `updated_at` | |
+
+**新增** `copilot_session_summary`（可选，P1）：
+
+| 字段 | 说明 |
+|------|------|
+| `session_id` | |
+| `user_id` | |
+| `summary_text` | LLM 或规则压缩的多轮摘要 |
+| `slot_json` | `{ "last_sql", "last_tables", "last_question", ... }` |
+| `turn_count` | |
+
+### 11.5.4 LangGraph 节点变更
+
+在 `normalize_question` 之后、`extract_keywords` 之前插入（Memory 关闭时 no-op 透传）：
+
+```
+load_session_memory → load_user_preference → [可选 resolve_references] → extract_keywords → ...
+```
+
+- **`load_session_memory`**：按 `session_id` + `user_id` 读最近 N 轮；输出 `session_slots`、`session_summary`（P1）。
+- **`load_user_preference`**：读 `copilot_user_preference`（explicit only）；输出 `user_preferences`。
+- **`resolve_references`**（P1 轻量）：规则识别「刚才/同上/按刚才的维度」→ 改写 `normalized_question` 或附加 hint；**失败则原问句不变**。
+- **`build_llm_context`**：新增「【会话上下文】」「【用户偏好（显式）】」小节；**排在**角色头与表白名单之后。
+- **`generate_sql`**：Prompt 中会话信息以 **结构化槽位** 为主，避免粘贴大段对话。
+
+### 11.5.5 API 补充
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/v1/memory/preferences` | 当前用户偏好列表 |
+| `PUT /api/v1/memory/preferences` | 批量 upsert（key 白名单校验） |
+| `DELETE /api/v1/memory/preferences` | 清空或按 key 删除 |
+| `POST /api/v1/ask` | 已有 `sessionId`；响应可选返回 `sessionSummary`（调试用，production 可关） |
+
+### 11.5.6 不测 P4 的说明
+
+**不做**：问句/对话的向量 episodic memory（pgvector / ES 存全量历史 embedding）。理由：存储与召回成本高、难审计、问数场景 **SQL 槽位** ROI 更高。若后续需要，放入 Phase 2 且须独立评测集。
+
+---
+
+## 11.6 动态数据权限设计（第 7 周）
+
+> **目标**：权限 **完全配置驱动**——行级维度、表↔列绑定、表 allow、列 deny 均由运营在 meta/用户管理维护；**代码只认 dimension_code + table_name + column_name**，不写死任何业务字段名。产品决策见 **§2.6.1**。
+
+### 11.6.0 配置驱动原则（零硬编码）
+
+| 配置项 | 存储 | 谁维护 | 代码行为 |
+|--------|------|--------|----------|
+| 范围维度定义 | `copilot_scope_dimension` | 超管/运营 | 只按 `code` 引用，如 `school`、`region`（**自定义**） |
+| 表 ↔ 维度列 | `copilot_table_scope_binding` | meta 表管理页 | 每表声明「维度 X 对应列 `column_name`」（来自 introspect） |
+| 用户行级授权 | `copilot_user_data_grant` | 用户管理 | `dimension_code` + `values_json`，同维 IN、跨维 AND |
+| 用户表授权 | `copilot_user_table_grant` | 用户管理 | `table_name` 来自 `copilot_table_meta` |
+| 列 deny | `copilot_column_deny` | meta 或用户管理 | `(table_name, column_name)` 来自字段 meta |
+| 当前上下文 | JWT `active_scopes` | 用户切换 | `{"school":1140}` 键为 **dimension_code**，值须在 grant 内 |
+
+**禁止**：在 `role_policy` / `sql_guard` / Prompt 模板中写死 `sch_id`、`region_id` 等；MVP 适配层仅 **读取** 已注册维度（如种子数据注册 `code=school` → 列 `sch_id`）完成迁移，而非在 Python 里 `if column == "sch_id"`。
+
+**示例（说明用，非代码常量）**：运营注册维度 `school` 绑定列 `sch_id`，给用户 grant `[1140,1220,1301]` → 运行时生成 `sch_id IN (:scope_school_0,…)`；另注册 `region` 绑定 `area_code` → `area_code IN (...)`；两维同时授权则 **AND**。
+
+### 11.6.1 与第 6 周 Memory 的隔离
+
+| 项 | Agent Memory（第 6 周） | DataScope（第 7 周） |
+|----|-------------------------|----------------------|
+| 隔离键 | `user_id` | `user_id` + grant |
+| 是否改 Memory 表/API | — | **否** |
+| 问数失败策略 | Fail-open | **Fail-closed**（无 grant → 403） |
+| Prompt 注入 | 会话槽位、用户偏好 | EffectivePolicy 摘要、可见表、Scope  hint |
+
+### 11.6.2 数据模型（DDL 草案 · V008）
+
+**`copilot_scope_dimension`**（范围维度注册 · **运营可增删改**）：
+
+| 字段 | 说明 |
+|------|------|
+| `code` | 唯一标识，如 `school`、`region`、`channel`（**非 DB 列名**） |
+| `display_name` | 展示名：学校 / 地区 / 渠道 |
+| `value_type` | `int` / `string` |
+| `status` | 启用/停用 |
+
+**`copilot_table_scope_binding`**（表 ↔ 维度 ↔ **物理列**，替代 `sch_id_column` 单字段）：
+
+| 字段 | 说明 |
+|------|------|
+| `table_id` | FK `copilot_table_meta` |
+| `dimension_code` | FK `copilot_scope_dimension.code` |
+| `column_name` | 该表上用于过滤的 **实际列名**（introspect 下拉选择） |
+
+**`copilot_user_data_grant`**（行级 · 默认无记录 = 无数据）：
+
+| 字段 | 说明 |
+|------|------|
+| `user_id` | |
+| `dimension_code` | |
+| `operator` | MVP：`in`（多值 OR 于同维）；`all` 仅 ADMIN bypass |
+| `values_json` | 该维度允许的值列表（类型由 `value_type` 决定） |
+| `created_by` | 超管 id |
+
+**`copilot_user_table_grant`**（表级 allow · 无记录 = 不可查该表）：
+
+| 字段 | 说明 |
+|------|------|
+| `user_id` | |
+| `table_name` | 须在 `copilot_table_meta` 已注册 |
+| `effect` | `allow` |
+
+**`copilot_column_deny`**（字段 deny-list · **动态表列**）：
+
+| 字段 | 说明 |
+|------|------|
+| `user_id` | NULL = 全局敏感列策略 |
+| `table_name` | |
+| `column_name` | 须存在于 `copilot_column_meta` |
+| `reason` | 审计说明 |
+
+**`copilot_table_meta.sch_id_column`**：第 7 周起 **废弃写入新逻辑**；已有数据迁移到 `table_scope_binding`（如维度 `school` → 原 `sch_id_column` 值）。UI 改为「维度绑定」多行配置。
+
+**迁移**：`copilot_sys_user_school` → 在维度 `school`（或运营定义的 code）下写入 `user_data_grant` + `table_grant`；**不假设** DB 列名必须为 `sch_id`。
+
+**`active_scopes`（JWT）**：多值 grant 且需「当前上下文」时，`active_scopes: { "<dimension_code>": <value> }`，每个键须在对应 grant 的 IN 列表内。
+
+### 11.6.3 `EffectivePolicy` 与适配层
+
+```text
+app/policy/effective_policy.py
+  load_effective_policy(user_id) -> EffectivePolicy
+  EffectivePolicy:
+    data_grants: dict[dimension_code, list[values]]   # 空 → 无数据（非 ADMIN bypass）
+    table_bindings: dict[table, list[(dimension_code, column_name)]]  # 来自 meta
+    allowed_tables: frozenset[str]
+    denied_columns: dict[table, frozenset[column_name]]
+    scope_sql_hints: str                                # 动态拼 Prompt，无固定列名
+    is_admin_bypass: bool
+```
+
+- 第 7 周第 1 步：`role_policy` **适配**为读「已注册维度 + 绑定列」生成策略（兼容 MVP 单测）；Python 内 **无** 业务列名字面量。
+- `UserContext` 增加 `effective_policy`；JWT 逐步由 `active_sch_id` 迁为 **`active_scopes: dict[str, Any]`**（与 Memory 无关）。
+
+### 11.6.4 Scope 执行（sql_guard + apply_policy）
+
+1. **表**：AST 表集合 ⊆ `allowed_tables`。
+2. **列 deny-list**：对 AST 中每个 `(table, column)` 引用查 `denied_columns`（列名来自 meta）→ `COLUMN_DENIED`。
+3. **行级 AND + IN（配置驱动）**：
+   - 遍历 SQL 涉及表 → 读该表全部 `table_scope_binding`；
+   - 对每个 `dimension_code`，若用户有 grant 值列表 → 对该 **绑定列** 要求可证明的 `IN (...)` 或由 **ScopeInjector** 注入 `AND <column> IN (:scope_<dimension_code>_…)`；
+   - 多 dimension 绑定同一表 → 条件 **AND**；
+   - 占位符命名 **`scope_{dimension_code}`**，不写死列名。
+4. **参数绑定**：grant 外的字面量 → 校验失败；**禁止** LLM 绕过 IN 列表。
+
+**ADMIN**：`is_admin_bypass` 或显式 `all` grant；其余角色 **无 grant 不可问数**。
+
+### 11.6.5 召回与 Prompt
+
+- `HybridRetriever` / `build_llm_context`：仅召回 **allowed_tables** 下字段；deny 列不出现在 Prompt。
+- 替换 `build_role_context_header` 中 MVP sch 硬编码 → `【数据范围】`（按 **EffectivePolicy 动态列名** 生成）+ `【可见表】` + `【禁止字段】`。
+- L1 样例仍须过 Scope 校验。
+
+### 11.6.6 管理 API 与前端
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| CRUD | `/api/v1/admin/meta/scope-dimensions` | 维度注册（code/display_name/value_type） |
+| CRUD | `/api/v1/admin/meta/tables/{id}/scope-bindings` | 表 ↔ 维度 ↔ 列（introspect 列下拉） |
+| CRUD | `/api/v1/admin/meta/column-deny` | 全局/用户列 deny |
+| GET | `/api/v1/admin/users/{id}/grants` | 数据/表/列 deny 汇总 |
+| PUT | `/api/v1/admin/users/{id}/data-grants` | 按 **dimension_code** 覆盖 IN 值列表 |
+| PUT | `/api/v1/admin/users/{id}/table-grants` | 允许访问的表列表 |
+
+前端：**meta** 增「范围维度」「表维度绑定」「敏感列 deny」；**用户管理** 增「数据授权」（选维度 → 填值列表 → 选表），**不出现**写死的 sch/region 表单字段名。
+
+### 11.6.7 鲁棒性（权限 Fail-closed）
+
+| 原则 | 要求 |
+|------|------|
+| 默认拒绝 | 无 `table_grant` / 无 `data_grant` → **403 NO_DATA_SCOPE**，不返回空表糊弄 |
+| 不信任 LLM | grant 外维度字面量 → 校验失败或 strip |
+| 与 Memory 解耦 | 不改 Memory 表；Memory fail-open 不变 |
+| 审计 | `copilot_audit_log` 增加 `effective_grants_hash` 或 dimension 快照 |
+| 单测 | **配置两个自定义 dimension** + 多值 IN + 跨维 AND + 列 deny + 越权表 + 无 grant 403（**单测数据用 fixture 维度名，不依赖生产列名**） |
+
+---
+
+## 12. 开发计划（8 周）
+
+> **第 1～2 周已完成**（见 [PROGRESS.md](./PROGRESS.md)）。**第 3～5 周**：元数据、混合召回、LangGraph。**第 6 周**：Agent Memory（**仅 user 维度**）。**第 7 周**：动态数据权限。**第 8 周**：评测、试点、MVP。
 
 ### 第 1～2 周：地基 + LangGraph 基线 ✅
 
@@ -1003,21 +1295,78 @@ L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **1
 
 ---
 
-### 第 6 周：评测 + 试点 + 文档
+### 第 6 周：Agent Memory（多轮会话 + 用户偏好 + 样例闭环）
 
 | 天 | 任务 | 交付物 |
 |----|------|--------|
-| 1～2 | `EVAL_QUESTIONS.md` 15～30 条 + `replay_eval.py`（分 L1 / LLM 路径统计） | 基线报告 |
-| 2～3 | 限流、错误码统一；`META_KNOWLEDGE.md` 维护规范 | 运营文档 |
-| 3～4 | 周报 SQL：P95、降级率、召回 fallback 率 | `WEEKLY_METRICS` 模板 |
-| 4～5 | 部署文档、`.env.example` 补 Embedding/ES 变量 | 同事可复现 |
-| 5～7 | 修 Top5 badcase（优先补 meta/指标，而非堆 L1） | **MVP 演示** |
+| 1 | `V007__agent_memory.sql`：`copilot_user_preference`、可选 `copilot_session_summary`；`copilot_ask_session` 首问 upsert | 迁移脚本 |
+| 1～2 | `app/memory/`：`MemoryService`（读 turn 槽位、fail-open）、`session` 归属校验单测 | 单测：越权 session 忽略 |
+| 2 | LangGraph 节点 `load_session_memory`；配置 `SESSION_MEMORY_ENABLED`、`MEMORY_PROMPT_MAX_CHARS` | span + trace_log |
+| 2～3 | **P0** 结构化槽位注入 `build_llm_context` / `generate_sql`（`last_sql`、`tables_used`、上轮问句） | 多轮指代 spot check |
+| 3 | **P1** `resolve_references` 规则节点（刚才/同上/同样维度）；失败透传 | 单测：无指代时不改写 |
+| 3～4 | **P1** `copilot_session_summary` + 异步/同步摘要更新（超 3 轮时压缩） | Token 截断单测 |
+| 4～5 | **P2** `GET/PUT/DELETE /api/v1/memory/preferences`；key 白名单；**仅 explicit 进 Prompt** | API + 单测 |
+| 5 | 前端：问数页「偏好设置」抽屉（默认时间范围等）；「新对话」重置 `sessionId` | 用户可自助 |
+| 5～6 | **P3** badcase 审核 → 样例入库流程（运营在 badcase 页一键「转为 L1 样例」草稿） | 闭环文档 |
+| 6 | L1 命中路径 **跳过** Memory 注入；Feature Flag 组合测试 | 路由单测 |
+| 6～7 | **鲁棒性**：DB 超时/空 session/超长历史/Memory 全关；多轮评测子集 5～8 条写入 `EVAL_QUESTIONS.md` | 回归通过 |
 
-**月验收标准（第 6 周末）**：
+**周验收标准（第 6 周末）**：
 
-- [ ] 三类账户可用；学校账户**零串校**  
-- [ ] 元数据/语义库可**前端完整维护**；索引可一键重建  
-- [ ] 混合召回链路 span 完整；ES 故障可 keyword 降级  
+- [ ] 同 `sessionId` 下 follow-up 问句 **结构化槽位**可注入且 span 可见  
+- [ ] Memory 任意环节失败时问数 **仍成功或按原逻辑降级**，不出现 500  
+- [ ] Memory **仅以 `user_id` 隔离**；**不读 grant、不涉及任何业务字段/dimension**；第 7 周权限重构 **不改** Memory DDL/API  
+- [ ] 越权 `session_id`（他人 session）**零注入**  
+- [ ] L1 命中时不注入会话 Memory  
+- [ ] 偏好 API 可用；inferred 类偏好 **不进** Prompt  
+- [ ] Prompt Memory 总字符 ≤ 配置上限  
+
+---
+
+### 第 7 周：动态数据权限（DataScope + 表/字段策略）
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1 | `V008__data_scope.sql`：维度/表绑列/行级 grant/表 grant/列 deny；**无业务列名字段** | 迁移脚本 |
+| 1 | `/admin/meta/scope-dimensions` CRUD；种子 **示例** 维度（如 `school`→列由 binding 指定，非 DDL 写死） | 维度管理 API |
+| 1～2 | `EffectivePolicy` + `load_effective_policy`；`ScopeInjector` **只读 binding** | `app/policy/effective_policy.py` |
+| 2 | 问数入口加载 policy；**无 grant → 403 NO_DATA_SCOPE** | 单测：新 OPERATOR 默认不可问数 |
+| 2～3 | `sql_guard`：per-user 表 allow + **动态列 deny** AST 校验 | `COLUMN_DENIED` |
+| 3～4 | `apply_policy`：按 binding **动态列名** 注入/校验（跨维 AND、同维 IN） | 单测：fixture 两维度 + 一次 IN |
+| 4 | meta 表详情「维度绑定」UI（维度下拉 + introspect 列下拉） | 替代单字段 `sch_id_column` 编辑 |
+| 4～5 | 召回 / `build_llm_context` 按 allowed_tables；Prompt **动态** scope 摘要 | 无硬编码列名 |
+| 5～6 | 用户管理「数据授权」：选 dimension_code + 值 + 表 | 超管逐个授权 |
+| 6 | 迁移：`copilot_sys_user_school` → 映射到 **已注册 school 维度** 的 grant | 回归 SCHOOL |
+| 6～7 | JWT `active_scopes`；列 deny 管理；**DATA_SCOPE.md** | 与 Memory 零交叉 |
+
+**周验收标准（第 7 周末）**：
+
+- [ ] **默认无数据**：无 grant 账户问数 **403**  
+- [ ] 运营可配置 **任意已注册维度** 的多值 IN（如维度 A 三个值、维度 B 六个值），**一次问数** SQL 合法执行  
+- [ ] 多 dimension 同时授权 → 绑定列条件 **AND**  
+- [ ] **列 deny-list**（meta 配置表列名）→ SELECT 命中则拒绝  
+- [ ] 代码库 **grep 无** 问数权限路径上的 `sch_id`/`region_id` **字面量**（适配/MVP 遗留除外，须标注 `@deprecated`）  
+- [ ] Memory 模块 **零变更**；Memory 单测仍绿  
+- [ ] SCHOOL 迁移后在 grant 范围内行为与 MVP 等价  
+
+---
+
+### 第 8 周：评测 + 试点 + 文档
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1～2 | `EVAL_QUESTIONS.md` 15～30 条 + `replay_eval.py`（L1 / LLM / Memory / **Scope** 路径） | 基线报告 |
+| 2～3 | 限流、错误码统一；`META_KNOWLEDGE.md`；`MEMORY_OPS.md`；**`DATA_SCOPE.md`** | 运营文档 |
+| 3～4 | 周报 SQL：P95、降级率、召回 fallback、memory_skipped、**no_grant 403 率** | `WEEKLY_METRICS` 模板 |
+| 4～5 | 部署文档、`.env.example` 补 Memory + **Policy** 变量 | 同事可复现 |
+| 5～7 | 修 Top5 badcase；含多轮 Memory + **多维度 Scope（配置驱动）** 场景 | **MVP 演示** |
+
+**月验收标准（第 8 周末 · MVP）**：
+
+- [ ] 动态权限：默认拒绝 + 超管授权 + AND/IN + 列 deny（§2.6.1）  
+- [ ] Agent Memory P0～P3 达标（第 6 周，与权限解耦）  
+- [ ] 元数据/语义库可前端完整维护；索引可一键重建  
+- [ ] 混合召回 span 完整；ES 故障可 keyword 降级  
 - [ ] 评测集总完成率 ≥ 70%；**纯 LLM 路径（degrade_level=0）≥ 60%**  
 - [ ] badcase → 补 meta/指标或 L1 样例闭环  
 
@@ -1033,10 +1382,19 @@ L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **1
 | **元数据陈旧** | 前端「从业务库同步」+ 变更审计；badcase 优先补 meta |
 | **召回不准** | 运营维护 alias/取值；span 记录 recall detail；A/B 调 Top-K |
 | **ES 不可用** | keyword_fallback；/ready 探测 ES；索引重建 job 告警 |
-| 学校账户未选校 | `active_sch_id` 为空 → 400，引导 `switch-school` |
+| 学校账户未选上下文 | `active_scopes` 缺必填维度 → 400，引导切换（键为 dimension_code） |
+| **硬编码列名回潮** | CR 检查 + 单测 fixture 仅用自定义维度；§11.6.0 原则 |
+| **LLM 写 grant 外 scope** | AST 校验 + 参数化 IN；不信任字面量 |
+| **无 grant 误放行** | 默认拒绝；`load_effective_policy` Fail-closed |
+| **Scope 与 Memory 耦合** | 第 6 周 Memory 不读 grant；第 7 周不改 Memory 表（§2.6.3） |
+| **敏感列泄露** | 全局 + 用户级 **column_deny**（meta 表列名）；sqlglot 遍历 SELECT |
 | 默认超管密码泄露 | 生产必须改 `SEED_ADMIN_PASSWORD`；首次登录强制改密（二期） |
 | 与体育后台账号两套 | 文档写清；避免用户混淆；二期再评估 SSO |
-| SQL 注入 | sqlglot 解析 + 参数化 sch_id + 只读账号 |
+| SQL 注入 | sqlglot 解析 + 参数化 scope 占位符 + 只读账号 |
+| **Memory 污染 Prompt** | 结构化槽位 + 字符上限；L1 路径不注入 |
+| **Memory 读失败拖垮问数** | Fail-open + `memory_skipped` span |
+| **会话越权** | `load_session_memory` 校验 `user_id` |
+| **Memory 与权限混淆** | 第 6 周仅 `user_id`；第 7 周 Scope 配置驱动（§11.6.0） |
 | Docker 访问本机 MySQL 失败 | 使用 `host.docker.internal`；Linux 生产可改用宿主机 IP |
 | RAGFlow 与 Ollama 抢 GPU | RAGFlow 用 CPU 版；LLM 走宿主机 Ollama；embedding 高峰勿与 14B 同时满载 |
 
@@ -1045,12 +1403,12 @@ L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **1
 ## 14. Phase 2 backlog（MVP 之后）
 
 - 对接体育后台 SSO  
-- 学校账户跨绑定校汇总（`sch_id IN (...)`）  
-- 渠道商租户模型  
+- 渠道商租户模型（新增 dimension，如 `channel_id`）  
 - **SSE 流式**问数进度（对标 shopkeeper `/api/query`）  
 - Langfuse / OpenTelemetry  
 - 图表（AntV）  
 - 可选 Qdrant 替代 ES 向量（大规模字段时）  
+- **P4 向量 episodic Memory**（全量对话 embedding 召回；须独立评测与合规评审）  
 - RAGFlow 文档问答与问数并列（仍与 meta 库解耦）  
 
 ---
@@ -1126,6 +1484,17 @@ SQL_DIALECT=mysql
 SQL_MAX_ROWS=5000
 SQL_TIMEOUT_SEC=10
 ASK_RATE_LIMIT_PER_USER_PER_MIN=20
+
+# ---------- Agent Memory（第 6 周）----------
+MEMORY_ENABLED=true
+SESSION_MEMORY_ENABLED=true
+USER_PREFERENCE_ENABLED=true
+SESSION_MEMORY_MAX_TURNS=3
+MEMORY_PROMPT_MAX_CHARS=2000
+
+# ---------- 动态数据权限（第 7 周）----------
+POLICY_DEFAULT_DENY=true
+POLICY_CACHE_TTL_SEC=60
 
 # ---------- RAGFlow（可选，与问数 meta 解耦）----------
 RAGFLOW_ENABLED=false
@@ -1207,10 +1576,12 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 
 ---
 
-**文档版本**：v2.1  
+**文档版本**：v2.4  
 **变更（v2.0）**：明确问数核心路线为 **元数据知识库 + 语义库（前端可配置）+ 向量/全文混合召回 + 多阶段 LangGraph**；计划由 4 周扩展为 **6 周**（第 3～6 周详述）；新增 §9  meta/语义库、§10.6 管理 API、§6.1 多阶段节点。  
 **变更（v2.1）**：§9.2 区分 **自动读取**（`table_comment_auto` / `column_comment_auto` / `data_type`）与 **人工定义**（`description_manual`）；人工非空优先；新增 `GET /introspect/tables/{tableName}` 与前端表名录入向导。  
-**维护**：随 meta 表结构、ES 索引、评测集更新同步改第 9、12、15 节；每完成里程碑更新 [PROGRESS.md](./PROGRESS.md)。
+**变更（v2.2）**：计划扩展为 **7 周**；新增 **§11.5 Agent Memory**（P0～P3）；原评测周后移。  
+**变更（v2.4）**：§2.6.1 增 **零硬编码字段名**；§11.6.0 配置驱动原则；第 6 周 Memory 去除 sch/region 表述；第 7 周权限改为 dimension_code + table/column meta 动态绑定，JWT `active_scopes` 替代 active_sch_id 硬编码。  
+**维护**：随 meta、Memory、DataScope DDL、评测集更新同步改第 2.6、9、11.5、11.6、12、15 节；每完成里程碑更新 [PROGRESS.md](./PROGRESS.md)。
 
 ---
 

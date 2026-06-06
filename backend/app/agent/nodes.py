@@ -12,17 +12,27 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 
 from app.agent.llm_sql import generate_sql_from_llm
+from app.agent.log_utils import get_node_label, get_status_label
 from app.agent.state import AskGraphState
+from app.core.log_config import get_logger
 from app.ask.query_match import ensure_can_run, match_question_async
 from app.core.context import UserContext, UserRole
 from app.observability import tracer
-from app.policy.role_policy import PolicyError, applies_sch_id_filter, require_school_scope
+from app.observability.trace_log import TraceLogCollector
+from app.policy.role_policy import (
+    PolicyError,
+    applies_sch_id_filter,
+    build_role_context_header,
+    require_school_scope,
+    strip_sch_id_for_broad_roles,
+)
 from app.sql.executor import execute_readonly
 from app.sql.guard import SqlGuardError, validate_sql
 from app.sql.whitelist import refresh_allowed_tables
 from config.settings import Settings
 
 _MAX_QUESTION_LEN = 2000
+logger = get_logger("agent")
 
 
 def _cfg(config: RunnableConfig) -> dict[str, Any]:
@@ -38,14 +48,36 @@ async def _span(
 ) -> None:
     c = _cfg(config)
     session = c["copilot_session"]
+    duration_ms = int((time.perf_counter() - t0) * 1000)
+    trace_id = c.get("trace_id", "-")
     await tracer.insert_span(
         session,
-        trace_id=c["trace_id"],
+        trace_id=trace_id,
         node_name=node_name,
         started_at=datetime.now(),
-        duration_ms=int((time.perf_counter() - t0) * 1000),
+        duration_ms=duration_ms,
         status=status,
         detail=detail,
+    )
+    collector: TraceLogCollector | None = c.get("trace_log_collector")
+    if collector is not None:
+        collector.append_node(
+            node_name,
+            get_node_label(node_name),
+            status,
+            duration_ms,
+            detail,
+        )
+    log_fn = logger.warning if status in ("fail", "empty", "degraded") else logger.info
+    log_fn(
+        "[trace=%s] %s[%s] status=%s[%s] duration_ms=%s detail=%s",
+        trace_id,
+        get_node_label(node_name),
+        node_name,
+        get_status_label(status),
+        status,
+        duration_ms,
+        detail,
     )
 
 
@@ -76,6 +108,13 @@ async def match_curated(state: AskGraphState, config: RunnableConfig) -> dict:
     try:
         ensure_can_run(matched, ctx)
     except PolicyError as exc:
+        await _span(
+            config,
+            "match_curated",
+            t0,
+            "fail",
+            {"error_code": exc.code, "error_message": exc.message, "matched": True},
+        )
         return {
             "matched": None,
             "status": "fail",
@@ -101,10 +140,14 @@ async def generate_sql(state: AskGraphState, config: RunnableConfig) -> dict:
 
     t0 = time.perf_counter()
     c = _cfg(config)
+    ctx: UserContext = c["ctx"]
     settings: Settings = c["settings"]
     question = state.get("normalized_question") or ""
     context_text = state.get("context_text") or ""
+    if context_text and not context_text.startswith("【当前用户角色】"):
+        context_text = f"{build_role_context_header(ctx)}\n\n{context_text}"
     retry_count = state.get("retry_count") or 0
+    l2_retry = False
 
     sql, token_in, token_out = await generate_sql_from_llm(
         settings=settings,
@@ -115,6 +158,7 @@ async def generate_sql(state: AskGraphState, config: RunnableConfig) -> dict:
     gen_ms = int((time.perf_counter() - t0) * 1000)
 
     if not sql and retry_count < 1:
+        l2_retry = True
         t2 = time.perf_counter()
         sql, token_in2, token_out2 = await generate_sql_from_llm(
             settings=settings,
@@ -132,7 +176,18 @@ async def generate_sql(state: AskGraphState, config: RunnableConfig) -> dict:
         "generate_sql",
         t0,
         "success" if sql else "fail",
-        {"retry_count": retry_count, "has_sql": bool(sql)},
+        {
+            "retry_count": retry_count,
+            "has_sql": bool(sql),
+            "l2_retry": l2_retry,
+            "token_in": token_in,
+            "token_out": token_out,
+            "sql_preview": sql,
+            "error_code": None if sql else "LLM_NO_SQL",
+            "error_message": None
+            if sql
+            else "未能生成有效 SQL，请换种问法或标记 badcase",
+        },
     )
 
     if not sql:
@@ -170,7 +225,13 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
     settings: Settings = c["settings"]
     raw = state.get("raw_sql")
     if not raw:
-        await _span(config, "validate_sql", t0, "fail", {"error": "NO_SQL"})
+        await _span(
+            config,
+            "validate_sql",
+            t0,
+            "fail",
+            {"error_code": "NO_SQL", "error_message": "无 SQL 可校验"},
+        )
         return {
             "status": "fail",
             "error_code": "NO_SQL",
@@ -180,12 +241,22 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
 
     try:
         final_sql = validate_sql(raw, ctx, max_rows=settings.sql_max_rows)
+        final_sql = strip_sch_id_for_broad_roles(final_sql, ctx)
         found = re.findall(r"\bFROM\s+([a-zA-Z0-9_]+)", final_sql, flags=re.IGNORECASE)
         tables_used = ",".join(dict.fromkeys(t.lower() for t in found))
-        await _span(config, "validate_sql", t0, "success")
+        await _span(config, "validate_sql", t0, "success", {
+            "tables_used": tables_used,
+            "sql_preview": final_sql,
+        })
         return {"final_sql": final_sql, "tables_used": tables_used, "status": "running"}
     except SqlGuardError as exc:
-        await _span(config, "validate_sql", t0, "fail", {"error": exc.code})
+        await _span(
+            config,
+            "validate_sql",
+            t0,
+            "fail",
+            {"error_code": exc.code, "error_message": exc.message},
+        )
         return {
             "status": "fail",
             "error_code": exc.code,
@@ -231,6 +302,20 @@ async def apply_policy(state: AskGraphState, config: RunnableConfig) -> dict:
                 "degrade_level": 3,
             }
 
+    if not applies_sch_id_filter(ctx):
+        stripped_sql = strip_sch_id_for_broad_roles(final_sql, ctx)
+        if stripped_sql != final_sql:
+            final_sql = stripped_sql
+            params.pop("sch_id", None)
+            await _span(
+                config,
+                "apply_policy",
+                t0,
+                "success",
+                {"stripped_sch_id": True},
+            )
+            return {"sql_params": params, "final_sql": final_sql}
+
     await _span(config, "apply_policy", t0, "success")
     return {"sql_params": params}
 
@@ -242,12 +327,28 @@ async def execute_sql(state: AskGraphState, config: RunnableConfig) -> dict:
 
     t0 = time.perf_counter()
     c = _cfg(config)
+    ctx: UserContext = c["ctx"]
     settings: Settings = c["settings"]
     final_sql = state.get("final_sql")
     params = state.get("sql_params") or {}
 
     if not final_sql:
         return {"status": "fail", "error_code": "NO_SQL", "degrade_level": 3}
+
+    final_sql = strip_sch_id_for_broad_roles(final_sql, ctx)
+    params = dict(params)
+    if not applies_sch_id_filter(ctx):
+        params.pop("sch_id", None)
+
+    trace_id = c.get("trace_id", "-")
+    logger.info(
+        "[trace=%s] %s[%s] 开始执行 sql=%r params=%r",
+        trace_id,
+        get_node_label("execute_sql"),
+        "execute_sql",
+        final_sql,
+        params,
+    )
 
     try:
         columns, rows = await execute_readonly(
@@ -267,12 +368,33 @@ async def execute_sql(state: AskGraphState, config: RunnableConfig) -> dict:
             "tables_used": tables,
             "status": "running",
         }
-    except Exception:
-        await _span(config, "execute_sql", t0, "fail", {"error": "SQL_EXEC_ERROR"})
+    except Exception as exc:
+        logger.exception(
+            "[trace=%s] %s[%s] 执行失败 sql=%r params=%r error=%s",
+            trace_id,
+            get_node_label("execute_sql"),
+            "execute_sql",
+            final_sql,
+            params,
+            exc,
+        )
+        await _span(
+            config,
+            "execute_sql",
+            t0,
+            "fail",
+            {
+                "error_code": "SQL_EXEC_ERROR",
+                "error_message": str(exc),
+                "sql_preview": final_sql,
+                "params": params,
+            },
+        )
         return {
             "status": "fail",
             "error_code": "SQL_EXEC_ERROR",
             "error_message": "SQL 执行失败",
+            "validation_error": str(exc),
             "degrade_level": 3,
         }
 
@@ -297,11 +419,26 @@ async def format_answer(state: AskGraphState, config: RunnableConfig) -> dict:
     t0 = time.perf_counter()
     if state.get("error_code"):
         msg = state.get("error_message") or "无法完成本次问数，请调整问法或联系管理员。"
-        await _span(config, "format_answer", t0, "fail")
+        await _span(
+            config,
+            "format_answer",
+            t0,
+            "fail",
+            {
+                "error_code": state.get("error_code"),
+                "error_message": msg,
+            },
+        )
         return {"answer": msg, "status": "fail"}
 
     answer = _format_answer_text(state)
-    await _span(config, "format_answer", t0, "success")
+    await _span(
+        config,
+        "format_answer",
+        t0,
+        "success",
+        {"answer_preview": answer},
+    )
     return {"answer": answer, "status": "success"}
 
 
@@ -321,6 +458,7 @@ _CORRECTABLE_CODES = frozenset(
         "NO_TABLE",
         "TABLE_NOT_ALLOWED",
         "MISSING_SCH_ID",
+        "SQL_EXEC_ERROR",
     }
 )
 
@@ -332,7 +470,7 @@ async def correct_sql(state: AskGraphState, config: RunnableConfig) -> dict:
     settings: Settings = c["settings"]
     question = state.get("normalized_question") or ""
     context_text = state.get("context_text") or ""
-    previous_sql = state.get("raw_sql") or ""
+    previous_sql = state.get("raw_sql") or state.get("final_sql") or ""
     error_msg = state.get("validation_error") or state.get("error_message") or "SQL 校验失败"
     correct_count = (state.get("correct_sql_count") or 0) + 1
 
@@ -350,7 +488,16 @@ async def correct_sql(state: AskGraphState, config: RunnableConfig) -> dict:
         "correct_sql",
         t0,
         "success" if sql else "fail",
-        {"correct_sql_count": correct_count, "has_sql": bool(sql)},
+        {
+            "correct_sql_count": correct_count,
+            "has_sql": bool(sql),
+            "token_in": token_in,
+            "token_out": token_out,
+            "sql_preview": sql,
+            "correction_hint": error_msg,
+            "error_code": None if sql else "LLM_NO_SQL",
+            "error_message": None if sql else "SQL 修正失败，请换种问法或标记 badcase",
+        },
     )
 
     if not sql:
@@ -386,3 +533,16 @@ def route_after_validate(state: AskGraphState) -> str:
             return "correct_sql"
         return "format_answer"
     return "apply_policy"
+
+
+def route_after_execute(state: AskGraphState) -> str:
+    """执行失败且可修正时重走 correct_sql（最多 1 次）。"""
+    if state.get("error_code"):
+        code = state.get("error_code") or ""
+        if (
+            state.get("matched") is None
+            and (state.get("correct_sql_count") or 0) < 1
+            and code in _CORRECTABLE_CODES
+        ):
+            return "correct_sql"
+    return "format_answer"
