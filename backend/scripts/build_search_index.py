@@ -36,7 +36,7 @@ async def main() -> None:
                 return
             result = await svc.rebuild_all()
             print(
-                f"索引重建完成：字段 {result.columns} 条，"
+                f"索引重建完成：表 {result.tables} 条，字段 {result.columns} 条，"
                 f"指标 {result.metrics} 条，取值 {result.field_values} 条，"
                 f"向量维度 {result.embedding_dims}"
             )

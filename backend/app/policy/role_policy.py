@@ -92,7 +92,17 @@ def build_llm_sql_generation_constraints(ctx: UserContext) -> list[str]:
         ),
     ]
     lines.extend(build_llm_sch_id_constraints(ctx))
-    lines.append("- 字段取值映射中的值用于 WHERE 条件")
+    lines.append(
+        "- 【问句匹配的过滤条件】与【表默认过滤条件】中的条目必须写入 WHERE，不可省略"
+    )
+    lines.append(
+        "- 字段取值映射：问句提及项目名/枚举别名时，用对应 column = 库内值 过滤"
+        "（如 project_id=1 或 JOIN sport_project 后 p.project_name='跳绳'）"
+    )
+    lines.append(
+        "- 只能使用【候选表字段清单】中的真实 column_name，"
+        "禁止编造 student_name、enrollment_year 等未列出的字段"
+    )
     lines.append("- 输出仅包含 SQL，不要解释")
     return lines
 

@@ -110,9 +110,13 @@ class Settings(BaseSettings):
         default="copilot_ask_",
         alias="ELASTICSEARCH_INDEX_PREFIX",
     )
-    recall_top_k_column: int = Field(default=8, alias="RECALL_TOP_K_COLUMN")
+    recall_top_k_table: int = Field(default=20, alias="RECALL_TOP_K_TABLE")
+    recall_top_k_column: int = Field(default=15, alias="RECALL_TOP_K_COLUMN")
     recall_top_k_metric: int = Field(default=5, alias="RECALL_TOP_K_METRIC")
     recall_top_k_value: int = Field(default=10, alias="RECALL_TOP_K_VALUE")
+    max_tables_in_prompt: int = Field(default=10, alias="MAX_TABLES_IN_PROMPT")
+    max_columns_per_table: int = Field(default=15, alias="MAX_COLUMNS_PER_TABLE")
+    table_recall_score_min: float = Field(default=0.7, alias="TABLE_RECALL_SCORE_MIN")
     recall_keyword_fallback: bool = Field(default=True, alias="RECALL_KEYWORD_FALLBACK")
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     minio_endpoint: str = Field(default="http://127.0.0.1:9000", alias="MINIO_ENDPOINT")

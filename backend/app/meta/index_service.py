@@ -12,6 +12,7 @@ from app.meta.index_text import (
     build_column_search_text,
     build_field_value_search_text,
     build_metric_search_text,
+    build_table_search_text,
 )
 from app.meta.repository import MetaRepository
 from app.retrieval.embedding import EmbeddingClient
@@ -23,6 +24,7 @@ from config.settings import Settings
 class RebuildIndexResult:
     """重建索引统计。"""
 
+    tables: int
     columns: int
     metrics: int
     field_values: int
@@ -52,16 +54,36 @@ class MetaKnowledgeService:
 
     async def rebuild_all(self) -> RebuildIndexResult:
         """
-        全量重建 column / metric 向量索引与 field_value 全文索引。
+        全量重建 table / column / metric 向量索引与 field_value 全文索引。
         索引用 effective 描述与别名拼装的 search_text。
         """
+        tables = await self._repo.list_indexable_tables()
         columns = await self._repo.list_indexable_columns()
         metrics = await self._repo.list_indexable_metrics()
         field_values = await self._repo.list_indexable_field_values()
 
         dims = self._settings.embedding_dims
+        table_count = 0
         column_count = 0
         metric_count = 0
+
+        if tables:
+            table_texts = [build_table_search_text(t) for t in tables]
+            table_vectors = await self._embedding.embed_texts(table_texts)
+            dims = self._embedding.dims or len(table_vectors[0])
+            table_index = await self._es.recreate_vector_index("table", dims)
+            table_docs = [
+                {
+                    "table_id": t.table_id,
+                    "table_name": t.table_name,
+                    "table_role": t.table_role,
+                    "biz_domain": t.biz_domain,
+                    "search_text": text,
+                    "embedding": vec,
+                }
+                for t, text, vec in zip(tables, table_texts, table_vectors, strict=True)
+            ]
+            table_count = await self._es.bulk_index(table_index, table_docs)
 
         if columns:
             column_texts = [build_column_search_text(c) for c in columns]
@@ -116,6 +138,7 @@ class MetaKnowledgeService:
         value_count = await self._es.bulk_index(value_index, value_docs)
 
         return RebuildIndexResult(
+            tables=table_count,
             columns=column_count,
             metrics=metric_count,
             field_values=value_count,

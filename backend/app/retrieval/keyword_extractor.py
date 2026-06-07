@@ -64,6 +64,21 @@ def _split_chinese_phrases(text: str, *, max_len: int = 6) -> list[str]:
     return phrases
 
 
+def _extract_short_chinese_bigrams(text: str) -> list[str]:
+    """从问句提取全部连续 2 字中文片段，优先保留业务实体词（如「跳绳」）。"""
+    found: list[str] = []
+    seen: set[str] = set()
+    for i in range(len(text) - 1):
+        if not ("\u4e00" <= text[i] <= "\u9fff" and "\u4e00" <= text[i + 1] <= "\u9fff"):
+            continue
+        token = text[i : i + 2]
+        if token in _STOP_WORDS or token in seen:
+            continue
+        seen.add(token)
+        found.append(token)
+    return found
+
+
 def extract_keywords(question: str, *, max_keywords: int = 12) -> list[str]:
     """
     从问句抽取关键词列表。
@@ -79,6 +94,12 @@ def extract_keywords(question: str, *, max_keywords: int = 12) -> list[str]:
 
     tokens: list[str] = []
     seen: set[str] = set()
+
+    # 先放入全部 2 字中文片段，避免长句 n-gram 挤掉「跳绳」等领域词
+    for token in _extract_short_chinese_bigrams(q):
+        seen.add(token)
+        tokens.append(token)
+
     for match in _TOKEN_RE.finditer(q):
         raw = match.group(0)
         candidates = _split_chinese_phrases(raw) if len(raw) > 6 and not raw.isascii() else [raw]

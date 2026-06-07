@@ -101,6 +101,7 @@ class TableMetaListResponse(CamelModel):
 class RebuildIndexResponse(CamelModel):
     """POST /admin/meta/rebuild-index 响应。"""
 
+    tables: int
     columns: int
     metrics: int
     field_values: int

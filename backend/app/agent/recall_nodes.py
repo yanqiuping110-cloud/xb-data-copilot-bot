@@ -1,5 +1,5 @@
 """
-LangGraph 多阶段召回节点：关键词 → 三路召回 → 合并过滤 → 构建 LLM 上下文。
+LangGraph 多阶段召回节点：关键词 → 表/字段/指标召回 → 合并过滤 → 构建 LLM 上下文。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from app.agent.context_builder import (
     MergedRecallContext,
     build_llm_context_text,
     enrich_tables_from_mysql,
+    filter_columns_for_prompt,
     filter_metrics,
     filter_tables,
     merge_retrieved_info,
@@ -45,8 +46,8 @@ async def extract_keywords_node(state: AskGraphState, config: RunnableConfig) ->
     return {"keywords": keywords}
 
 
-async def recall_columns(state: AskGraphState, config: RunnableConfig) -> dict:
-    """字段向量/关键词召回。"""
+async def recall_tables(state: AskGraphState, config: RunnableConfig) -> dict:
+    """表级向量/关键词召回。"""
     t0 = time.perf_counter()
     c = _cfg(config)
     settings: Settings = c["settings"]
@@ -55,11 +56,43 @@ async def recall_columns(state: AskGraphState, config: RunnableConfig) -> dict:
 
     retriever = HybridRetriever(c["copilot_session"], settings)
     try:
-        columns, recall_mode = await retriever.recall_columns_only(question, keywords)
+        tables, recall_mode = await retriever.recall_tables_only(question, keywords)
+        status = "success" if tables else "empty"
+        detail = {
+            "count": len(tables),
+            "recall_mode": recall_mode,
+            "items": [
+                {"table": t.table_name, "score": t.score}
+                for t in tables[:10]
+            ],
+        }
+        await _span(config, "recall_tables", t0, status, detail)
+        return {"recall_tables": tables, "recall_mode": recall_mode}
+    finally:
+        await retriever.close()
+
+
+async def recall_columns(state: AskGraphState, config: RunnableConfig) -> dict:
+    """字段向量/关键词召回（限定在表级召回候选内）。"""
+    t0 = time.perf_counter()
+    c = _cfg(config)
+    settings: Settings = c["settings"]
+    question = state.get("normalized_question") or ""
+    keywords = state.get("keywords") or []
+    table_scope = [t.table_name for t in (state.get("recall_tables") or [])]
+
+    retriever = HybridRetriever(c["copilot_session"], settings)
+    try:
+        columns, recall_mode = await retriever.recall_columns_only(
+            question,
+            keywords,
+            table_names=table_scope or None,
+        )
         status = "success" if columns else "empty"
         detail = {
             "count": len(columns),
             "recall_mode": recall_mode,
+            "scope_tables": table_scope[:10],
             "items": [
                 {"table": col.table_name, "column": col.column_name, "score": col.score}
                 for col in columns[:8]
@@ -119,12 +152,13 @@ async def recall_field_values(state: AskGraphState, config: RunnableConfig) -> d
 
 
 async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig) -> dict:
-    """合并三路召回结果。"""
+    """合并多路召回结果。"""
     t0 = time.perf_counter()
     from app.retrieval.hybrid import HybridRecallResult
 
     recall = HybridRecallResult(
         keywords=state.get("keywords") or [],
+        tables=state.get("recall_tables") or [],
         columns=state.get("recall_columns") or [],
         metrics=state.get("recall_metrics") or [],
         field_values=state.get("recall_field_values") or [],
@@ -137,6 +171,7 @@ async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig
         t0,
         "success",
         {
+            "table_count": len(merged.recalled_tables),
             "column_count": len(merged.columns),
             "metric_count": len(merged.metrics),
             "value_count": len(merged.field_values),
@@ -146,15 +181,48 @@ async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig
 
 
 async def filter_tables_node(state: AskGraphState, config: RunnableConfig) -> dict:
-    """按召回得分筛选候选表。"""
+    """表级召回为主筛选候选表，并做关系扩展。"""
     t0 = time.perf_counter()
+    c = _cfg(config)
+    settings: Settings = c["settings"]
     merged = _get_merged(state)
     if merged is None:
         await _span(config, "filter_tables", t0, "empty")
         return {}
 
-    merged = filter_tables(merged, top_n=5)
-    await _span(config, "filter_tables", t0, "success", {"table_names": merged.table_names})
+    repo = MetaRepository(c["copilot_session"])
+    relations = await repo.list_relations()
+    merged = filter_tables(merged, settings, relations=relations)
+    await _span(
+        config,
+        "filter_tables",
+        t0,
+        "success",
+        {"table_names": merged.table_names, "count": len(merged.table_names)},
+    )
+    return {"merged_recall": merged}
+
+
+async def filter_columns_node(state: AskGraphState, config: RunnableConfig) -> dict:
+    """在候选表内筛选 Prompt 字段。"""
+    t0 = time.perf_counter()
+    c = _cfg(config)
+    settings: Settings = c["settings"]
+    merged = _get_merged(state)
+    if merged is None:
+        await _span(config, "filter_columns", t0, "empty")
+        return {}
+
+    repo = MetaRepository(c["copilot_session"])
+    relations = await repo.list_relations()
+    merged = await filter_columns_for_prompt(merged, repo, settings, relations=relations)
+    await _span(
+        config,
+        "filter_columns",
+        t0,
+        "success",
+        {"prompt_column_counts": {k: len(v) for k, v in merged.prompt_columns.items()}},
+    )
     return {"merged_recall": merged}
 
 

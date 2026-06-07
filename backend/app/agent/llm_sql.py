@@ -62,7 +62,8 @@ async def generate_sql_from_llm(
     system = (
         "你是企业问数系统的 SQL 生成助手，只为智慧体育业务库生成只读查询。"
         "严格遵守上下文中的表白名单与 MySQL 5.7 语法。"
-        "SELECT 列别名优先使用中文（如 AS 年份、AS 总人数）；"
+        "只能使用上下文中【候选表字段清单】列出的真实列名，禁止编造任何字段。"
+        "SELECT 列别名优先使用中文（如 AS 学生名、AS 入学年份）；"
         "仅当用户明确要求英文表头时才使用英文别名。"
         f"{LLM_JOIN_ALIAS_SYSTEM_HINT}"
     )

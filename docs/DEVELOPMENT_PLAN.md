@@ -4,7 +4,7 @@
 > **目标**：产品/运营/学校管理员用自然语言查 MySQL 数据，减少固定报表开发；第一期不上渠道商。  
 > **技术路线**：**纯 Python** 问数服务 + **自研用户/权限表**（不依赖 `youplus-base-api`；**不修改** `youplus-base`、`sport-plantform`）  
 > **运行环境**：**MySQL 5.7 在宿主机/公司库**；**Elasticsearch + Embedding 在 Docker/宿主机**；本机先调试，配置区分 `development` / `production` 后上公司环境  
-> **周期**：约 **8 周**（业余开发）：前 2 周地基与 LangGraph 基线已完成；**第 3～5 周**元数据、混合召回、多阶段 LangGraph；**第 6 周** Agent Memory（**仅 `user_id` 维度，与权限解耦**）；**第 7 周**动态数据权限（DataScope + 表/字段策略）；**第 8 周**评测、试点与 MVP 文档；按企业可观测、可审计、可降级标准交付  
+> **周期**：约 **8 周**（业余开发）：前 2 周地基与 LangGraph 基线已完成；**第 3～5 周**元数据、混合召回、多阶段 LangGraph；**第 6 周** Agent Memory + **左侧对话历史栏**（新对话、每用户 20 条 session，§11.5.6）；**第 7 周**动态数据权限（DataScope + 表/字段策略）；**第 8 周**评测、试点与 MVP 文档；按企业可观测、可审计、可降级标准交付  
 > **问数核心路线**：**元数据知识库 + 语义库（前端可配置）→ 向量 + 全文混合召回 → 多阶段 LangGraph 推理 → LLM 生成 SQL**（L1 样例仅作高频快路径，不追求全覆盖）
 
 ---
@@ -377,8 +377,8 @@ Memory 中的 `last_sql` 等槽位 **不得** 绕过 Scope 校验；第 7 周只
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
 │ 问数前端（Vue3，data-copilot-bot/frontend）                        │
-│  · 问数对话页  · 超管用户管理  · **元数据/语义库管理**（ADMIN/OPERATOR）│
-│  · POST /api/v1/auth/login  ·  /api/v1/ask  ·  /api/v1/admin/*   │
+│  · 问数对话页（**左侧对话历史栏** + 新对话）· 超管用户管理  · **元数据/语义库管理**（ADMIN/OPERATOR）│
+│  · POST /api/v1/auth/login  ·  /api/v1/ask  ·  /api/v1/sessions  ·  /api/v1/admin/*   │
 └────────────────────────────┬────────────────────────────────────┘
                              │ JWT + question
 ┌────────────────────────────▼────────────────────────────────────┐
@@ -441,12 +441,12 @@ data-copilot-bot/
 ├── backend/                         # Python 问数 API
 │   ├── app/
 │   │   ├── main.py
-│   │   ├── api/                     # auth、admin_users、ask、admin_meta…
+│   │   ├── api/                     # auth、admin_users、ask、sessions、admin_meta…
 │   │   ├── core/                    # context、security
 │   │   ├── auth/
 │   │   ├── policy/                  # role_policy + effective_policy / scope（第 7 周）
 │   │   ├── agent/                   # LangGraph 多阶段节点
-│   │   ├── memory/                  # Agent Memory：会话槽位、用户偏好（第 6 周）
+│   │   ├── memory/                  # Agent Memory：SessionService、会话槽位、用户偏好（第 6 周）
 │   │   ├── meta/                    # 元数据/语义库 Repository + 索引构建
 │   │   ├── retrieval/               # 混合召回（向量 + 全文 + MySQL 补全）
 │   │   ├── db/
@@ -462,9 +462,9 @@ data-copilot-bot/
 │   └── .env.production              # gitignore
 ├── frontend/                        # Vue3 + Vite 问数前端
 │   ├── src/
-│   │   ├── api/                     # 封装 REST（含 adminMeta.js）
+│   │   ├── api/                     # 封装 REST（含 ask.js、sessions.js、adminMeta.js）
 │   │   ├── router/
-│   │   ├── views/                   # login、ask、admin、AdminMetaTables…
+│   │   ├── views/                   # login、Ask（左侧对话栏）、admin、AdminMetaTables…
 │   │   └── utils/request.js
 │   ├── package.json
 │   ├── vite.config.js
@@ -569,8 +569,19 @@ def require_school_scope(ctx: UserContext) -> int:
 
 ### 8.1 分析库表（`analytics` schema）
 
-**`copilot_ask_session`**：会话级  
-`session_id, user_id, role, active_sch_id, created_at`
+**`copilot_ask_session`**：会话级（**UI「对话」= 后端 `session_id`**，与 L1 Agent Memory 同作用域）  
+
+| 字段 | 说明 |
+|------|------|
+| `session_id` | 主键；前端创建或 `POST /sessions` 返回 |
+| `user_id` | 归属用户 |
+| `role` | 创建时角色快照 |
+| `active_sch_id` | 创建时校 ID 快照（学校账户；审计用） |
+| `title` | 列表标题，默认首问前 20 字（§11.5.6） |
+| `turn_count` | 成功提问轮次计数 |
+| `context_snapshot_json` | 可选 JWT 上下文快照（**不参与** Memory 过滤） |
+| `created_at` / `updated_at` | 创建 / 最后提问时间 |
+| `deleted` | 逻辑删除 |
 
 **`copilot_ask_turn`**：每次提问一行  
 
@@ -903,6 +914,8 @@ L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **1
 }
 ```
 
+**对话历史（第 6 周）**：请求体 `sessionId` 绑定 L1 会话记忆；左侧栏列表与切换见 **§11.5.5**、**§11.5.6**（`GET/POST/DELETE /api/v1/sessions`、`GET .../messages`）。
+
 ### 10.5 `POST /api/v1/feedback`
 
 ```json
@@ -1037,15 +1050,23 @@ L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **1
 
 ### 11.5.3 数据模型（DDL 草案）
 
-**复用** `copilot_ask_session`（第 6 周起 **写入**：首问 upsert；不再仅 DDL 占位）：
+**扩展** `copilot_ask_session`（V007 增列；第 6 周起 **首问 upsert**，不再仅 DDL 占位）：
+
+| 新增/复用字段 | 说明 |
+|---------------|------|
+| `title` | VARCHAR(128)；首问写入，默认 `LEFT(question, 20)` |
+| `updated_at` | 每轮 `/ask` 成功后更新，供左侧栏排序 |
+| `turn_count` | 成功 turn 累计 |
+| `context_snapshot_json` | 可选审计快照（**不参与** Memory 过滤） |
 
 ```sql
--- session 仅作 user 级分组；可选 context_snapshot_json 存审计快照（不参与 memory 过滤）
-INSERT INTO copilot_ask_session (session_id, user_id, role, context_snapshot_json, ...)
-ON DUPLICATE KEY UPDATE ...
+-- 首问 upsert；同 session 后续提问只更新 updated_at / turn_count
+INSERT INTO copilot_ask_session (session_id, user_id, role, active_sch_id, title, turn_count, context_snapshot_json, ...)
+ON DUPLICATE KEY UPDATE updated_at = NOW(), turn_count = turn_count + 1, ...
 ```
 
-> `context_snapshot_json` 为可选审计字段（如当时 JWT 上下文），**不参与** Memory 读写与过滤逻辑。
+> `context_snapshot_json` 为可选审计字段（如当时 JWT 上下文），**不参与** Memory 读写与过滤逻辑。  
+> **每用户最多保留 20 个未删除 session**（`SESSION_MAX_PER_USER`，§11.5.6）；超限按 `updated_at` 淘汰最旧。
 
 **新增** `copilot_user_preference`（V007）：
 
@@ -1085,12 +1106,120 @@ load_session_memory → load_user_preference → [可选 resolve_references] →
 
 | 接口 | 说明 |
 |------|------|
+| `GET /api/v1/sessions` | 当前用户对话列表（`deleted=0`，最多 20 条，按 `updated_at` 降序） |
+| `POST /api/v1/sessions` | 创建新对话；返回 `sessionId`；超限则按策略淘汰最旧（§11.5.6） |
+| `GET /api/v1/sessions/{sessionId}/messages` | 加载对话 UI 历史（由 `copilot_ask_turn` 组装，与 Memory 同源） |
+| `DELETE /api/v1/sessions/{sessionId}` | 逻辑删除对话；同步失效 `copilot_session_summary` |
 | `GET /api/v1/memory/preferences` | 当前用户偏好列表 |
 | `PUT /api/v1/memory/preferences` | 批量 upsert（key 白名单校验） |
 | `DELETE /api/v1/memory/preferences` | 清空或按 key 删除 |
-| `POST /api/v1/ask` | 已有 `sessionId`；响应可选返回 `sessionSummary`（调试用，production 可关） |
+| `POST /api/v1/ask` | 已有 `sessionId`；首问 upsert session；响应可选返回 `sessionSummary`（调试用，production 可关） |
 
-### 11.5.6 不测 P4 的说明
+### 11.5.6 对话历史管理（新对话 · 左侧栏）
+
+> **目标**：问数页支持 **左侧对话列表** + **新对话**；每用户默认最多 **20 条** 对话历史；与 Agent Memory **严格按 `session_id` 绑定**，不与 L2 用户偏好混淆。
+
+#### 11.5.6.1 概念映射
+
+| UI 概念 | 后端实体 | Agent Memory 层级 |
+|---------|----------|-------------------|
+| 一条「对话」 | `copilot_ask_session` + 其下 `copilot_ask_turn` | **L1 会话短期记忆**（最近 N 轮槽位） |
+| 「新对话」 | 新 `sessionId` | **重置 L1**；**不重置 L2** 用户偏好 |
+| 切换对话 | 切换 `activeSessionId` | `load_session_memory` 改读对应 session 的 turn |
+| 偏好设置 | `copilot_user_preference` | **L2**，跨所有对话共享 |
+
+**与 §11.5.1 分层关系**：
+
+- **L1**：仅当前 `sessionId` 下最近 `SESSION_MEMORY_MAX_TURNS`（默认 3）轮成功 turn → 结构化槽位（`last_sql`、`tables_used` 等），**非** raw 全量 chat 粘贴进 Prompt。
+- **L2**：`load_user_preference` 与当前对话无关，新对话后仍注入。
+- **L3**：组织样例 / L1 快路径与 session 无关；命中时 **不注入** L1（§11.5.2）。
+
+#### 11.5.6.2 前端布局（问数页 `Ask.vue`）
+
+对话历史栏固定在 **聊天主区域左侧**（窄栏，约 240～280px；小屏可折叠为抽屉）：
+
+```text
+┌──────────────────┬─────────────────────────────────────────────┐
+│  [+ 新对话]       │  顶部：学校切换 / 用户 / 退出（沿用现有 header） │
+│  ─────────────── │  ─────────────────────────────────────────── │
+│  ● 跳绳参与人数   │  消息区（当前对话 messages）                  │
+│    7天趋势分析    │                                             │
+│    跳绳 vs 跑步   │                                             │
+│    …（最多 20 条）│                                             │
+│                  │  ─────────────────────────────────────────── │
+│  [偏好设置]       │  输入框 + [提问]                              │
+└──────────────────┴─────────────────────────────────────────────┘
+```
+
+**交互要求**：
+
+| 操作 | 行为 |
+|------|------|
+| 进入问数页 | `GET /sessions` 拉列表；`localStorage.activeSessionId` 存在且仍属本人则恢复，否则选最近一条或自动 `POST /sessions` |
+| 点击「新对话」 | `POST /sessions` → 清空消息区（保留欢迎语）→ `activeSessionId` 指向新 id |
+| 点击列表项 | `GET /sessions/{id}/messages` 渲染历史；后续 `/ask` 带该 `sessionId` |
+| 删除对话 | 列表项菜单 → `DELETE /sessions/{id}`；若删当前项则切到最近一条或新建 |
+| 刷新页面 | 以服务端 turn 为准恢复 UI，**禁止**仅依赖内存 `messages` |
+| 偏好设置 | 右侧或 header 入口打开抽屉；改 `PUT /memory/preferences`，**不影响**当前 L1 |
+
+**前端状态（约定）**：
+
+```javascript
+const activeSessionId = ref(null)   // 当前对话，持久化 localStorage
+const sessions = ref([])            // 左侧列表
+const messages = ref([])            // 当前对话 UI，由 API 加载
+```
+
+#### 11.5.6.3 20 条上限与淘汰
+
+| 配置项 | 默认 | 说明 |
+|--------|------|------|
+| `SESSION_MAX_PER_USER` | `20` | 每用户 `copilot_ask_session` 且 `deleted=0` 上限 |
+| `SESSION_EVICT_POLICY` | `oldest` | `oldest`：创建新对话时自动逻辑删除 `updated_at` 最旧 1 条；`reject`：返回 409 并提示用户手动删 |
+
+- 上限统计 **session 条数**，与单对话内 turn 数、Memory 读取轮数（默认 3）**独立**。
+- 可选 `SESSION_UI_TURN_LIMIT`（如 50）：单对话 UI 加载 turn 上限，防超长渲染；Memory 仍只读最近 N 轮。
+- 淘汰写 **审计日志**（`action=session_evict`）；前端可 Toast：「最早对话已自动归档」。
+
+#### 11.5.6.4 服务端流程（与 Memory 衔接）
+
+```text
+POST /sessions
+  → 若 count ≥ SESSION_MAX_PER_USER：按 SESSION_EVICT_POLICY 淘汰或 409
+  → 生成 session_id，插入空 session（或延迟到首问 upsert，二选一；MVP 推荐 POST 即占位）
+
+POST /ask { sessionId, question }
+  → 归属校验 session.user_id == ctx.user_id
+  → 首问 upsert session（title / context_snapshot_json）
+  → load_session_memory(sessionId)     // L1，Fail-open
+  → load_user_preference(user_id)      // L2，与 session 无关
+  → LangGraph …
+  → 写 copilot_ask_turn(session_id)
+  → 更新 session.updated_at、turn_count；可选更新 copilot_session_summary（P1）
+```
+
+**「清空当前会话记忆」**（§11.5.2）：等同 **新对话**（新 `sessionId`）；若需审计可追溯，对旧 session 调 `DELETE /sessions/{id}`。
+
+#### 11.5.6.5 边界与安全
+
+| 场景 | 处理 |
+|------|------|
+| 越权 `sessionId` | 列表/消息/ Memory 加载均校验 `user_id`；零注入 + audit |
+| 新对话后首问 | L1 为空；指代「刚才」类问句无槽位可解，走原问句或引导换说法 |
+| 切换学校后继续同对话 | 每轮 turn 存 `active_sch_id` 快照；L1 槽位仅作指代，**不**替代 Scope（§2.6.3） |
+| 空对话（未提问） | POST 创建后 `turn_count=0`；可定时清理超过 24h 且无 turn 的 session（可选） |
+| UI 全量历史 vs Memory | UI 可展示该 session 全部 turn（受 `SESSION_UI_TURN_LIMIT`）；Prompt 仍只用最近 N 轮槽位 |
+
+#### 11.5.6.6 模块与交付物
+
+| 路径 | 说明 |
+|------|------|
+| `backend/app/memory/session_service.py` | 列表/创建/删除/淘汰/归属校验 |
+| `backend/app/api/routes/sessions.py` | Session REST |
+| `frontend/src/api/sessions.js` | 封装 sessions API |
+| `frontend/src/views/Ask.vue` | 左侧栏 + 新对话 + 切换 + 刷新恢复 |
+
+### 11.5.7 不测 P4 的说明
 
 **不做**：问句/对话的向量 episodic memory（pgvector / ES 存全量历史 embedding）。理由：存储与召回成本高、难审计、问数场景 **SQL 槽位** ROI 更高。若后续需要，放入 Phase 2 且须独立评测集。
 
@@ -1299,14 +1428,15 @@ app/policy/effective_policy.py
 
 | 天 | 任务 | 交付物 |
 |----|------|--------|
-| 1 | `V007__agent_memory.sql`：`copilot_user_preference`、可选 `copilot_session_summary`；`copilot_ask_session` 首问 upsert | 迁移脚本 |
-| 1～2 | `app/memory/`：`MemoryService`（读 turn 槽位、fail-open）、`session` 归属校验单测 | 单测：越权 session 忽略 |
+| 1 | `V007__agent_memory.sql`：`copilot_user_preference`、可选 `copilot_session_summary`；`copilot_ask_session` 增 `title`/`updated_at`/`turn_count`、首问 upsert | 迁移脚本 |
+| 1～2 | `app/memory/`：`MemoryService`（读 turn 槽位、fail-open）、`SessionService`（列表/创建/淘汰/归属校验）单测 | 单测：越权 session 忽略 |
+| 2 | `GET/POST/DELETE /api/v1/sessions`、`GET .../messages`；`SESSION_MAX_PER_USER=20` | Session API |
 | 2 | LangGraph 节点 `load_session_memory`；配置 `SESSION_MEMORY_ENABLED`、`MEMORY_PROMPT_MAX_CHARS` | span + trace_log |
 | 2～3 | **P0** 结构化槽位注入 `build_llm_context` / `generate_sql`（`last_sql`、`tables_used`、上轮问句） | 多轮指代 spot check |
 | 3 | **P1** `resolve_references` 规则节点（刚才/同上/同样维度）；失败透传 | 单测：无指代时不改写 |
 | 3～4 | **P1** `copilot_session_summary` + 异步/同步摘要更新（超 3 轮时压缩） | Token 截断单测 |
 | 4～5 | **P2** `GET/PUT/DELETE /api/v1/memory/preferences`；key 白名单；**仅 explicit 进 Prompt** | API + 单测 |
-| 5 | 前端：问数页「偏好设置」抽屉（默认时间范围等）；「新对话」重置 `sessionId` | 用户可自助 |
+| 5 | 前端：问数页 **左侧对话栏**（列表 + 切换 + 删除）；「新对话」；「偏好设置」抽屉；刷新恢复 `activeSessionId` | 用户可自助 |
 | 5～6 | **P3** badcase 审核 → 样例入库流程（运营在 badcase 页一键「转为 L1 样例」草稿） | 闭环文档 |
 | 6 | L1 命中路径 **跳过** Memory 注入；Feature Flag 组合测试 | 路由单测 |
 | 6～7 | **鲁棒性**：DB 超时/空 session/超长历史/Memory 全关；多轮评测子集 5～8 条写入 `EVAL_QUESTIONS.md` | 回归通过 |
@@ -1320,6 +1450,9 @@ app/policy/effective_policy.py
 - [ ] L1 命中时不注入会话 Memory  
 - [ ] 偏好 API 可用；inferred 类偏好 **不进** Prompt  
 - [ ] Prompt Memory 总字符 ≤ 配置上限  
+- [ ] 左侧对话栏：新对话 / 切换 / 删除；每用户 ≤ **20** 条 session；超限淘汰或拒绝可配置  
+- [ ] 切换对话后 L1 槽位随 `sessionId` 变化；L2 偏好跨对话保留  
+- [ ] `GET /sessions/{id}/messages` 与 `load_session_memory` 同源 `copilot_ask_turn`，UI 与 Memory 一致  
 
 ---
 
@@ -1393,7 +1526,8 @@ app/policy/effective_policy.py
 | SQL 注入 | sqlglot 解析 + 参数化 scope 占位符 + 只读账号 |
 | **Memory 污染 Prompt** | 结构化槽位 + 字符上限；L1 路径不注入 |
 | **Memory 读失败拖垮问数** | Fail-open + `memory_skipped` span |
-| **会话越权** | `load_session_memory` 校验 `user_id` |
+| **会话越权** | `load_session_memory` / Session API 校验 `user_id` |
+| **对话历史膨胀** | `SESSION_MAX_PER_USER=20` + `oldest` 淘汰；单对话 UI 可选 `SESSION_UI_TURN_LIMIT` |
 | **Memory 与权限混淆** | 第 6 周仅 `user_id`；第 7 周 Scope 配置驱动（§11.6.0） |
 | Docker 访问本机 MySQL 失败 | 使用 `host.docker.internal`；Linux 生产可改用宿主机 IP |
 | RAGFlow 与 Ollama 抢 GPU | RAGFlow 用 CPU 版；LLM 走宿主机 Ollama；embedding 高峰勿与 14B 同时满载 |
@@ -1491,6 +1625,9 @@ SESSION_MEMORY_ENABLED=true
 USER_PREFERENCE_ENABLED=true
 SESSION_MEMORY_MAX_TURNS=3
 MEMORY_PROMPT_MAX_CHARS=2000
+SESSION_MAX_PER_USER=20
+SESSION_EVICT_POLICY=oldest
+SESSION_UI_TURN_LIMIT=50
 
 # ---------- 动态数据权限（第 7 周）----------
 POLICY_DEFAULT_DENY=true
@@ -1576,11 +1713,12 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 
 ---
 
-**文档版本**：v2.4  
+**文档版本**：v2.5  
 **变更（v2.0）**：明确问数核心路线为 **元数据知识库 + 语义库（前端可配置）+ 向量/全文混合召回 + 多阶段 LangGraph**；计划由 4 周扩展为 **6 周**（第 3～6 周详述）；新增 §9  meta/语义库、§10.6 管理 API、§6.1 多阶段节点。  
 **变更（v2.1）**：§9.2 区分 **自动读取**（`table_comment_auto` / `column_comment_auto` / `data_type`）与 **人工定义**（`description_manual`）；人工非空优先；新增 `GET /introspect/tables/{tableName}` 与前端表名录入向导。  
 **变更（v2.2）**：计划扩展为 **7 周**；新增 **§11.5 Agent Memory**（P0～P3）；原评测周后移。  
 **变更（v2.4）**：§2.6.1 增 **零硬编码字段名**；§11.6.0 配置驱动原则；第 6 周 Memory 去除 sch/region 表述；第 7 周权限改为 dimension_code + table/column meta 动态绑定，JWT `active_scopes` 替代 active_sch_id 硬编码。  
+**变更（v2.5）**：新增 **§11.5.6 对话历史管理**——问数页 **左侧对话栏**、新对话、每用户 **20** 条 session 上限、`/api/v1/sessions` API；与 L1/L2 Memory 边界写清；§8.1 / 第 6 周任务与验收同步更新。  
 **维护**：随 meta、Memory、DataScope DDL、评测集更新同步改第 2.6、9、11.5、11.6、12、15 节；每完成里程碑更新 [PROGRESS.md](./PROGRESS.md)。
 
 ---

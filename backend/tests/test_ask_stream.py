@@ -51,11 +51,13 @@ def test_all_graph_nodes_have_labels():
     expected = {
         "normalize_question",
         "extract_keywords",
+        "do_recall_tables",
         "do_recall_columns",
         "do_recall_metrics",
         "do_recall_field_values",
         "merge_retrieved_info",
         "filter_tables",
+        "filter_columns",
         "filter_metrics",
         "build_llm_context",
         "match_curated",

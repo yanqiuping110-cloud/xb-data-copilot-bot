@@ -9,8 +9,26 @@ from app.meta.repository import (
     IndexableColumnRow,
     IndexableFieldValueRow,
     IndexableMetricRow,
+    IndexableTableRow,
     parse_alias_json,
 )
+
+
+def build_table_search_text(row: IndexableTableRow) -> str:
+    """表级向量索引文本：表名 + 有效描述 + 域/角色/粒度 + 字段摘要。"""
+    parts = [row.table_name]
+    desc = effective_description(row.description_manual, row.table_comment_auto)
+    if desc:
+        parts.append(desc)
+    if row.biz_domain:
+        parts.append(row.biz_domain)
+    if row.table_role:
+        parts.append(row.table_role)
+    if row.grain:
+        parts.append(row.grain)
+    if row.column_summary:
+        parts.append(row.column_summary)
+    return " ".join(parts).strip()
 
 
 def build_column_search_text(row: IndexableColumnRow) -> str:

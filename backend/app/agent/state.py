@@ -8,7 +8,7 @@ from typing import Any, TypedDict
 
 from app.agent.context_builder import MergedRecallContext
 from app.ask.models import MatchedQuery
-from app.retrieval.hybrid import RecalledColumn, RecalledFieldValue, RecalledMetric
+from app.retrieval.hybrid import RecalledColumn, RecalledFieldValue, RecalledMetric, RecalledTable
 
 
 class AskGraphState(TypedDict, total=False):
@@ -19,6 +19,7 @@ class AskGraphState(TypedDict, total=False):
     normalized_question: str
     keywords: list[str]
     recall_mode: str
+    recall_tables: list[RecalledTable]
     recall_columns: list[RecalledColumn]
     recall_metrics: list[RecalledMetric]
     recall_field_values: list[RecalledFieldValue]

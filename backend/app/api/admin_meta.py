@@ -374,6 +374,7 @@ async def rebuild_search_index(
     finally:
         await svc.close()
     return RebuildIndexResponse(
+        tables=result.tables,
         columns=result.columns,
         metrics=result.metrics,
         field_values=result.field_values,

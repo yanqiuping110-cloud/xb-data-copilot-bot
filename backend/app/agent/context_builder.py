@@ -11,15 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ask.semantic_repository import CuratedSqlExample, SemanticRepository
 from app.core.context import UserContext
 from app.meta.effective import effective_description
+from app.meta.repository import ColumnMetaRow, MetaRepository, RelationRow, TableMetaRow, parse_alias_json
 from app.policy.role_policy import build_llm_sql_generation_constraints, build_role_context_header
-from app.meta.repository import MetaRepository, TableMetaRow
 from app.retrieval.hybrid import (
     HybridRecallResult,
     RecalledColumn,
     RecalledFieldValue,
     RecalledMetric,
+    RecalledTable,
 )
 from app.sql.whitelist import get_allowed_tables
+from config.settings import Settings
 
 
 @dataclass
@@ -28,11 +30,64 @@ class MergedRecallContext:
 
     keywords: list[str]
     recall_mode: str
+    recalled_tables: list[RecalledTable] = field(default_factory=list)
     columns: list[RecalledColumn] = field(default_factory=list)
     metrics: list[RecalledMetric] = field(default_factory=list)
     field_values: list[RecalledFieldValue] = field(default_factory=list)
     tables: list[TableMetaRow] = field(default_factory=list)
     table_names: list[str] = field(default_factory=list)
+    prompt_columns: dict[str, list[str]] = field(default_factory=dict)
+
+
+def _format_sql_literal(value_text: str) -> str:
+    """字段取值映射为 SQL 字面量。"""
+    text = (value_text or "").strip()
+    if not text:
+        return "''"
+    if text.isdigit():
+        return text
+    if text.replace(".", "", 1).isdigit():
+        return text
+    escaped = text.replace("'", "''")
+    return f"'{escaped}'"
+
+
+def _build_field_value_filter_lines(field_values: list[RecalledFieldValue]) -> list[str]:
+    """将召回的字段取值转为必须在 WHERE 中使用的过滤说明。"""
+    lines: list[str] = []
+    for fv in field_values[:10]:
+        label = fv.display_label or fv.value_text
+        literal = _format_sql_literal(fv.value_text)
+        lines.append(
+            f"- 问句匹配「{label}」→ 必须过滤 {fv.table_name}.{fv.column_name} = {literal}"
+            f"（JOIN 后写为 {{别名}}.{fv.column_name} = {literal}）"
+        )
+    return lines
+
+
+async def _collect_default_filter_hints(
+    repo: MetaRepository,
+    table_names: list[str],
+) -> list[str]:
+    """
+    收集候选表上 filter 角色字段的默认过滤说明。
+
+    运营在 description_manual 中维护「默认 status=1」等口径时，此处单独注入 Prompt。
+    """
+    hints: list[str] = []
+    for table_name in table_names:
+        table = await repo.find_table_by_name(table_name)
+        if not table:
+            continue
+        cols = await repo.list_columns(table.id)
+        for col in cols:
+            if col.status != 1 or col.column_role != "filter":
+                continue
+            desc = effective_description(col.description_manual, col.column_comment_auto)
+            if not desc:
+                continue
+            hints.append(f"- 使用 {table_name} 时：{col.column_name} — {desc}")
+    return hints
 
 
 def _score_example_relevance(question: str, example: CuratedSqlExample) -> int:
@@ -56,31 +111,91 @@ def _score_example_relevance(question: str, example: CuratedSqlExample) -> int:
 
 
 def merge_retrieved_info(recall: HybridRecallResult) -> MergedRecallContext:
-    """合并三路召回为统一结构（不做过滤）。"""
+    """合并多路召回为统一结构（不做过滤）。"""
     return MergedRecallContext(
         keywords=recall.keywords,
         recall_mode=recall.recall_mode,
+        recalled_tables=list(recall.tables),
         columns=list(recall.columns),
         metrics=list(recall.metrics),
         field_values=list(recall.field_values),
     )
 
 
-def filter_tables(merged: MergedRecallContext, *, top_n: int = 5) -> MergedRecallContext:
-    """按字段召回得分聚合候选表，保留 Top-N。"""
+def expand_table_names_by_relations(
+    table_names: list[str],
+    relations: list[RelationRow],
+    *,
+    max_tables: int,
+) -> list[str]:
+    """候选表关系扩展：召回主表时自动纳入关联表。"""
+    if not table_names or not relations:
+        return table_names[:max_tables]
+
+    seen = set(table_names)
+    expanded = list(table_names)
+    for name in list(table_names):
+        for rel in relations:
+            if rel.status != 1:
+                continue
+            other: str | None = None
+            if rel.from_table_name == name:
+                other = rel.to_table_name
+            elif rel.to_table_name == name:
+                other = rel.from_table_name
+            if other and other not in seen:
+                seen.add(other)
+                expanded.append(other)
+                if len(expanded) >= max_tables:
+                    return expanded[:max_tables]
+    return expanded[:max_tables]
+
+
+def filter_tables(
+    merged: MergedRecallContext,
+    settings: Settings,
+    *,
+    relations: list[RelationRow] | None = None,
+) -> MergedRecallContext:
+    """
+    表级召回为主筛选候选表，指标/字段/取值作辅助加权，再关系扩展并截断。
+    """
     table_scores: dict[str, float] = {}
-    for col in merged.columns:
-        table_scores[col.table_name] = table_scores.get(col.table_name, 0.0) + col.score
+    es_table_recall = any(t.recall_mode == "es_vector" for t in merged.recalled_tables)
+
+    for t in merged.recalled_tables:
+        if es_table_recall and t.score < settings.table_recall_score_min:
+            continue
+        table_scores[t.table_name] = max(table_scores.get(t.table_name, 0.0), t.score)
+
     for metric in merged.metrics:
         if metric.relevant_tables:
-            for t in metric.relevant_tables.replace(" ", "").split(","):
-                if t:
-                    table_scores[t] = table_scores.get(t, 0.0) + metric.score * 0.5
-    for fv in merged.field_values:
-        table_scores[fv.table_name] = table_scores.get(fv.table_name, 0.0) + fv.score * 0.3
+            for name in metric.relevant_tables.replace(" ", "").split(","):
+                if name:
+                    table_scores[name] = table_scores.get(name, 0.0) + metric.score * 0.5
 
-    ranked = sorted(table_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
-    merged.table_names = [name for name, _ in ranked]
+    for col in merged.columns:
+        table_scores[col.table_name] = table_scores.get(col.table_name, 0.0) + col.score * 0.2
+
+    for fv in merged.field_values:
+        table_scores[fv.table_name] = table_scores.get(fv.table_name, 0.0) + fv.score * 0.1
+
+    if not table_scores and merged.recalled_tables:
+        for t in merged.recalled_tables[: settings.max_tables_in_prompt]:
+            table_scores[t.table_name] = t.score
+
+    ranked = sorted(table_scores.items(), key=lambda x: x[1], reverse=True)
+    merged.table_names = [name for name, _ in ranked[: settings.recall_top_k_table]]
+
+    if relations:
+        merged.table_names = expand_table_names_by_relations(
+            merged.table_names,
+            relations,
+            max_tables=settings.max_tables_in_prompt,
+        )
+    else:
+        merged.table_names = merged.table_names[: settings.max_tables_in_prompt]
+
     return merged
 
 
@@ -90,11 +205,91 @@ def filter_metrics(merged: MergedRecallContext, *, top_n: int = 5) -> MergedReca
     return merged
 
 
+def _join_key_columns(relations: list[RelationRow], table_names: set[str]) -> set[tuple[str, str]]:
+    """候选表在关系定义中出现的 JOIN 键。"""
+    keys: set[tuple[str, str]] = set()
+    for rel in relations:
+        if rel.status != 1:
+            continue
+        if rel.from_table_name in table_names:
+            keys.add((rel.from_table_name, rel.from_column))
+        if rel.to_table_name in table_names:
+            keys.add((rel.to_table_name, rel.to_column))
+    return keys
+
+
+async def filter_columns_for_prompt(
+    merged: MergedRecallContext,
+    repo: MetaRepository,
+    settings: Settings,
+    *,
+    relations: list[RelationRow] | None = None,
+) -> MergedRecallContext:
+    """在候选表内筛选 Prompt 字段（recall_enabled + 召回得分 + JOIN 键/角色必留）。"""
+    rels = relations if relations is not None else await repo.list_relations()
+    table_set = set(merged.table_names)
+    join_keys = _join_key_columns(rels, table_set)
+    recalled_scores = {(c.table_name, c.column_name): c.score for c in merged.columns}
+
+    prompt_columns: dict[str, list[str]] = {}
+    for table_name in merged.table_names:
+        table = await repo.find_table_by_name(table_name)
+        if not table:
+            continue
+        cols = await repo.list_columns(table.id)
+        scored: list[tuple[float, str, ColumnMetaRow]] = []
+
+        for col in cols:
+            if col.status != 1:
+                continue
+            score = recalled_scores.get((table_name, col.column_name), 0.0)
+            is_join_key = (table_name, col.column_name) in join_keys
+            is_enabled = col.recall_enabled == 1
+
+            if not is_enabled and not is_join_key:
+                continue
+
+            if col.column_role in ("pk", "fk", "time", "filter"):
+                score += 50.0
+            if col.column_name == table.sch_id_column:
+                score += 50.0
+            if is_join_key:
+                score += 100.0
+            if col.column_role == "filter":
+                score += 100.0
+
+            scored.append((score, col.column_name, col))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        seen: set[str] = set()
+        selected: list[str] = []
+        must_include = {
+            name
+            for _, name, col in scored
+            if (table_name, name) in join_keys or col.column_role == "filter"
+        }
+        for name in sorted(must_include):
+            if name not in seen:
+                seen.add(name)
+                selected.append(name)
+        for _, name, _ in scored:
+            if name in seen:
+                continue
+            seen.add(name)
+            selected.append(name)
+            if len(selected) >= settings.max_columns_per_table:
+                break
+        prompt_columns[table_name] = selected
+
+    merged.prompt_columns = prompt_columns
+    return merged
+
+
 async def enrich_tables_from_mysql(
     merged: MergedRecallContext,
     repo: MetaRepository,
 ) -> MergedRecallContext:
-    """从 MySQL 补全候选表的元数据与关系。"""
+    """从 MySQL 补全候选表元数据。"""
     tables: list[TableMetaRow] = []
     for name in merged.table_names:
         row = await repo.find_table_by_name(name)
@@ -133,7 +328,7 @@ async def build_llm_context_text(
     ]
 
     if merged.tables:
-        parts.append("【候选表说明（混合召回）】")
+        parts.append("【候选表说明（表级召回）】")
         for table in merged.tables:
             desc = effective_description(table.description_manual, table.table_comment_auto)
             line = f"- {table.table_name}"
@@ -158,14 +353,48 @@ async def build_llm_context_text(
             ]
             if relevant:
                 parts.append("【表关系与 JOIN 提示】")
-                for r in relevant[:8]:
+                for r in relevant[:12]:
                     hint = r.join_hint or f"{r.from_table_name}.{r.from_column} = {r.to_table_name}.{r.to_column}"
                     parts.append(f"- {r.from_table_name} → {r.to_table_name}（{r.relation_type}）：{hint}")
                 parts.append("")
 
+        if merged.prompt_columns:
+            parts.append("【候选表字段清单（只能使用下列真实列名，禁止编造）】")
+            col_map: dict[str, dict[str, ColumnMetaRow]] = {}
+            for table in merged.tables:
+                col_map[table.table_name] = await meta_repo.get_column_map(table.id)
+
+            for table_name in merged.table_names:
+                names = merged.prompt_columns.get(table_name, [])
+                if not names:
+                    continue
+                col_parts: list[str] = []
+                by_name = col_map.get(table_name, {})
+                for col_name in names:
+                    col = by_name.get(col_name)
+                    if not col:
+                        col_parts.append(col_name)
+                        continue
+                    desc = effective_description(col.description_manual, col.column_comment_auto)
+                    item = col.column_name
+                    if desc:
+                        item += f"({desc})"
+                    aliases = parse_alias_json(col.alias_json)
+                    if aliases:
+                        item += f"[{','.join(aliases)}]"
+                    col_parts.append(item)
+                parts.append(f"- {table_name}: {', '.join(col_parts)}")
+            parts.append("")
+
+    if merged.recalled_tables:
+        parts.append("【相关表（表级召回）】")
+        for t in merged.recalled_tables[:10]:
+            parts.append(f"- {t.table_name}：{t.search_text[:120]}（score={t.score:.3f}）")
+        parts.append("")
+
     if merged.columns:
-        parts.append("【相关字段（召回）】")
-        for col in merged.columns[:12]:
+        parts.append("【相关字段（字段召回）】")
+        for col in merged.columns[:15]:
             parts.append(f"- {col.table_name}.{col.column_name}：{col.search_text[:120]}")
         parts.append("")
 
@@ -180,7 +409,16 @@ async def build_llm_context_text(
             parts.append(line)
         parts.append("")
 
+    default_filters = await _collect_default_filter_hints(meta_repo, merged.table_names)
+    if default_filters:
+        parts.append("【表默认过滤条件（查询该表时必须附加到 WHERE，除非用户明确指定其他条件）】")
+        parts.extend(default_filters)
+        parts.append("")
+
     if merged.field_values:
+        parts.append("【问句匹配的过滤条件（必须在 WHERE 中使用）】")
+        parts.extend(_build_field_value_filter_lines(merged.field_values))
+        parts.append("")
         parts.append("【字段取值映射（枚举/别名 → 库内值）】")
         for fv in merged.field_values[:10]:
             label = fv.display_label or fv.value_text
@@ -211,10 +449,16 @@ def span_detail_from_merged(merged: MergedRecallContext) -> dict:
     return {
         "recall_mode": merged.recall_mode,
         "keywords": merged.keywords,
+        "table_recall_count": len(merged.recalled_tables),
         "column_count": len(merged.columns),
         "metric_count": len(merged.metrics),
         "value_count": len(merged.field_values),
         "table_names": merged.table_names,
+        "prompt_column_counts": {k: len(v) for k, v in merged.prompt_columns.items()},
+        "tables": [
+            {"table": t.table_name, "score": t.score, "mode": t.recall_mode}
+            for t in merged.recalled_tables[:10]
+        ],
         "columns": [
             {"table": c.table_name, "column": c.column_name, "score": c.score, "mode": c.recall_mode}
             for c in merged.columns[:8]

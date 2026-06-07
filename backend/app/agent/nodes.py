@@ -27,6 +27,8 @@ from app.policy.role_policy import (
     strip_sch_id_for_broad_roles,
 )
 from app.sql.executor import execute_readonly
+from app.meta.repository import MetaRepository
+from app.sql.column_guard import validate_sql_columns
 from app.sql.guard import SqlGuardError, validate_sql
 from app.sql.whitelist import refresh_allowed_tables
 from config.settings import Settings
@@ -242,6 +244,16 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
     try:
         final_sql = validate_sql(raw, ctx, max_rows=settings.sql_max_rows)
         final_sql = strip_sch_id_for_broad_roles(final_sql, ctx)
+
+        meta_repo = MetaRepository(c["copilot_session"])
+        table_names = list(
+            dict.fromkeys(
+                re.findall(r"\b(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)", final_sql, flags=re.IGNORECASE)
+            )
+        )
+        column_map = await meta_repo.load_active_column_names(table_names)
+        validate_sql_columns(final_sql, column_map)
+
         found = re.findall(r"\bFROM\s+([a-zA-Z0-9_]+)", final_sql, flags=re.IGNORECASE)
         tables_used = ",".join(dict.fromkeys(t.lower() for t in found))
         await _span(config, "validate_sql", t0, "success", {

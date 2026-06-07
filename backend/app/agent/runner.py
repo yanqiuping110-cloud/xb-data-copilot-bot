@@ -353,6 +353,9 @@ def _progress_detail(node_name: str, update: dict) -> dict | None:
         return None
     if node_name == "extract_keywords" and update.get("keywords"):
         return {"keywords": update["keywords"][:8]}
+    if node_name in ("do_recall_tables", "recall_tables"):
+        tables = update.get("recall_tables") or []
+        return {"count": len(tables)}
     if node_name in ("do_recall_columns", "recall_columns"):
         cols = update.get("recall_columns") or []
         return {"count": len(cols)}

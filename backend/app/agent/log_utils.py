@@ -10,11 +10,13 @@ from typing import Any
 NODE_LABELS: dict[str, str] = {
     "normalize_question": "清洗问句",
     "extract_keywords": "抽取关键词",
+    "do_recall_tables": "召回相关表",
     "do_recall_columns": "召回相关字段",
     "do_recall_metrics": "召回相关指标",
     "do_recall_field_values": "召回字段取值",
     "merge_retrieved_info": "合并召回结果",
     "filter_tables": "筛选候选表",
+    "filter_columns": "筛选 Prompt 字段",
     "filter_metrics": "筛选指标",
     "build_llm_context": "构建问数上下文",
     "match_curated": "匹配样例 SQL",
@@ -28,6 +30,7 @@ NODE_LABELS: dict[str, str] = {
 
 # _span 等日志里使用的短节点名 → 图节点名
 _NODE_ALIASES: dict[str, str] = {
+    "recall_tables": "do_recall_tables",
     "recall_columns": "do_recall_columns",
     "recall_metrics": "do_recall_metrics",
     "recall_field_values": "do_recall_field_values",
@@ -69,6 +72,11 @@ def summarize_state_update(update: dict[str, Any] | None) -> dict[str, Any]:
             summary[key] = {"count": len(value), "sample": value[:2]}
         elif key == "columns" and isinstance(value, list):
             summary[key] = value[:20]
+        elif key == "recall_tables":
+            summary[key] = [
+                {"table": t.table_name, "score": round(t.score, 4)}
+                for t in (value or [])[:10]
+            ]
         elif key == "recall_columns":
             summary[key] = [
                 {"table": c.table_name, "column": c.column_name, "score": round(c.score, 4)}
@@ -91,9 +99,11 @@ def summarize_state_update(update: dict[str, Any] | None) -> dict[str, Any]:
         elif key == "merged_recall" and value is not None:
             summary[key] = {
                 "tables": getattr(value, "table_names", None),
+                "table_recall_count": len(getattr(value, "recalled_tables", []) or []),
                 "column_count": len(getattr(value, "columns", []) or []),
                 "metric_count": len(getattr(value, "metrics", []) or []),
                 "value_count": len(getattr(value, "field_values", []) or []),
+                "prompt_columns": getattr(value, "prompt_columns", None),
             }
         elif key == "matched" and value is not None:
             summary[key] = {

@@ -32,6 +32,20 @@ class TableMetaRow:
 
 
 @dataclass
+class IndexableTableRow:
+    """ES 表级索引一行。"""
+
+    table_id: int
+    table_name: str
+    table_role: str | None
+    biz_domain: str | None
+    description_manual: str | None
+    table_comment_auto: str | None
+    grain: str | None
+    column_summary: str | None
+
+
+@dataclass
 class IndexableColumnRow:
     """ES 字段索引一行。"""
 
@@ -354,6 +368,17 @@ class MetaRepository:
         cols = await self.list_columns(table_id)
         return {c.column_name: c for c in cols}
 
+    async def load_active_column_names(self, table_names: list[str]) -> dict[str, set[str]]:
+        """批量加载表的启用字段名，供 SQL 列名校验使用。"""
+        result: dict[str, set[str]] = {}
+        for name in table_names:
+            table = await self.find_table_by_name(name)
+            if not table:
+                continue
+            cols = await self.list_columns(table.id)
+            result[name.lower()] = {c.column_name for c in cols if c.status == 1}
+        return result
+
     async def insert_column(
         self,
         *,
@@ -543,7 +568,52 @@ class MetaRepository:
                 "alias_json": alias_json,
             },
         )
-        return int(result.lastrowid)
+        return result
+
+    async def list_indexable_tables(self) -> list[IndexableTableRow]:
+        """启用表及其 recall_enabled 字段摘要，供 ES 表级向量索引。"""
+        result = await self._session.execute(
+            text(
+                """
+                SELECT t.id AS table_id, t.table_name, t.table_role, t.biz_domain,
+                       t.description_manual, t.table_comment_auto, t.grain,
+                       GROUP_CONCAT(
+                           CONCAT(
+                               c.column_name, ' ',
+                               COALESCE(NULLIF(TRIM(c.description_manual), ''), c.column_comment_auto, '')
+                           )
+                           ORDER BY c.ordinal_position, c.column_name
+                           SEPARATOR ' '
+                       ) AS column_summary
+                FROM copilot_table_meta t
+                LEFT JOIN copilot_column_meta c
+                    ON c.table_id = t.id
+                   AND c.deleted = 0 AND c.status = 1 AND c.recall_enabled = 1
+                WHERE t.deleted = 0 AND t.status = 1
+                GROUP BY t.id, t.table_name, t.table_role, t.biz_domain,
+                         t.description_manual, t.table_comment_auto, t.grain
+                ORDER BY t.table_name
+                """
+            )
+        )
+        rows: list[IndexableTableRow] = []
+        for r in result.mappings().all():
+            summary = r.get("column_summary")
+            if summary and len(summary) > 800:
+                summary = summary[:800]
+            rows.append(
+                IndexableTableRow(
+                    table_id=int(r["table_id"]),
+                    table_name=str(r["table_name"]),
+                    table_role=r.get("table_role"),
+                    biz_domain=r.get("biz_domain"),
+                    description_manual=r.get("description_manual"),
+                    table_comment_auto=r.get("table_comment_auto"),
+                    grain=r.get("grain"),
+                    column_summary=summary,
+                )
+            )
+        return rows
 
     async def list_indexable_columns(self) -> list[IndexableColumnRow]:
         """启用表下有效字段，供 ES 向量索引。"""
