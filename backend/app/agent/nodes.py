@@ -15,7 +15,6 @@ from app.agent.llm_sql import generate_sql_from_llm
 from app.agent.log_utils import get_node_label, get_status_label
 from app.agent.state import AskGraphState
 from app.core.log_config import get_logger
-from app.ask.query_match import ensure_can_run, match_question_async
 from app.core.context import UserContext, UserRole
 from app.observability import tracer
 from app.observability.trace_log import TraceLogCollector
@@ -92,54 +91,8 @@ async def normalize_question(state: AskGraphState, config: RunnableConfig) -> di
     return {"normalized_question": normalized, "status": "running"}
 
 
-async def match_curated(state: AskGraphState, config: RunnableConfig) -> dict:
-    """L1 库内样例 + MVP 兜底匹配。"""
-    t0 = time.perf_counter()
-    c = _cfg(config)
-    ctx: UserContext = c["ctx"]
-    session = c["copilot_session"]
-    question = state.get("normalized_question") or ""
-
-    matched = await match_question_async(question, ctx, session)
-    detail = {"matched": matched is not None, "source": matched.match_source if matched else None}
-    await _span(config, "match_curated", t0, "success" if matched else "fail", detail)
-
-    if matched is None:
-        return {"matched": None, "degrade_level": 0}
-
-    try:
-        ensure_can_run(matched, ctx)
-    except PolicyError as exc:
-        await _span(
-            config,
-            "match_curated",
-            t0,
-            "fail",
-            {"error_code": exc.code, "error_message": exc.message, "matched": True},
-        )
-        return {
-            "matched": None,
-            "status": "fail",
-            "error_code": exc.code,
-            "error_message": exc.message,
-        }
-
-    return {
-        "matched": matched,
-        "raw_sql": matched.sql,
-        "sql_params": dict(matched.params),
-        "tables_used": ",".join(matched.tables),
-        "degrade_level": matched.degrade_level,
-        "value_column": matched.value_column,
-        "answer_template": matched.answer_template,
-    }
-
-
 async def generate_sql(state: AskGraphState, config: RunnableConfig) -> dict:
     """LLM 生成 SQL（L0）；失败可 L2 重试一次。"""
-    if state.get("matched") is not None:
-        return {}
-
     t0 = time.perf_counter()
     c = _cfg(config)
     ctx: UserContext = c["ctx"]
@@ -452,15 +405,6 @@ async def format_answer(state: AskGraphState, config: RunnableConfig) -> dict:
         {"answer_preview": answer},
     )
     return {"answer": answer, "status": "success"}
-
-
-def route_after_match(state: AskGraphState) -> str:
-    """命中 L1/MVP 则跳过 LLM。"""
-    if state.get("error_code"):
-        return "format_answer"
-    if state.get("matched") is not None:
-        return "validate_sql"
-    return "generate_sql"
 
 
 _CORRECTABLE_CODES = frozenset(

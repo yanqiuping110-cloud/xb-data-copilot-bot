@@ -9,6 +9,9 @@ from typing import Any
 # LangGraph 图节点 → 中文含义（与 graph.py 节点名一致）
 NODE_LABELS: dict[str, str] = {
     "normalize_question": "清洗问句",
+    "load_session_memory": "加载会话记忆",
+    "load_user_preference": "加载用户偏好",
+    "resolve_references": "指代消解",
     "extract_keywords": "抽取关键词",
     "do_recall_tables": "召回相关表",
     "do_recall_columns": "召回相关字段",
@@ -19,7 +22,6 @@ NODE_LABELS: dict[str, str] = {
     "filter_columns": "筛选 Prompt 字段",
     "filter_metrics": "筛选指标",
     "build_llm_context": "构建问数上下文",
-    "match_curated": "匹配样例 SQL",
     "generate_sql": "生成 SQL",
     "validate_sql": "校验 SQL",
     "correct_sql": "修正 SQL",
@@ -41,6 +43,7 @@ STATUS_LABELS: dict[str, str] = {
     "fail": "失败",
     "empty": "无结果",
     "degraded": "降级",
+    "cancelled": "已中断",
 }
 
 

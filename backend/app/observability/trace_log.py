@@ -12,6 +12,7 @@ _MAX_JSON_BYTES = 512 * 1024
 _MAX_SQL_LEN = 4096
 _MAX_TEXT_PREVIEW = 500
 _MAX_ROWS_SAMPLE = 2
+_MAX_RESULT_ROWS = 100
 
 
 def _utc_now_iso() -> str:
@@ -202,3 +203,57 @@ def build_final_summary(final_state: dict[str, Any]) -> dict[str, Any]:
     if rows:
         summary["rows_sample"] = rows[:_MAX_ROWS_SAMPLE]
     return summary
+
+
+def build_result_json(
+    *,
+    answer: str | None = None,
+    columns: list[str] | None = None,
+    rows: list[list] | None = None,
+    error_message: str | None = None,
+    max_rows: int = _MAX_RESULT_ROWS,
+) -> str:
+    """构建写入 copilot_ask_turn.result_json 的快照（供历史 UI 回放）。"""
+    payload: dict[str, Any] = {}
+    if answer:
+        payload["answer"] = answer
+    if columns:
+        payload["columns"] = columns
+    if rows:
+        payload["rows"] = rows[:max_rows]
+    if error_message:
+        payload["error_message"] = error_message
+    return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def parse_result_snapshot(
+    result_json: str | None,
+    *,
+    trace_log: str | None = None,
+) -> dict[str, Any]:
+    """解析 turn 结果快照；无 result_json 时从 trace_log.final 降级。"""
+    if result_json:
+        try:
+            data = json.loads(result_json)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+    if not trace_log:
+        return {}
+
+    try:
+        data = json.loads(trace_log)
+    except json.JSONDecodeError:
+        return {}
+
+    final = data.get("final") or {}
+    out: dict[str, Any] = {}
+    if final.get("answer_preview"):
+        out["answer"] = final["answer_preview"]
+    if final.get("rows_sample"):
+        out["rows"] = final["rows_sample"]
+    if data.get("error_message"):
+        out["error_message"] = data["error_message"]
+    return out

@@ -4,15 +4,15 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ask.service import handle_ask, handle_ask_stream, wants_stream
+from app.ask.service import handle_ask, handle_ask_cancel, handle_ask_stream, wants_stream
 from app.core.context import UserContext
 from app.core.security import get_current_user
 from app.db.copilot import get_copilot_session
-from app.schemas.ask import AskRequest, AskResponse
+from app.schemas.ask import AskCancelRequest, AskCancelResponse, AskRequest, AskResponse
 from config.settings import Settings, get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["ask"])
@@ -56,3 +56,28 @@ async def ask(
         )
 
     return await handle_ask(body, ctx, session, settings)
+
+
+@router.post(
+    "/ask/cancel",
+    response_model=AskCancelResponse,
+    response_model_by_alias=True,
+)
+async def ask_cancel(
+    body: AskCancelRequest,
+    ctx: Annotated[UserContext, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_copilot_session)],
+) -> AskCancelResponse:
+    """用户主动中断进行中的问数（仅 pending turn）。"""
+    ok = await handle_ask_cancel(body.trace_id, ctx, session)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "CANCEL_NOT_APPLICABLE",
+                    "message": "问数已结束或不存在，无法中断",
+                }
+            },
+        )
+    return AskCancelResponse(ok=True, trace_id=body.trace_id)

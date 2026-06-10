@@ -76,13 +76,14 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MetaAdminNav from '../components/MetaAdminNav.vue'
 import { fetchMe } from '../api/auth'
 import { createSqlExample, deleteSqlExample, listSqlExamples, updateSqlExample } from '../api/meta'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const saving = ref(false)
 const examples = ref([])
@@ -99,6 +100,11 @@ const form = reactive({
 onMounted(async () => {
   if (!(await guardMetaManager())) return
   await loadList()
+  const editFromQuery = route.query.editId
+  if (editFromQuery) {
+    const row = examples.value.find((e) => String(e.id) === String(editFromQuery))
+    if (row) openEdit(row)
+  }
   const prefill = sessionStorage.getItem('badcasePrefill')
   if (prefill) {
     sessionStorage.removeItem('badcasePrefill')

@@ -20,10 +20,24 @@ class AskRequest(CamelModel):
     options: AskOptions | None = None
 
 
+class AskCancelRequest(CamelModel):
+    """用户主动中断进行中的问数。"""
+
+    trace_id: str
+
+
+class AskCancelResponse(CamelModel):
+    """POST /ask/cancel 响应。"""
+
+    ok: bool
+    trace_id: str
+
+
 class AskResponse(CamelModel):
     """问数成功或降级响应。"""
 
     trace_id: str
+    session_id: str | None = None
     status: str
     degrade_level: int = 0
     sql: str | None = None

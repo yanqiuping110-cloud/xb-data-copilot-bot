@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "description": "第 6 周 Agent Memory 多轮评测子集",
+  "cases": [
+    {
+      "id": "mem-01",
+      "role": "SCHOOL",
+      "turns": [
+        { "question": "本校本月跳绳参与人数是多少？", "expect": { "status": "success" } },
+        {
+          "question": "按刚才的维度查上周",
+          "expect": { "status": "success", "reference_resolved": true }
+        }
+      ]
+    },
+    {
+      "id": "mem-02",
+      "role": "SCHOOL",
+      "turns": [
+        { "question": "最近7天每日参与人数趋势", "expect": { "status": "success" } },
+        {
+          "question": "同上，但只要跳绳",
+          "expect": { "status": "success", "reference_resolved": true }
+        }
+      ]
+    },
+    {
+      "id": "mem-03",
+      "role": "SCHOOL",
+      "turns": [
+        { "question": "本校活动参与人数", "expect": { "status": "success" } },
+        {
+          "question": "再查一次",
+          "expect": { "status": "success", "reference_resolved": true }
+        }
+      ]
+    },
+    {
+      "id": "mem-04",
+      "role": "ADMIN",
+      "turns": [
+        { "question": "昨日全平台活动参与人次", "expect": { "status": "success" } },
+        {
+          "question": "同样维度看本月",
+          "expect": { "status": "success", "reference_resolved": true }
+        }
+      ]
+    },
+    {
+      "id": "mem-05",
+      "role": "SCHOOL",
+      "new_session_on_turn": 2,
+      "turns": [
+        { "question": "本校本月跳绳参与人数", "expect": { "status": "success" } },
+        {
+          "question": "参与人数呢",
+          "expect": { "status": "success", "memory_empty_ok": true }
+        }
+      ]
+    },
+    {
+      "id": "mem-06",
+      "role": "SCHOOL",
+      "preferences": {
+        "default_time_range": { "unit": "month" }
+      },
+      "turns": [
+        { "question": "本校跳绳参与人数", "expect": { "status": "success" } },
+        { "question": "参与人数呢", "expect": { "status": "success" } }
+      ]
+    },
+    {
+      "id": "mem-07",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "查询不存在的虚构指标 xyzabc",
+          "expect": { "status_in": ["success", "fail", "degraded"] }
+        },
+        {
+          "question": "刚才那个再查",
+          "expect": { "status_in": ["success", "fail", "degraded"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "mem-08",
+      "role": "SCHOOL",
+      "turns": [
+        { "question": "本校本月跳绳参与人数是多少？", "expect": { "status": "success" } },
+        {
+          "question": "本校本月跳绳参与人数是多少？",
+          "expect": { "status": "success", "degrade_level_lte": 1 }
+        }
+      ]
+    }
+  ]
+}

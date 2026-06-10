@@ -6,30 +6,12 @@ from __future__ import annotations
 
 import json
 
-from app.ask.semantic_repository import CuratedSqlExample, MetricDefinition, SemanticRepository
+from app.ask.example_ranker import rank_curated_examples_for_prompt
+from app.ask.semantic_repository import SemanticRepository
 from app.core.context import UserContext
 from app.policy.role_policy import build_llm_sql_generation_constraints, build_role_context_header
 from app.sql.whitelist import get_allowed_tables
-
-
-def _score_example_relevance(question: str, example: CuratedSqlExample) -> int:
-    """简单关键词重叠得分，用于挑选 Top-K 样例放入 Prompt。"""
-    q = question
-    score = 0
-    for token in example.question_pattern.replace("（", " ").replace("）", " ").split():
-        if len(token) >= 2 and token in q:
-            score += 2
-    meta = example.meta
-    for kw in meta.get("matchAll", []):
-        if kw in q:
-            score += 1
-    for group in meta.get("matchAllGroups", []):
-        if any(k in q for k in group):
-            score += 1
-    for kw in meta.get("matchAny", []):
-        if kw in q:
-            score += 1
-    return score
+from config.settings import Settings, get_settings
 
 
 async def build_retrieval_context(
@@ -37,13 +19,14 @@ async def build_retrieval_context(
     repo: SemanticRepository,
     ctx: UserContext,
     *,
-    example_top_k: int = 5,
+    settings: Settings | None = None,
 ) -> str:
     """
     拼接检索上下文文本，供 generate_sql Prompt 使用。
 
     无数据时仍返回表白名单说明，不阻塞流水线。
     """
+    cfg = settings or get_settings()
     metrics = await repo.list_metrics()
     examples = await repo.list_sql_examples()
     allowed = sorted(get_allowed_tables())
@@ -74,15 +57,17 @@ async def build_retrieval_context(
             parts.append(line)
         parts.append("")
 
-    if examples:
-        ranked = sorted(
-            examples,
-            key=lambda ex: (_score_example_relevance(question, ex), -ex.degrade_priority),
-            reverse=True,
-        )[:example_top_k]
+    ranked = rank_curated_examples_for_prompt(
+        question,
+        ctx,
+        examples,
+        top_k=cfg.curated_example_top_k,
+        min_score=cfg.curated_example_min_score,
+    )
+    if ranked:
         parts.append("【相似样例 SQL（仅供参考，勿照搬若不符合问句）】")
-        for ex in ranked:
-            parts.append(f"问法示例：{ex.question_pattern}")
+        for ex, relevance in ranked:
+            parts.append(f"问法示例：{ex.question_pattern}（相关度={relevance}）")
             parts.append(f"SQL：{ex.sql_text[:500]}")
             parts.append("")
 

@@ -170,6 +170,7 @@ class BadcaseRow:
     is_badcase: int
     human_corrected_sql: str | None
     created_at: datetime
+    role: str | None = None
 
 
 @dataclass
@@ -1138,6 +1139,23 @@ class MetaRepository:
             {"id": example_id},
         )
 
+    async def get_turn_by_trace(self, trace_id: str) -> BadcaseRow | None:
+        """按 trace_id 读取问数 turn（badcase 转 L1 等）。"""
+        result = await self._session.execute(
+            text(
+                """
+                SELECT trace_id, question, final_sql, status, user_feedback,
+                       is_badcase, human_corrected_sql, created_at, role
+                FROM copilot_ask_turn
+                WHERE trace_id = :trace_id AND deleted = 0
+                LIMIT 1
+                """
+            ),
+            {"trace_id": trace_id},
+        )
+        row = result.mappings().first()
+        return _map_badcase(row) if row else None
+
     async def list_badcases(self, *, limit: int = 50, offset: int = 0) -> list[BadcaseRow]:
         result = await self._session.execute(
             text(
@@ -1224,6 +1242,7 @@ def _map_badcase(row) -> BadcaseRow:
         is_badcase=int(row["is_badcase"]),
         human_corrected_sql=row.get("human_corrected_sql"),
         created_at=row["created_at"],
+        role=row.get("role"),
     )
 
 

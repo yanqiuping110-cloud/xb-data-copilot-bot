@@ -10,12 +10,18 @@ export function postAsk(data) {
   return request.post('/api/v1/ask', data)
 }
 
+/** 用户主动中断进行中的问数 */
+export function postAskCancel(traceId) {
+  return request.post('/api/v1/ask/cancel', { traceId })
+}
+
 /**
  * 流式问数：SSE 推送 LangGraph 节点进度与最终结果。
  *
  * @param {object} params
  * @param {string} params.question
  * @param {string} [params.sessionId]
+ * @param {string} [params.traceId]
  * @param {(evt: { node: string, label: string, detail?: object }) => void} [params.onProgress]
  * @param {(result: object) => void} [params.onDone]
  * @param {(err: { code: string, message: string }) => void} [params.onError]
@@ -24,6 +30,7 @@ export function postAsk(data) {
 export async function postAskStream({
   question,
   sessionId,
+  traceId,
   onProgress,
   onDone,
   onError,
@@ -36,16 +43,28 @@ export async function postAskStream({
   }
 
   const url = `${API_BASE}/api/v1/ask`
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      question,
-      sessionId,
-      options: { stream: true },
-    }),
-    signal,
-  })
+  let resp
+  try {
+    resp = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        question,
+        sessionId,
+        traceId,
+        options: { stream: true },
+      }),
+      signal,
+    })
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw err
+    }
+    const message = err?.message || '问数请求失败'
+    const e = { code: 'NETWORK_ERROR', message }
+    onError?.(e)
+    throw err
+  }
 
   if (!resp.ok) {
     let message = '问数请求失败'
@@ -98,7 +117,19 @@ export async function postAskStream({
   }
 
   while (true) {
-    const { done, value } = await reader.read()
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    let readResult
+    try {
+      readResult = await reader.read()
+    } catch (err) {
+      if (err?.name === 'AbortError' || signal?.aborted) {
+        throw err
+      }
+      throw err
+    }
+    const { done, value } = readResult
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const parts = buffer.split('\n\n')

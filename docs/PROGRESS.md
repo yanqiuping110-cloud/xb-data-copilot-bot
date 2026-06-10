@@ -29,7 +29,8 @@
 | **混合召回（ES）** | ✅ 完成 | `HybridRetriever` + keyword 降级；接入 LangGraph |
 | **多阶段 LangGraph** | ✅ 完成 | 召回链 + `correct_sql`；见 §6.1 |
 | **前端 meta 管理页** | ✅ 完成 | 表/字段/关系/取值/指标/L1/badcase + 问数页反馈 |
-| 评测集 | ⬜ 未开始 | `docs/EVAL_QUESTIONS.md` |
+| **Agent Memory（第 6 周）** | ✅ 完成 | Memory + 偏好抽屉 + badcase→L1 草稿 + 多轮评测子集 |
+| 评测集 | 🟡 部分 | `EVAL_QUESTIONS.md` + `replay_eval.py`（Memory 子集）；全量第 8 周 |
 
 ---
 
@@ -97,11 +98,19 @@
 
 ---
 
-## 第 6 周（待开始）
+## 第 6 周（Agent Memory · 已完成）
 
-| 周 | 重点 | 状态 |
-|----|------|------|
-| 第 6 周 | 评测回归、文档、MVP 演示 | ⬜ |
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `V007__agent_memory.sql` | ✅ | session 扩展 + `copilot_user_preference` + `copilot_session_summary` |
+| `app/memory/` | ✅ | `SessionService`、`MemoryService`、`reference_resolver`、`badcase_l1` |
+| `GET/POST/DELETE /api/v1/sessions` | ✅ | 含 messages、20 条上限淘汰 |
+| `GET/PUT/DELETE /api/v1/memory/preferences` | ✅ | key 白名单 |
+| LangGraph `load_session_memory` 等 3 节点 | ✅ | Fail-open；注入 `build_llm_context` |
+| 问数页左侧对话栏 + 偏好抽屉 | ✅ | 新对话 / 切换 / 删除 / 偏好设置 |
+| 本机执行 V007 迁移 | ✅ | 用户已执行 |
+| badcase → L1 一键草稿（P3） | ✅ | `POST .../draft-sql-example`；`draft` 样例不参与匹配 |
+| `EVAL_QUESTIONS.md` + `replay_eval.py` | ✅ | 8 条多轮用例 `docs/eval/memory_multiturn.json` |
 
 ---
 
@@ -205,5 +214,7 @@ python scripts/build_search_index.py
 
 ## 下一步
 
-1. **第 6 周**：`EVAL_QUESTIONS.md` + `replay_eval.py` 评测基线。  
-2. 运营闭环验证：badcase → 补 meta/指标或 L1 → 重建索引 → 再问数（开放域问数 span 应含 `recall_columns` 等）。
+1. **多轮评测**：`python scripts/replay_eval.py --subset memory --token "<JWT>"`  
+2. **第 7 周**：动态数据权限（`V008` + `EffectivePolicy`）。  
+3. **第 8 周**：扩展 `EVAL_QUESTIONS` 至 15～30 条开放域 + 全量 `replay_eval`。  
+4. 运营闭环：badcase → 转 L1 草稿 → 审核发布 → 再问数验证。

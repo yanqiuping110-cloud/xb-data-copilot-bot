@@ -80,6 +80,16 @@ async def insert_span(
     )
 
 
+async def get_turn_status(session: AsyncSession, trace_id: str) -> str | None:
+    """读取 turn 当前 status；不存在返回 None。"""
+    result = await session.execute(
+        text("SELECT status FROM copilot_ask_turn WHERE trace_id = :trace_id LIMIT 1"),
+        {"trace_id": trace_id},
+    )
+    row = result.mappings().first()
+    return row["status"] if row else None
+
+
 async def finish_turn(
     session: AsyncSession,
     *,
@@ -97,8 +107,9 @@ async def finish_turn(
     token_in: int | None = None,
     token_out: int | None = None,
     trace_log: str | None = None,
+    result_json: str | None = None,
 ) -> None:
-    """更新 copilot_ask_turn 为终态。"""
+    """更新 copilot_ask_turn 为终态（已 cancelled 的 turn 不会被覆盖）。"""
     await session.execute(
         text(
             """
@@ -115,8 +126,9 @@ async def finish_turn(
                 retry_count = :retry_count,
                 token_in = :token_in,
                 token_out = :token_out,
-                trace_log = :trace_log
-            WHERE trace_id = :trace_id
+                trace_log = :trace_log,
+                result_json = :result_json
+            WHERE trace_id = :trace_id AND status != 'cancelled'
             """
         ),
         {
@@ -134,8 +146,54 @@ async def finish_turn(
             "token_in": token_in,
             "token_out": token_out,
             "trace_log": trace_log,
+            "result_json": result_json,
         },
     )
+
+
+async def finish_turn_user_cancelled(
+    session: AsyncSession,
+    *,
+    trace_id: str,
+    user_id: int,
+    latency_ms_total: int | None = None,
+    latency_ms_first_token: int | None = None,
+    trace_log: str | None = None,
+) -> bool:
+    """
+    用户主动中断：仅 pending 的 turn 标记为 cancelled。
+
+    Returns:
+        是否成功更新（False 表示已结束或不存在）。
+    """
+    result = await session.execute(
+        text(
+            """
+            UPDATE copilot_ask_turn SET
+                status = 'cancelled',
+                error_code = 'USER_CANCELLED',
+                latency_ms_total = COALESCE(:latency_ms_total, latency_ms_total),
+                latency_ms_first_token = COALESCE(:latency_ms_first_token, latency_ms_first_token),
+                trace_log = COALESCE(:trace_log, trace_log),
+                result_json = :result_json
+            WHERE trace_id = :trace_id
+              AND user_id = :user_id
+              AND status = 'pending'
+            """
+        ),
+        {
+            "trace_id": trace_id,
+            "user_id": user_id,
+            "latency_ms_total": latency_ms_total,
+            "latency_ms_first_token": latency_ms_first_token,
+            "trace_log": trace_log,
+            "result_json": json.dumps(
+                {"error_message": "用户主动中断"},
+                ensure_ascii=False,
+            ),
+        },
+    )
+    return bool(getattr(result, "rowcount", 0))
 
 
 async def insert_audit(

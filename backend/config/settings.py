@@ -118,6 +118,32 @@ class Settings(BaseSettings):
     max_columns_per_table: int = Field(default=15, alias="MAX_COLUMNS_PER_TABLE")
     table_recall_score_min: float = Field(default=0.7, alias="TABLE_RECALL_SCORE_MIN")
     recall_keyword_fallback: bool = Field(default=True, alias="RECALL_KEYWORD_FALLBACK")
+    recall_columns_enabled: bool = Field(
+        default=False,
+        alias="RECALL_COLUMNS_ENABLED",
+        description="是否启用 ES/关键词字段召回；关闭时仅按召回表从元数据加载 Prompt 字段",
+    )
+    curated_example_top_k: int = Field(
+        default=5,
+        alias="CURATED_EXAMPLE_TOP_K",
+        description="注入 LLM Prompt 的 L1 样例软参考最大条数",
+    )
+    curated_example_min_score: int = Field(
+        default=1,
+        alias="CURATED_EXAMPLE_MIN_SCORE",
+        description="L1 样例软参考最低相关性得分，低于此值不注入 Prompt",
+    )
+
+    # ---------- Agent Memory（第 6 周）----------
+    memory_enabled: bool = Field(default=True, alias="MEMORY_ENABLED")
+    session_memory_enabled: bool = Field(default=True, alias="SESSION_MEMORY_ENABLED")
+    user_preference_enabled: bool = Field(default=True, alias="USER_PREFERENCE_ENABLED")
+    memory_prompt_max_chars: int = Field(default=2000, alias="MEMORY_PROMPT_MAX_CHARS")
+    session_memory_max_turns: int = Field(default=3, alias="SESSION_MEMORY_MAX_TURNS")
+    session_max_per_user: int = Field(default=20, alias="SESSION_MAX_PER_USER")
+    session_evict_policy: str = Field(default="oldest", alias="SESSION_EVICT_POLICY")
+    session_ui_turn_limit: int = Field(default=30, alias="SESSION_UI_TURN_LIMIT")
+
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     minio_endpoint: str = Field(default="http://127.0.0.1:9000", alias="MINIO_ENDPOINT")
 

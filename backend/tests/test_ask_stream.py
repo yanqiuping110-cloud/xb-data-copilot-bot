@@ -48,24 +48,12 @@ def test_error_event():
 
 
 def test_all_graph_nodes_have_labels():
-    expected = {
-        "normalize_question",
-        "extract_keywords",
-        "do_recall_tables",
-        "do_recall_columns",
-        "do_recall_metrics",
-        "do_recall_field_values",
-        "merge_retrieved_info",
-        "filter_tables",
-        "filter_columns",
-        "filter_metrics",
-        "build_llm_context",
-        "match_curated",
-        "generate_sql",
-        "validate_sql",
-        "correct_sql",
-        "apply_policy",
-        "execute_sql",
-        "format_answer",
-    }
-    assert expected == set(NODE_LABELS.keys())
+    from app.agent.graph import build_ask_graph
+
+    graph = build_ask_graph(recall_columns_enabled=False)
+    skip = {"__start__", "__end__"}
+    for node in graph.nodes:
+        if node in skip:
+            continue
+        assert node in NODE_LABELS, f"missing label for graph node: {node}"
+    assert "do_recall_columns" not in graph.nodes

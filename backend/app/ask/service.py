@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.runner import run_ask_graph, stream_ask_graph
+from app.agent.runner import cancel_ask_run, run_ask_graph, stream_ask_graph
 from app.core.context import UserContext
 from app.schemas.ask import AskRequest, AskResponse
 from config.settings import Settings
@@ -38,3 +38,16 @@ async def handle_ask_stream(
     """处理流式问数请求（SSE 文本帧）。"""
     async for frame in stream_ask_graph(body, ctx, copilot_session, settings):
         yield frame
+
+
+async def handle_ask_cancel(
+    trace_id: str,
+    ctx: UserContext,
+    copilot_session: AsyncSession,
+) -> bool:
+    """用户主动中断问数。"""
+    return await cancel_ask_run(
+        copilot_session,
+        trace_id=trace_id,
+        user_id=ctx.user_id,
+    )

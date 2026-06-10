@@ -7,6 +7,8 @@ import json
 from app.observability.trace_log import (
     TraceLogCollector,
     build_final_summary,
+    build_result_json,
+    parse_result_snapshot,
     resolve_error_node,
     sanitize_detail,
 )
@@ -72,6 +74,31 @@ def test_build_final_summary() -> None:
     assert summary["row_count"] == 1
     assert summary["sql_preview"] == "SELECT 1"
     assert summary["answer_preview"] == "共 1 行"
+
+
+def test_build_result_json_and_parse_snapshot() -> None:
+    raw = build_result_json(
+        answer="共 1 行",
+        columns=["cnt"],
+        rows=[[3]],
+        error_message=None,
+    )
+    parsed = parse_result_snapshot(raw)
+    assert parsed["answer"] == "共 1 行"
+    assert parsed["columns"] == ["cnt"]
+    assert parsed["rows"] == [[3]]
+
+    trace = json.dumps(
+        {
+            "final": {"answer_preview": "预览回答", "rows_sample": [[1]]},
+            "error_message": "表不在白名单",
+        },
+        ensure_ascii=False,
+    )
+    fallback = parse_result_snapshot(None, trace_log=trace)
+    assert fallback["answer"] == "预览回答"
+    assert fallback["rows"] == [[1]]
+    assert fallback["error_message"] == "表不在白名单"
 
 
 def test_non_stream_omits_first_token_in_json() -> None:

@@ -27,10 +27,13 @@
           <el-table-column label="SQL" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">{{ row.finalSql || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openCorrect(row)">修正 SQL</el-button>
-              <el-button link type="primary" @click="goAddExample(row)">补 L1 样例</el-button>
+              <el-button link type="primary" :loading="draftingId === row.traceId" @click="onDraftL1(row)">
+                转 L1 草稿
+              </el-button>
+              <el-button link type="primary" @click="goAddExample(row)">手动补样例</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -54,7 +57,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import MetaAdminNav from '../components/MetaAdminNav.vue'
 import { fetchMe } from '../api/auth'
-import { listBadcases, postFeedback } from '../api/feedback'
+import { draftSqlExampleFromBadcase, listBadcases, postFeedback } from '../api/feedback'
 
 const router = useRouter()
 const loading = ref(false)
@@ -63,6 +66,7 @@ const items = ref([])
 const dialogVisible = ref(false)
 const currentRow = ref(null)
 const correctedSql = ref('')
+const draftingId = ref(null)
 
 function formatTime(iso) {
   if (!iso) return '—'
@@ -119,6 +123,23 @@ async function submitCorrect() {
     await loadList()
   } finally {
     saving.value = false
+  }
+}
+
+async function onDraftL1(row) {
+  const sql = (row.humanCorrectedSql || row.finalSql || '').trim()
+  if (!sql) {
+    ElMessage.warning('请先填写修正 SQL 或确保原问数有 SQL')
+    openCorrect(row)
+    return
+  }
+  draftingId.value = row.traceId
+  try {
+    const res = await draftSqlExampleFromBadcase(row.traceId)
+    ElMessage.success(`已创建 L1 草稿 #${res.id}，请在样例页审核发布`)
+    router.push({ path: '/admin/meta/sql-examples', query: { editId: res.id } })
+  } finally {
+    draftingId.value = null
   }
 }
 

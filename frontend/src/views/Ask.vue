@@ -18,7 +18,7 @@
             />
           </el-select>
         </template>
-        <span v-if="user">{{ user.displayName || user.username }}（{{ user.role }}）</span>
+        <span v-if="user" class="user-label">{{ user.displayName || user.username }}（{{ user.role }}）</span>
         <el-button v-if="user?.role === 'ADMIN'" link type="primary" @click="router.push('/admin/users')">
           用户管理
         </el-button>
@@ -35,99 +35,209 @@
     </header>
 
     <main class="main">
-      <el-card class="chat-card">
-        <div ref="messagesEl" class="messages" @scroll="onMessagesScroll">
-          <div v-for="(msg, idx) in messages" :key="idx" :class="['msg', msg.role]">
-            <div class="bubble">{{ msg.text }}</div>
-            <ul v-if="msg.progress?.length" class="progress-list">
-              <li
-                v-for="(step, si) in msg.progress"
-                :key="si"
-                :class="{ done: step.done, active: step.active }"
-              >
-                {{ step.label }}
-              </li>
-            </ul>
-            <div v-if="msg.meta" class="meta">{{ msg.meta }}</div>
-          </div>
-        </div>
+      <aside class="session-sidebar">
+        <el-button type="primary" class="new-chat-btn" @click="onNewChat">+ 新对话</el-button>
+        <ul class="session-list">
+          <li
+            v-for="s in sessions"
+            :key="s.sessionId"
+            :class="['session-item', { active: s.sessionId === sessionId }]"
+            @click="onSelectSession(s.sessionId)"
+          >
+            <span class="session-title">{{ s.title || '新对话' }}</span>
+            <el-button
+              link
+              type="danger"
+              size="small"
+              class="session-del"
+              @click.stop="onDeleteSession(s.sessionId)"
+            >
+              删
+            </el-button>
+          </li>
+        </ul>
+        <el-button class="pref-btn" link type="primary" @click="openPrefDrawer">偏好设置</el-button>
+      </aside>
 
-        <el-form class="input-row" @submit.prevent="onAsk">
-          <el-input
-            v-model="question"
-            placeholder="例如：本校本月跳绳参与人数 / 最近7天每日趋势"
-            :disabled="loading || needSelectSchool"
-          />
-          <el-button type="primary" native-type="submit" :loading="loading" :disabled="needSelectSchool">
-            提问
-          </el-button>
+      <el-drawer v-model="prefDrawerVisible" title="问数偏好（跨对话生效）" size="360px">
+        <p class="pref-hint">以下偏好会注入后续问数 Prompt，不影响当前对话历史。</p>
+        <el-form label-width="100px" label-position="top">
+          <el-form-item label="默认时间范围">
+            <el-select v-model="prefForm.defaultTimeRange" clearable placeholder="不指定" style="width: 100%">
+              <el-option label="本月" value="month" />
+              <el-option label="本周" value="week" />
+              <el-option label="最近7天" value="last_7_days" />
+              <el-option label="昨日" value="yesterday" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="常用统计粒度">
+            <el-select v-model="prefForm.preferredGrain" clearable placeholder="不指定" style="width: 100%">
+              <el-option label="按日" value="daily" />
+              <el-option label="按周" value="weekly" />
+              <el-option label="按月" value="monthly" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="回答风格">
+            <el-select v-model="prefForm.answerStyle" clearable placeholder="默认" style="width: 100%">
+              <el-option label="简洁" value="concise" />
+              <el-option label="详细" value="detailed" />
+            </el-select>
+          </el-form-item>
         </el-form>
-        <el-alert
-          v-if="needSelectSchool"
-          title="请先选择学校后再提问"
-          type="warning"
-          :closable="false"
-          show-icon
-          style="margin-top: 12px"
-        />
-      </el-card>
+        <template #footer>
+          <el-button @click="prefDrawerVisible = false">取消</el-button>
+          <el-button type="primary" :loading="prefSaving" @click="savePreferences">保存</el-button>
+        </template>
+      </el-drawer>
 
-      <el-card v-if="lastResult" style="margin-top: 16px">
-        <template #header>
-          <div class="result-header">
-            <span>最近一次查询</span>
-            <div v-if="lastResult.traceId" class="feedback-row">
-              <el-button
-                size="small"
-                :type="lastFeedback === 'up' ? 'success' : 'default'"
-                :loading="feedbackLoading"
-                @click="onFeedback('up')"
-              >
-                👍 有用
-              </el-button>
-              <el-button
-                size="small"
-                :type="lastFeedback === 'down' ? 'danger' : 'default'"
-                :loading="feedbackLoading"
-                @click="onFeedback('down')"
-              >
-                👎 不准
-              </el-button>
-              <el-button size="small" :loading="feedbackLoading" @click="onMarkBadcase">
-                标记 badcase
-              </el-button>
+      <div class="chat-area">
+        <div class="chat-shell">
+          <div ref="messagesEl" class="messages" @scroll="onMessagesScroll">
+            <div v-for="(msg, idx) in messages" :key="idx" :class="['msg', msg.role]">
+              <!-- 用户消息 -->
+              <div v-if="msg.role === 'user'" class="bubble user-bubble">{{ msg.text }}</div>
+
+              <!-- 助手消息 -->
+              <div v-else class="response-card" :class="{ error: msg.isError }">
+                <div class="answer-line">{{ msg.text }}</div>
+
+                <ul v-if="msg.progress?.length" class="progress-list">
+                  <li
+                    v-for="(step, si) in msg.progress"
+                    :key="si"
+                    :class="{ done: step.done, active: step.active }"
+                  >
+                    {{ step.label }}
+                  </li>
+                </ul>
+
+                <template v-if="canShowSqlInChat && msg.result?.sql">
+                  <div class="section-label">SQL</div>
+                  <pre class="sql-block">{{ msg.result.sql }}</pre>
+                </template>
+
+                <template v-if="msg.result?.columns?.length && msg.result?.rows?.length">
+                  <div class="section-label">查询结果</div>
+                  <div class="table-wrap">
+                    <el-table
+                      :data="resultTableRows(msg.result)"
+                      border
+                      stripe
+                      size="small"
+                      max-height="320"
+                    >
+                      <el-table-column
+                        v-for="col in msg.result.columns"
+                        :key="col"
+                        :prop="col"
+                        :label="col"
+                        min-width="100"
+                        show-overflow-tooltip
+                      />
+                    </el-table>
+                  </div>
+                </template>
+
+                <div v-if="msg.meta" class="meta">{{ msg.meta }}</div>
+
+                <div v-if="msg.traceId" class="feedback-bar">
+                  <span class="feedback-hint">这条回答有帮助吗？</span>
+                  <div class="feedback-actions">
+                    <el-button
+                      size="small"
+                      round
+                      :type="msg.feedback === 'up' ? 'success' : 'default'"
+                      :loading="feedbackLoadingId === msg.traceId"
+                      @click="onFeedback(msg, 'up')"
+                    >
+                      👍 有用
+                    </el-button>
+                    <el-button
+                      size="small"
+                      round
+                      :type="msg.feedback === 'down' ? 'danger' : 'default'"
+                      :loading="feedbackLoadingId === msg.traceId"
+                      @click="onFeedback(msg, 'down')"
+                    >
+                      👎 不准
+                    </el-button>
+                    <el-button
+                      size="small"
+                      round
+                      plain
+                      type="warning"
+                      :loading="feedbackLoadingId === msg.traceId"
+                      @click="onMarkBadcase(msg)"
+                    >
+                      标记 badcase
+                    </el-button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </template>
-        <p v-if="lastResult.answer"><strong>回答：</strong>{{ lastResult.answer }}</p>
-        <p v-if="lastResult.sql"><strong>SQL：</strong><code>{{ lastResult.sql }}</code></p>
-        <el-table
-          v-if="lastResult.columns?.length"
-          :data="tableRows"
-          border
-          size="small"
-          style="margin-top: 12px"
-        >
-          <el-table-column
-            v-for="col in lastResult.columns"
-            :key="col"
-            :prop="col"
-            :label="col"
-          />
-        </el-table>
-      </el-card>
+
+          <div class="input-panel">
+            <el-form class="input-row" @submit.prevent="onAsk">
+              <el-input
+                v-model="question"
+                type="textarea"
+                :autosize="{ minRows: 1, maxRows: 4 }"
+                placeholder="例如：本校本月跳绳参与人数 / 最近7天每日趋势"
+                :disabled="loading || needSelectSchool"
+                @keydown.enter.exact.prevent="onAsk"
+              />
+              <el-button
+                v-if="!loading"
+                type="primary"
+                native-type="submit"
+                class="ask-btn"
+                :disabled="needSelectSchool"
+              >
+                提问
+              </el-button>
+              <el-button
+                v-else
+                type="danger"
+                plain
+                class="ask-btn"
+                :loading="cancelling"
+                @click="onCancelAsk"
+              >
+                中断
+              </el-button>
+            </el-form>
+            <el-alert
+              v-if="needSelectSchool"
+              title="请先选择学校后再提问"
+              type="warning"
+              :closable="false"
+              show-icon
+              class="school-alert"
+            />
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 </template>
 
 <script setup>
-/** 问数对话页：学校切换 + SSE 流式 POST /api/v1/ask */
+/** 问数对话页：左侧对话栏 + 学校切换 + SSE 流式 POST /api/v1/ask */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchMe, switchSchool } from '../api/auth'
-import { postAskStream } from '../api/ask'
+import { postAskStream, postAskCancel } from '../api/ask'
 import { postFeedback } from '../api/feedback'
+import {
+  createSession,
+  deleteSession,
+  fetchPreferences,
+  fetchSessionMessages,
+  fetchSessions,
+  updatePreferences,
+} from '../api/sessions'
 
 const router = useRouter()
 const user = ref(null)
@@ -135,26 +245,69 @@ const boundSchools = ref([])
 const selectedSchId = ref(null)
 const question = ref('')
 const loading = ref(false)
+const cancelling = ref(false)
+const abortController = ref(null)
+const currentTraceId = ref(null)
 const messages = ref([])
-const lastResult = ref(null)
-const lastFeedback = ref(null)
-const feedbackLoading = ref(false)
-const sessionId = ref(`sess-${Date.now()}`)
+const feedbackLoadingId = ref(null)
+const sessionId = ref(null)
+const sessions = ref([])
 const messagesEl = ref(null)
-/** 用户未手动上滚时为 true，流式输出时自动贴底 */
+const WELCOME_TEXT =
+  '你好，我是问数助手。可尝试：「本校本月跳绳参与人数」「最近7天每日趋势」「昨日全平台活动参与人次」。'
 const stickToBottom = ref(true)
-const SCROLL_THRESHOLD = 32
+const SCROLL_THRESHOLD = 48
+const prefDrawerVisible = ref(false)
+const prefSaving = ref(false)
+const prefForm = ref({
+  defaultTimeRange: null,
+  preferredGrain: null,
+  answerStyle: null,
+})
 
 const needSelectSchool = computed(
   () => user.value?.role === 'SCHOOL' && boundSchools.value.length > 1 && !selectedSchId.value,
 )
 
-const tableRows = computed(() => {
-  if (!lastResult.value?.columns?.length || !lastResult.value?.rows?.length) return []
-  return lastResult.value.rows.map((row) =>
-    Object.fromEntries(lastResult.value.columns.map((col, i) => [col, row[i]])),
+/** 仅系统管理员在聊天对话框内可见 SQL */
+const canShowSqlInChat = computed(() => user.value?.role === 'ADMIN')
+
+function resultTableRows(result) {
+  if (!result?.columns?.length || !result?.rows?.length) return []
+  return result.rows.map((row) =>
+    Object.fromEntries(result.columns.map((col, i) => [col, row[i]])),
   )
-})
+}
+
+function buildMeta(m) {
+  const parts = []
+  if (m.traceId) parts.push(`trace: ${m.traceId}`)
+  if (m.latencyMs) parts.push(`${m.latencyMs}ms`)
+  return parts.length ? parts.join(' · ') : undefined
+}
+
+function buildAssistantHistoryMessage(m) {
+  const isSuccess = m.status === 'success'
+  const isCancelled = m.status === 'cancelled'
+  const text = isSuccess
+    ? m.answer || (m.rowCount != null ? `根据查询结果，共返回 ${m.rowCount} 行数据。` : '查询完成')
+    : isCancelled
+      ? m.errorMessage || m.answer || '已中断查询（用户主动取消）'
+      : m.errorMessage || m.answer || m.status
+  return {
+    role: 'assistant',
+    text,
+    isError: !isSuccess,
+    meta: buildMeta(m),
+    traceId: m.traceId,
+    feedback: null,
+    result: {
+      sql: user.value?.role === 'ADMIN' ? m.finalSql || undefined : undefined,
+      columns: m.columns || undefined,
+      rows: m.rows || undefined,
+    },
+  }
+}
 
 function isAtBottom(el) {
   if (!el) return true
@@ -180,6 +333,89 @@ watch(
   { deep: true },
 )
 
+function resetWelcomeMessages() {
+  messages.value = [{ role: 'assistant', text: WELCOME_TEXT }]
+}
+
+async function loadSessions() {
+  const res = await fetchSessions()
+  sessions.value = res.items || []
+}
+
+async function activateSession(id) {
+  sessionId.value = id
+  localStorage.setItem('activeSessionId', id)
+  const res = await fetchSessionMessages(id)
+  resetWelcomeMessages()
+  for (const m of res.messages || []) {
+    messages.value.push({ role: 'user', text: m.question })
+    messages.value.push(buildAssistantHistoryMessage(m))
+  }
+  await nextTick()
+  scrollMessagesToBottom()
+}
+
+async function onNewChat() {
+  const res = await createSession()
+  await loadSessions()
+  await activateSession(res.sessionId)
+}
+
+async function onSelectSession(id) {
+  if (id === sessionId.value) return
+  await activateSession(id)
+}
+
+async function loadPreferences() {
+  try {
+    const res = await fetchPreferences()
+    const map = Object.fromEntries((res.items || []).map((p) => [p.prefKey, p.prefValue]))
+    prefForm.value.defaultTimeRange = map.default_time_range?.unit ?? map.default_time_range ?? null
+    prefForm.value.preferredGrain = map.preferred_grain ?? null
+    prefForm.value.answerStyle = map.answer_style ?? null
+  } catch {
+    /* 偏好加载失败不阻断问数 */
+  }
+}
+
+function openPrefDrawer() {
+  prefDrawerVisible.value = true
+  loadPreferences()
+}
+
+async function savePreferences() {
+  const prefs = {}
+  if (prefForm.value.defaultTimeRange) {
+    prefs.default_time_range = { unit: prefForm.value.defaultTimeRange }
+  }
+  if (prefForm.value.preferredGrain) {
+    prefs.preferred_grain = prefForm.value.preferredGrain
+  }
+  if (prefForm.value.answerStyle) {
+    prefs.answer_style = prefForm.value.answerStyle
+  }
+  prefSaving.value = true
+  try {
+    await updatePreferences(prefs)
+    ElMessage.success('偏好已保存，后续问数将自动参考')
+    prefDrawerVisible.value = false
+  } finally {
+    prefSaving.value = false
+  }
+}
+
+async function onDeleteSession(id) {
+  await deleteSession(id)
+  await loadSessions()
+  if (sessionId.value === id) {
+    if (sessions.value.length) {
+      await activateSession(sessions.value[0].sessionId)
+    } else {
+      await onNewChat()
+    }
+  }
+}
+
 onMounted(async () => {
   try {
     const res = await fetchMe()
@@ -187,12 +423,17 @@ onMounted(async () => {
     localStorage.setItem('userRole', res.user.role)
     boundSchools.value = res.user.boundSchools || []
     selectedSchId.value = res.user.activeSchId ?? boundSchools.value[0]?.schId ?? null
-    messages.value.push({
-      role: 'assistant',
-      text: '你好，我是问数助手。可尝试：「本校本月跳绳参与人数」「最近7天每日趋势」「昨日全平台活动参与人次」。',
-    })
-    await nextTick()
-    scrollMessagesToBottom()
+
+    await loadSessions()
+    const saved = localStorage.getItem('activeSessionId')
+    const owned = saved && sessions.value.some((s) => s.sessionId === saved)
+    if (owned) {
+      await activateSession(saved)
+    } else if (sessions.value.length) {
+      await activateSession(sessions.value[0].sessionId)
+    } else {
+      await onNewChat()
+    }
   } catch {
     router.push('/login')
   }
@@ -210,13 +451,47 @@ async function onSwitchSchool(schId) {
   }
 }
 
+async function onCancelAsk() {
+  if (!loading.value) return
+  cancelling.value = true
+  const tid = currentTraceId.value
+  try {
+    if (tid) {
+      try {
+        await postAskCancel(tid)
+      } catch {
+        /* 已结束则忽略，仍断开流 */
+      }
+    }
+    abortController.value?.abort()
+  } finally {
+    cancelling.value = false
+  }
+}
+
+function applyCancelledMessage(msg, traceId) {
+  msg.text = '已中断查询（用户主动取消）'
+  msg.isError = true
+  msg.meta = traceId ? `trace: ${traceId}` : undefined
+  msg.traceId = traceId
+  msg.progress?.forEach((step) => {
+    step.active = false
+    step.done = false
+  })
+}
+
 async function onAsk() {
   const q = question.value.trim()
-  if (!q) return
+  if (!q || loading.value) return
   stickToBottom.value = true
   messages.value.push({ role: 'user', text: q })
   question.value = ''
   loading.value = true
+  cancelling.value = false
+
+  const traceId = crypto.randomUUID()
+  currentTraceId.value = traceId
+  abortController.value = new AbortController()
 
   const assistantIdx = messages.value.length
   messages.value.push({
@@ -229,6 +504,8 @@ async function onAsk() {
     await postAskStream({
       question: q,
       sessionId: sessionId.value,
+      traceId,
+      signal: abortController.value.signal,
       onProgress: ({ label }) => {
         const msg = messages.value[assistantIdx]
         if (!msg?.progress) return
@@ -245,15 +522,30 @@ async function onAsk() {
         }
       },
       onDone: (res) => {
-        lastResult.value = res
-        lastFeedback.value = null
+        if (res.sessionId && res.sessionId !== sessionId.value) {
+          sessionId.value = res.sessionId
+          localStorage.setItem('activeSessionId', res.sessionId)
+        }
         const msg = messages.value[assistantIdx]
-        if (res.status === 'success') {
-          msg.text = res.answer || '查询完成'
-          msg.meta = res.traceId ? `trace: ${res.traceId} · ${res.latencyMs}ms` : undefined
-        } else {
-          msg.text = res.errorMessage || '未能回答该问题'
-          msg.meta = res.traceId ? `trace: ${res.traceId}` : undefined
+        const isSuccess = res.status === 'success'
+        const isCancelled = res.status === 'cancelled'
+        msg.isError = !isSuccess
+        if (isCancelled) {
+          applyCancelledMessage(msg, res.traceId || traceId)
+          return
+        }
+        msg.text = isSuccess
+          ? res.answer || '查询完成'
+          : res.errorMessage || '未能回答该问题'
+        msg.meta = res.traceId
+          ? `trace: ${res.traceId}${res.latencyMs ? ` · ${res.latencyMs}ms` : ''}`
+          : undefined
+        msg.traceId = res.traceId
+        msg.feedback = null
+        msg.result = {
+          sql: canShowSqlInChat.value ? res.sql || undefined : undefined,
+          columns: res.columns || undefined,
+          rows: res.rows || undefined,
         }
         msg.progress?.forEach((step) => {
           step.active = false
@@ -263,16 +555,24 @@ async function onAsk() {
       onError: (err) => {
         const msg = messages.value[assistantIdx]
         msg.text = err.message || '问数失败，请稍后重试'
+        msg.isError = true
         msg.meta = undefined
       },
     })
-  } catch {
+  } catch (err) {
     const msg = messages.value[assistantIdx]
-    if (msg.text === '正在分析您的问题…') {
+    if (err?.name === 'AbortError') {
+      applyCancelledMessage(msg, currentTraceId.value)
+    } else if (msg.text === '正在分析您的问题…') {
       msg.text = '请求失败，请稍后重试'
+      msg.isError = true
     }
   } finally {
     loading.value = false
+    cancelling.value = false
+    abortController.value = null
+    currentTraceId.value = null
+    await loadSessions()
   }
 }
 
@@ -282,136 +582,364 @@ function logout() {
   router.push('/login')
 }
 
-async function onFeedback(kind) {
-  if (!lastResult.value?.traceId) return
-  feedbackLoading.value = true
+async function onFeedback(msg, kind) {
+  if (!msg.traceId) return
+  feedbackLoadingId.value = msg.traceId
   try {
-    await postFeedback({ traceId: lastResult.value.traceId, feedback: kind })
-    lastFeedback.value = kind
+    await postFeedback({ traceId: msg.traceId, feedback: kind })
+    msg.feedback = kind
     ElMessage.success(kind === 'up' ? '感谢反馈' : '已记录，我们会改进')
   } finally {
-    feedbackLoading.value = false
+    feedbackLoadingId.value = null
   }
 }
 
-async function onMarkBadcase() {
-  if (!lastResult.value?.traceId) return
-  feedbackLoading.value = true
+async function onMarkBadcase(msg) {
+  if (!msg.traceId) return
+  feedbackLoadingId.value = msg.traceId
   try {
     await postFeedback({
-      traceId: lastResult.value.traceId,
+      traceId: msg.traceId,
       feedback: 'down',
       isBadcase: true,
     })
-    lastFeedback.value = 'down'
+    msg.feedback = 'down'
     ElMessage.success('已标记为 badcase，运营可在元数据管理中处理')
   } finally {
-    feedbackLoading.value = false
+    feedbackLoadingId.value = null
   }
 }
 </script>
 
 <style scoped>
 .layout {
-  min-height: 100vh;
-  background: #f5f7fa;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(160deg, #eef2f8 0%, #f5f7fa 45%, #fafbfc 100%);
+  overflow: hidden;
 }
+
 .header {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 24px;
+  padding: 0 24px;
+  height: 56px;
   background: #fff;
   border-bottom: 1px solid #e4e7ed;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
+
 .title {
-  font-weight: 600;
+  font-weight: 700;
   font-size: 18px;
+  color: #1a1a2e;
+  letter-spacing: 0.02em;
 }
+
 .user-area {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-.main {
-  max-width: 960px;
-  margin: 24px auto;
-  padding: 0 16px;
+
+.user-label {
+  font-size: 13px;
+  color: #606266;
 }
-.chat-card {
-  min-height: 420px;
+
+.main {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+  padding: 16px 20px;
+  min-height: 0;
+  max-width: 1680px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.session-sidebar {
+  width: 240px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e8ecf2;
+  padding: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
 }
+
+.new-chat-btn {
+  width: 100%;
+  margin-bottom: 12px;
+  border-radius: 8px;
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  margin-bottom: 4px;
+  transition: background 0.15s;
+}
+
+.session-item:hover {
+  background: #f5f7fa;
+}
+
+.session-item.active {
+  background: #ecf5ff;
+  color: #409eff;
+  font-weight: 500;
+}
+
+.session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 4px;
+}
+
+.session-del {
+  flex-shrink: 0;
+  padding: 0 4px;
+  opacity: 0.6;
+}
+
+.session-item:hover .session-del {
+  opacity: 1;
+}
+
+.pref-btn {
+  width: 100%;
+  margin-top: 8px;
+  justify-content: flex-start;
+}
+
+.pref-hint {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.chat-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e8ecf2;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  min-height: 0;
+}
+
 .messages {
   flex: 1;
-  min-height: 280px;
-  max-height: 400px;
   overflow-y: auto;
-  margin-bottom: 16px;
+  padding: 24px 28px;
+  min-height: 0;
 }
+
 .msg {
-  margin-bottom: 12px;
+  margin-bottom: 20px;
 }
+
 .msg.user {
-  text-align: right;
+  display: flex;
+  justify-content: flex-end;
 }
-.msg.user .bubble {
-  background: #409eff;
-  color: #fff;
-}
-.msg.assistant .bubble {
-  background: #ecf5ff;
-  color: #303133;
-}
-.bubble {
+
+.user-bubble {
   display: inline-block;
-  padding: 10px 14px;
-  border-radius: 8px;
-  max-width: 85%;
-  text-align: left;
+  max-width: min(680px, 72%);
+  padding: 12px 16px;
+  border-radius: 16px 16px 4px 16px;
+  background: linear-gradient(135deg, #409eff 0%, #337ecc 100%);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.25);
+}
+
+.response-card {
+  max-width: min(920px, 92%);
+  padding: 16px 18px;
+  border-radius: 4px 16px 16px 16px;
+  background: #fafbfc;
+  border: 1px solid #e8ecf2;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.response-card.error {
+  background: #fef0f0;
+  border-color: #fde2e2;
+}
+
+.answer-line {
+  font-size: 14px;
+  line-height: 1.65;
+  color: #303133;
   white-space: pre-wrap;
 }
-.meta {
+
+.section-label {
+  margin: 14px 0 6px;
   font-size: 12px;
+  font-weight: 600;
   color: #909399;
-  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
+
+.sql-block {
+  margin: 0;
+  padding: 12px 14px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border-radius: 8px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.table-wrap {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #ebeef5;
+}
+
+.meta {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #b0b8c4;
+  font-family: monospace;
+}
+
 .progress-list {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   padding: 0;
   font-size: 12px;
   color: #909399;
-  text-align: left;
 }
+
 .progress-list li {
   padding: 2px 0;
 }
+
 .progress-list li.done {
   color: #67c23a;
 }
+
 .progress-list li.active {
   color: #409eff;
   font-weight: 500;
 }
-.input-row {
+
+.feedback-bar {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed #e4e7ed;
   display: flex;
-  gap: 8px;
-}
-code {
-  word-break: break-all;
-  font-size: 12px;
-}
-.result-header {
-  display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 10px;
+}
+
+.feedback-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+.feedback-actions {
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-.feedback-row {
+
+.input-panel {
+  flex-shrink: 0;
+  padding: 16px 20px 20px;
+  border-top: 1px solid #eef0f4;
+  background: #fafbfc;
+}
+
+.input-row {
   display: flex;
-  gap: 8px;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.input-row :deep(.el-textarea__inner) {
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+  box-shadow: none;
+}
+
+.ask-btn {
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 24px;
+  border-radius: 10px;
+}
+
+.school-alert {
+  margin-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .main {
+    flex-direction: column;
+    padding: 12px;
+  }
+
+  .session-sidebar {
+    width: 100%;
+    max-height: 160px;
+  }
+
+  .response-card {
+    max-width: 100%;
+  }
+
+  .user-bubble {
+    max-width: 88%;
+  }
 }
 </style>

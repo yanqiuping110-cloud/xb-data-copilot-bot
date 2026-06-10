@@ -8,6 +8,7 @@ from typing import Any, TypedDict
 
 from app.agent.context_builder import MergedRecallContext
 from app.ask.models import MatchedQuery
+from app.memory.models import SessionMemory, UserPreferenceItem
 from app.retrieval.hybrid import RecalledColumn, RecalledFieldValue, RecalledMetric, RecalledTable
 
 
@@ -17,6 +18,11 @@ class AskGraphState(TypedDict, total=False):
     trace_id: str
     question: str
     normalized_question: str
+    session_memory: SessionMemory | None
+    user_preferences: list[UserPreferenceItem]
+    memory_prompt_text: str
+    reference_hint: str | None
+    memory_skipped: bool
     keywords: list[str]
     recall_mode: str
     recall_tables: list[RecalledTable]

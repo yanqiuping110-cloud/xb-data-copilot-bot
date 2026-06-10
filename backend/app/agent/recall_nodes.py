@@ -243,6 +243,7 @@ async def build_llm_context(state: AskGraphState, config: RunnableConfig) -> dic
     """拼装结构化 Prompt 上下文，替代基线 retrieve_context。"""
     t0 = time.perf_counter()
     c = _cfg(config)
+    settings: Settings = c["settings"]
     question = state.get("normalized_question") or state.get("question") or ""
     merged = _get_merged(state)
 
@@ -255,6 +256,8 @@ async def build_llm_context(state: AskGraphState, config: RunnableConfig) -> dic
                 merged,
                 c["copilot_session"],
                 c["ctx"],
+                settings=settings,
+                memory_prompt_text=state.get("memory_prompt_text") or "",
             )
             detail = span_detail_from_merged(merged)
             detail["chars"] = len(context_text)

@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ask.semantic_repository import CuratedSqlExample, SemanticRepository
+from app.ask.example_ranker import rank_curated_examples_for_prompt
+from app.ask.semantic_repository import SemanticRepository
 from app.core.context import UserContext
 from app.meta.effective import effective_description
 from app.meta.repository import ColumnMetaRow, MetaRepository, RelationRow, TableMetaRow, parse_alias_json
@@ -21,7 +22,7 @@ from app.retrieval.hybrid import (
     RecalledTable,
 )
 from app.sql.whitelist import get_allowed_tables
-from config.settings import Settings
+from config.settings import Settings, get_settings
 
 
 @dataclass
@@ -88,26 +89,6 @@ async def _collect_default_filter_hints(
                 continue
             hints.append(f"- 使用 {table_name} 时：{col.column_name} — {desc}")
     return hints
-
-
-def _score_example_relevance(question: str, example: CuratedSqlExample) -> int:
-    """简单关键词重叠得分，用于挑选 Top-K 样例放入 Prompt。"""
-    q = question
-    score = 0
-    for token in example.question_pattern.replace("（", " ").replace("）", " ").split():
-        if len(token) >= 2 and token in q:
-            score += 2
-    meta = example.meta
-    for kw in meta.get("matchAll", []):
-        if kw in q:
-            score += 1
-    for group in meta.get("matchAllGroups", []):
-        if any(k in q for k in group):
-            score += 1
-    for kw in meta.get("matchAny", []):
-        if kw in q:
-            score += 1
-    return score
 
 
 def merge_retrieved_info(recall: HybridRecallResult) -> MergedRecallContext:
@@ -305,7 +286,8 @@ async def build_llm_context_text(
     copilot_session: AsyncSession,
     ctx: UserContext,
     *,
-    example_top_k: int = 3,
+    settings: Settings | None = None,
+    memory_prompt_text: str = "",
 ) -> str:
     """
     将结构化召回结果拼为 generate_sql Prompt 上下文。
@@ -315,17 +297,28 @@ async def build_llm_context_text(
     meta_repo = MetaRepository(copilot_session)
     sem_repo = SemanticRepository(copilot_session)
     allowed = sorted(get_allowed_tables())
+    cfg = settings or get_settings()
+    example_top_k = cfg.curated_example_top_k
+    example_min_score = cfg.curated_example_min_score
 
     parts: list[str] = [
         build_role_context_header(ctx),
         "",
+    ]
+    if memory_prompt_text:
+        parts.append(memory_prompt_text)
+        parts.append("")
+
+    parts.extend(
+        [
         f"【召回模式】{merged.recall_mode}",
         f"【问句关键词】{', '.join(merged.keywords) or '（整句）'}",
         "",
         "【允许查询的业务表】",
         ", ".join(allowed) or "（未配置，使用默认表）",
         "",
-    ]
+        ]
+    )
 
     if merged.tables:
         parts.append("【候选表说明（表级召回）】")
@@ -426,15 +419,17 @@ async def build_llm_context_text(
         parts.append("")
 
     examples = await sem_repo.list_sql_examples()
-    if examples:
-        ranked = sorted(
-            examples,
-            key=lambda ex: (_score_example_relevance(question, ex), -ex.degrade_priority),
-            reverse=True,
-        )[:example_top_k]
-        parts.append("【相似样例 SQL（仅供参考）】")
-        for ex in ranked:
-            parts.append(f"问法示例：{ex.question_pattern}")
+    ranked = rank_curated_examples_for_prompt(
+        question,
+        ctx,
+        examples,
+        top_k=example_top_k,
+        min_score=example_min_score,
+    )
+    if ranked:
+        parts.append("【相似样例 SQL（仅供参考，勿照搬若不符合问句）】")
+        for ex, relevance in ranked:
+            parts.append(f"问法示例：{ex.question_pattern}（相关度={relevance}）")
             parts.append(f"SQL：{ex.sql_text[:500]}")
             parts.append("")
 
