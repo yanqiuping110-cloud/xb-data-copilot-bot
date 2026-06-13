@@ -152,9 +152,22 @@ async def recall_field_values(state: AskGraphState, config: RunnableConfig) -> d
 
 
 async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig) -> dict:
-    """合并多路召回结果。"""
+    """合并多路召回结果（含代码 artifact）。"""
     t0 = time.perf_counter()
-    from app.retrieval.hybrid import HybridRecallResult
+    c = _cfg(config)
+    settings: Settings = c["settings"]
+    from app.retrieval.hybrid import HybridRecallResult, HybridRetriever
+
+    retriever = HybridRetriever(c["copilot_session"], settings)
+    code_items = []
+    code_mode = "disabled"
+    try:
+        question = state.get("normalized_question") or ""
+        keywords = state.get("keywords") or []
+        if settings.code_knowledge_enabled:
+            code_items, code_mode = await retriever.recall_code_artifacts(question, keywords)
+    finally:
+        await retriever.close()
 
     recall = HybridRecallResult(
         keywords=state.get("keywords") or [],
@@ -162,6 +175,7 @@ async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig
         columns=state.get("recall_columns") or [],
         metrics=state.get("recall_metrics") or [],
         field_values=state.get("recall_field_values") or [],
+        code_artifacts=code_items,
         recall_mode=state.get("recall_mode") or "hybrid",
     )
     merged = merge_retrieved_info(recall)
@@ -175,9 +189,11 @@ async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig
             "column_count": len(merged.columns),
             "metric_count": len(merged.metrics),
             "value_count": len(merged.field_values),
+            "code_recall_count": len(code_items),
+            "code_recall_mode": code_mode,
         },
     )
-    return {"merged_recall": merged}
+    return {"merged_recall": merged, "recall_code_artifacts": code_items}
 
 
 async def filter_tables_node(state: AskGraphState, config: RunnableConfig) -> dict:
@@ -266,7 +282,7 @@ async def build_llm_context(state: AskGraphState, config: RunnableConfig) -> dic
             ctx = c["ctx"]
             allowed = ", ".join(sorted(get_allowed_tables())) or "（未配置）"
             context_text = (
-                f"{build_role_context_header(ctx)}\n\n"
+                f"{build_role_context_header(ctx, settings=settings)}\n\n"
                 f"【检索失败，仅依赖表白名单】\n{allowed}\n"
             )
             detail = {"chars": len(context_text)}

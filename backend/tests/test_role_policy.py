@@ -11,6 +11,11 @@ from app.policy.role_policy import (
     require_school_scope,
     strip_sch_id_for_broad_roles,
 )
+from config.settings import Settings
+
+
+def _settings_sch_on() -> Settings:
+    return Settings(JWT_SECRET="test-secret", POLICY_SCH_ID_ENABLED=True)
 
 
 def test_school_requires_active_sch_id():
@@ -72,7 +77,7 @@ def test_admin_llm_constraints_no_sch_id():
 
 def test_school_llm_constraints_requires_sch_id():
     ctx = UserContext(trace_id="t6", user_id=1, username="sch", role=UserRole.SCHOOL)
-    lines = build_llm_sch_id_constraints(ctx)
+    lines = build_llm_sch_id_constraints(ctx, settings=_settings_sch_on())
     assert any("sch_id = :sch_id" in line for line in lines)
 
 
@@ -97,7 +102,7 @@ def test_strip_sch_id_keeps_school_sql():
         bound_sch_ids=[1140],
     )
     sql = "SELECT COUNT(*) FROM sport_activity_qzs_record WHERE sch_id = :sch_id"
-    assert strip_sch_id_for_broad_roles(sql, ctx) == sql
+    assert strip_sch_id_for_broad_roles(sql, ctx, settings=_settings_sch_on()) == sql
 
 
 def test_sql_generation_constraints_include_join_aliases():

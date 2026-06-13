@@ -4,6 +4,7 @@ import pytest
 
 from app.core.context import UserContext, UserRole
 from app.sql.guard import SqlGuardError, validate_sql
+from config.settings import Settings
 
 
 def _ctx(role: UserRole, active_sch_id: int | None = None) -> UserContext:
@@ -15,6 +16,10 @@ def _ctx(role: UserRole, active_sch_id: int | None = None) -> UserContext:
         active_sch_id=active_sch_id,
         bound_sch_ids=[1140] if role == UserRole.SCHOOL else [],
     )
+
+
+def _settings_sch_on() -> Settings:
+    return Settings(JWT_SECRET="test-secret", POLICY_SCH_ID_ENABLED=True)
 
 
 def test_validate_select_ok():
@@ -47,21 +52,23 @@ def test_reject_unknown_table():
 
 
 def test_school_requires_sch_id():
-    """学校账户 SQL 必须含 sch_id。"""
+    """学校账户 SQL 必须含 sch_id（POLICY_SCH_ID_ENABLED=true 时）。"""
     with pytest.raises(SqlGuardError) as exc:
         validate_sql(
             "SELECT COUNT(*) FROM sport_activity_qzs_record",
             _ctx(UserRole.SCHOOL, active_sch_id=1140),
             max_rows=100,
+            settings=_settings_sch_on(),
         )
     assert exc.value.code == "MISSING_SCH_ID"
 
 
 def test_school_with_sch_id_ok():
-    """学校账户带 sch_id 条件应通过。"""
+    """学校账户带 sch_id 条件应通过（Flag 开启时）。"""
     sql = validate_sql(
         "SELECT COUNT(*) FROM sport_activity_qzs_record WHERE sch_id = 1140",
         _ctx(UserRole.SCHOOL, active_sch_id=1140),
         max_rows=100,
+        settings=_settings_sch_on(),
     )
     assert "sch_id" in sql.lower()

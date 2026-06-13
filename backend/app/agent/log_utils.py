@@ -22,12 +22,28 @@ NODE_LABELS: dict[str, str] = {
     "filter_columns": "筛选 Prompt 字段",
     "filter_metrics": "筛选指标",
     "build_llm_context": "构建问数上下文",
+    "plan_question": "问句规划",
+    "agent_loop": "Agent 工具循环",
+    "build_agent_context": "构建 Agent 上下文",
+    "generate_sql_step": "分步生成 SQL",
+    "tool_run_probe_sql": "工具·探查 SQL",
+    "tool_describe_table": "工具·表结构",
+    "tool_list_relations": "工具·表关系",
+    "tool_get_join_path": "工具·JOIN路径",
+    "tool_search_metrics": "工具·指标检索",
+    "tool_search_field_values": "工具·取值检索",
+    "tool_search_sql_examples": "工具·样例检索",
     "generate_sql": "生成 SQL",
     "validate_sql": "校验 SQL",
     "correct_sql": "修正 SQL",
     "apply_policy": "应用权限策略",
     "execute_sql": "执行查询",
+    "verify_answer": "语义验证",
     "format_answer": "生成回答",
+    "tool_search_code_artifacts": "工具·代码检索",
+    "tool_get_code_artifact": "工具·代码片段",
+    "tool_trace_code_flow": "工具·调用链",
+    "tool_link_artifact_to_meta": "工具·代码关联元数据",
 }
 
 # _span 等日志里使用的短节点名 → 图节点名
@@ -108,6 +124,20 @@ def summarize_state_update(update: dict[str, Any] | None) -> dict[str, Any]:
                 "value_count": len(getattr(value, "field_values", []) or []),
                 "prompt_columns": getattr(value, "prompt_columns", None),
             }
+        elif key == "plan" and isinstance(value, dict):
+            summary[key] = {
+                "complexity": value.get("complexity"),
+                "intent": value.get("intent"),
+                "step_count": len(value.get("steps") or []),
+            }
+        elif key == "tool_observations" and isinstance(value, list):
+            summary[key] = [{"tool": o.get("tool")} for o in value[:8]]
+        elif key == "agent_steps" and isinstance(value, list):
+            summary[key] = value[:8]
+        elif key == "sql_steps" and isinstance(value, list):
+            summary[key] = [{"step_id": s.get("step_id"), "goal": s.get("goal")} for s in value[:6]]
+        elif key == "agent_step_count":
+            summary[key] = value
         elif key == "matched" and value is not None:
             summary[key] = {
                 "source": getattr(value, "match_source", None),

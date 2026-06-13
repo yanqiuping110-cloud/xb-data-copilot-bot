@@ -32,6 +32,50 @@ def test_resolve_刚才():
     assert matched is True
     assert hint is not None
     assert "跳绳" in hint
+    assert q == "本校本月跳绳参与人数"
+
+
+def test_resolve_time_shift():
+    mem = SessionMemory(
+        session_id="sess-ts",
+        turns=[
+            SessionTurnSlot(
+                trace_id="t1",
+                question="本校本月跳绳参与人数是多少？",
+                final_sql="SELECT COUNT(*) FROM sport_activity_qzs_record",
+                tables_used="sport_activity_qzs_record",
+                row_count=42,
+            )
+        ],
+    )
+    q, hint, matched = resolve_references("按刚才的维度查上周", mem)
+    assert matched is True
+    assert q == "本校上周跳绳参与人数是多少？"
+    assert "改写后问句" in (hint or "")
+
+
+def test_resolve_same_as_last_project_filter():
+    mem = SessionMemory(
+        session_id="sess-2",
+        turns=[
+            SessionTurnSlot(
+                trace_id="t1",
+                question="最近7天每日参与人数趋势",
+                final_sql="SELECT DATE(created_at) AS d, COUNT(*) FROM sport_activity_qzs_record GROUP BY 1",
+                tables_used="sport_activity_qzs_record",
+                row_count=7,
+            )
+        ],
+    )
+    q, _, matched = resolve_references("同上，但只要跳绳", mem)
+    assert matched is True
+    assert q == "最近7天每日跳绳参与人数趋势"
+
+
+def test_resolve_repeat_last():
+    q, _, matched = resolve_references("再查一次", _memory_with_turn())
+    assert matched is True
+    assert q == "本校本月跳绳参与人数"
 
 
 def test_build_memory_prompt_truncation():

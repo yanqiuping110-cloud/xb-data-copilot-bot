@@ -13,6 +13,7 @@ from app.core.context import UserContext
 from app.db.sql_policy import BusinessWriteForbiddenError, assert_business_readonly_sql
 from app.policy.role_policy import applies_sch_id_filter
 from app.sql.whitelist import SCH_ID_COLUMN, get_allowed_tables
+from config.settings import Settings, get_settings
 
 
 class SqlGuardError(Exception):
@@ -43,6 +44,7 @@ def validate_sql(
     ctx: UserContext,
     *,
     max_rows: int,
+    settings: Settings | None = None,
 ) -> str:
     """
     校验 SQL 并返回带 LIMIT 的最终语句（MySQL 方言）。
@@ -75,7 +77,8 @@ def validate_sql(
             f"表不在白名单: {', '.join(sorted(unknown))}",
         )
 
-    if applies_sch_id_filter(ctx):
+    s = settings or get_settings()
+    if applies_sch_id_filter(ctx, settings=s):
         if SCH_ID_COLUMN not in stripped.lower():
             raise SqlGuardError(
                 "MISSING_SCH_ID",
@@ -95,3 +98,19 @@ def validate_sql(
                 parsed = parsed.limit(max_rows)
 
     return parsed.sql(dialect="mysql")
+
+
+def validate_probe_sql(
+    sql: str,
+    ctx: UserContext,
+    *,
+    max_rows: int = 10,
+    settings: Settings | None = None,
+) -> str:
+    """
+    探查 SQL 校验：仅 SELECT、表白名单、强制 LIMIT≤max_rows（默认 10）。
+
+    供 run_probe_sql 工具使用。
+    """
+    capped = min(max_rows, 10)
+    return validate_sql(sql, ctx, max_rows=capped, settings=settings)

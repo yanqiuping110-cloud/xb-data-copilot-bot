@@ -1,5 +1,5 @@
 """
-编译 LangGraph 问数有向图（多阶段召回 + LLM 生成 + correct_sql）。
+编译 LangGraph 问数有向图（多阶段召回 + Agent Loop + 分步 SQL + correct_sql）。
 """
 
 from __future__ import annotations
@@ -24,6 +24,14 @@ from app.agent.nodes import (
     route_after_validate,
     validate_sql_node,
 )
+from app.agent.plan_nodes import plan_question, route_after_plan
+from app.agent.agent_nodes import (
+    agent_loop,
+    build_agent_context,
+    generate_sql_step,
+    route_after_agent_loop,
+)
+from app.agent.verify_nodes import route_after_verify, verify_answer
 from app.agent.recall_nodes import (
     build_llm_context,
     extract_keywords_node,
@@ -63,11 +71,16 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
     graph.add_node("filter_columns", filter_columns_node)
     graph.add_node("filter_metrics", filter_metrics_node)
     graph.add_node("build_llm_context", build_llm_context)
+    graph.add_node("plan_question", plan_question)
+    graph.add_node("agent_loop", agent_loop)
+    graph.add_node("build_agent_context", build_agent_context)
     graph.add_node("generate_sql", generate_sql)
+    graph.add_node("generate_sql_step", generate_sql_step)
     graph.add_node("validate_sql", validate_sql_node)
     graph.add_node("correct_sql", correct_sql)
     graph.add_node("apply_policy", apply_policy)
     graph.add_node("execute_sql", execute_sql)
+    graph.add_node("verify_answer", verify_answer)
     graph.add_node("format_answer", format_answer)
 
     graph.add_edge(START, "normalize_question")
@@ -87,8 +100,27 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
     graph.add_edge("filter_tables", "filter_columns")
     graph.add_edge("filter_columns", "filter_metrics")
     graph.add_edge("filter_metrics", "build_llm_context")
-    graph.add_edge("build_llm_context", "generate_sql")
+    graph.add_edge("build_llm_context", "plan_question")
+    graph.add_conditional_edges(
+        "plan_question",
+        route_after_plan,
+        {
+            "generate_sql": "generate_sql",
+            "agent_loop": "agent_loop",
+            "format_answer": "format_answer",
+        },
+    )
+    graph.add_conditional_edges(
+        "agent_loop",
+        route_after_agent_loop,
+        {
+            "agent_loop": "agent_loop",
+            "build_agent_context": "build_agent_context",
+        },
+    )
+    graph.add_edge("build_agent_context", "generate_sql_step")
     graph.add_edge("generate_sql", "validate_sql")
+    graph.add_edge("generate_sql_step", "validate_sql")
     graph.add_conditional_edges(
         "validate_sql",
         route_after_validate,
@@ -105,7 +137,15 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
         route_after_execute,
         {
             "correct_sql": "correct_sql",
+            "verify_answer": "verify_answer",
+        },
+    )
+    graph.add_conditional_edges(
+        "verify_answer",
+        route_after_verify,
+        {
             "format_answer": "format_answer",
+            "correct_sql": "correct_sql",
         },
     )
     graph.add_edge("format_answer", END)

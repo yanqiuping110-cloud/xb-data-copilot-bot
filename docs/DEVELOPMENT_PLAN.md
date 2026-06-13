@@ -4,8 +4,9 @@
 > **目标**：产品/运营/学校管理员用自然语言查 MySQL 数据，减少固定报表开发；第一期不上渠道商。  
 > **技术路线**：**纯 Python** 问数服务 + **自研用户/权限表**（不依赖 `youplus-base-api`；**不修改** `youplus-base`、`sport-plantform`）  
 > **运行环境**：**MySQL 5.7 在宿主机/公司库**；**Elasticsearch + Embedding 在 Docker/宿主机**；本机先调试，配置区分 `development` / `production` 后上公司环境  
-> **周期**：约 **8 周**（业余开发）：前 2 周地基与 LangGraph 基线已完成；**第 3～5 周**元数据、混合召回、多阶段 LangGraph；**第 6 周** Agent Memory + **左侧对话历史栏**（新对话、每用户 20 条 session，§11.5.6）；**第 7 周**动态数据权限（DataScope + 表/字段策略）；**第 8 周**评测、试点与 MVP 文档；按企业可观测、可审计、可降级标准交付  
-> **问数核心路线**：**元数据知识库 + 语义库（前端可配置）→ 向量 + 全文混合召回 → 多阶段 LangGraph 推理 → LLM 生成 SQL**（L1 样例仅作高频快路径，不追求全覆盖）
+> **周期**：约 **14 周**（业余开发）：**第 1～6 周已完成**；**第 7～9 周**问数准确性攻坚（暂停 sch_id、Cursor 式 Agent + MySQL 元数据工具）；**第 10～12 周** **Git 多项目代码知识图谱**（MySQL 图 + ES 索引，与表字段 meta 融合，§11.8）；**第 13 周**动态数据权限（DataScope）；**第 14 周**全量评测与 MVP  
+> **问数核心路线（v2.7 起）**：**元数据 + 语义库 + 代码 artifact** → 统一种子召回 → **Plan** → **Agent 工具循环**（MySQL meta **+ 代码按需读**）→ 分步 SQL → 校验/执行/语义验证  
+> **存储原则**：**不引入 Codegraph**；**不新增 SQLite**；权威数据在 **MySQL copilot 库**（meta + 代码节点/边/artifact）；检索用 **Elasticsearch**（与现有混合召回同一栈）
 
 ---
 
@@ -188,7 +189,7 @@
 
 ### 2.3 权限策略表（`PolicyService` · 当前 MVP 已落地）
 
-> **演进说明**：下列为第 1～5 周已实现的 **角色 + sch_id 硬编码** 模型；**第 7 周**替换为 §2.6 动态 DataScope，并通过适配层兼容现有 SCHOOL 行为。
+> **演进说明**：下列为第 1～6 周已实现的 **角色 + sch_id 硬编码** 模型。**第 7～12 周**为提升问数准确性，**暂时关闭** sch_id 注入/校验（§11.7.1）；**第 13 周**再落地 §2.6 动态 DataScope。
 
 ```text
 role == ADMIN      → 不注入 sch_id 条件（全平台业务数据，仍受表白名单约束）
@@ -329,7 +330,9 @@ data-copilot-bot (Python FastAPI)
 }
 ```
 
-### 2.6 动态数据权限（第 7 周目标 · 已拍板产品/安全决策）
+### 2.6 动态数据权限（第 13 周目标 · 已拍板产品/安全决策 · 顺延）
+
+> **顺延说明**：原第 7 周任务后移至 **第 13 周**；其前 **第 7～12 周**优先 Agent 与 Git 代码知识图谱；sch_id 相关逻辑 **Feature Flag 关闭**（§11.7.1）。
 
 > **动机**：`sch_id` 只是业务库众多隔离维度之一；运营可能需要「3 个地区」或「6 所学校」等 **自由组合** 授权。权限拆为 **功能 RBAC**（`UserRole`）与 **数据/资源策略**（Grant）两层，互不硬编码。
 
@@ -345,7 +348,7 @@ data-copilot-bot (Python FastAPI)
 
 #### 2.6.2 三正交维度
 
-| 维度 | 回答的问题 | 第 7 周实现 |
+| 维度 | 回答的问题 | 第 13 周实现 |
 |------|------------|-------------|
 | **功能 RBAC** | 能否问数、管用户、管 meta | 保留 `ADMIN` / `OPERATOR` / `SCHOOL` |
 | **DataScope（行级）** | 能看哪些行 | `copilot_user_data_grant`（**dimension_code** + IN 值；code 来自维度注册表） |
@@ -353,14 +356,15 @@ data-copilot-bot (Python FastAPI)
 
 业务上的「学校 / 地区 / 渠道」等仅为 **运营在后台注册的 dimension 实例**（如 `code=school`、`code=region`），**不是**代码里的固定字段；每张表通过 **`table_scope_binding`** 声明「该维度在本表对应哪一列」。
 
-#### 2.6.3 与 Agent Memory 的边界（第 6 / 7 周分工）
+#### 2.6.3 与 Agent Memory / 代码知识的边界
 
-| 模块 | 隔离键 | 第 6 周 | 第 7 周 |
-|------|--------|---------|---------|
-| **Agent Memory** | 仅 `user_id`（+ session 归属） | 实现；**不读 grant、不分 sch** | **不改表结构**；避免与权限重构耦合 |
-| **DataScope / SQL 网关** | `user_id` + grant | 仍用 MVP `role_policy` | 统一 `EffectivePolicy` + Scope 注入 |
+| 模块 | 隔离键 | 第 6 周 | 第 7～12 周 | 第 13 周 |
+|------|--------|---------|-------------|----------|
+| **Agent Memory** | `user_id` + session | 实现 | **不改表**；Fail-open | **不改表** |
+| **Git 代码知识** | 无用户隔离（全局索引） | — | §11.8；只读 artifact | 不变 |
+| **DataScope / SQL 网关** | `user_id` + grant | MVP sch_id | **sch_id 暂停** | `EffectivePolicy` |
 
-Memory 中的 `last_sql` 等槽位 **不得** 绕过 Scope 校验；第 7 周只改 **问数权限链路**，不回溯改 Memory DDL/API。
+Memory 中的 `last_sql` 等槽位 **不得** 绕过 Scope 校验；第 13 周只改 **问数权限链路**，不回溯改 Memory / 代码知识 DDL。
 
 #### 2.6.4 运行时原则（与 MVP 一致）
 
@@ -435,7 +439,9 @@ data-copilot-bot/
 │   ├── ROLE_PERMISSION.md           # 待写
 │   ├── TABLE_WHITELIST.md           # 初始表白名单参考（逐步迁入 copilot_table_meta）
 │   ├── META_KNOWLEDGE.md            # 元数据/语义库字段说明与维护规范
-│   ├── MEMORY_OPS.md                # Agent Memory 运营规范（第 8 周）
+│   ├── CODE_KNOWLEDGE.md            # Git 仓库与代码 artifact 维护规范（第 12 周）
+│   ├── AGENT_OPS.md                 # Plan/Tool Agent 运营规范（第 14 周）
+│   ├── MEMORY_OPS.md                # Agent Memory 运营规范（第 14 周）
 │   ├── DATA_SCOPE.md                # 动态数据权限运营规范（第 7～8 周）
 │   └── EVAL_QUESTIONS.md            # 待写
 ├── backend/                         # Python 问数 API
@@ -444,8 +450,9 @@ data-copilot-bot/
 │   │   ├── api/                     # auth、admin_users、ask、sessions、admin_meta…
 │   │   ├── core/                    # context、security
 │   │   ├── auth/
-│   │   ├── policy/                  # role_policy + effective_policy / scope（第 7 周）
-│   │   ├── agent/                   # LangGraph 多阶段节点
+│   │   ├── code/                    # Git 同步 + 代码解析 + 知识图谱（§11.8，第 10～12 周）
+│   │   ├── policy/                  # role_policy + effective_policy / scope（第 13 周）
+│   │   ├── agent/                   # LangGraph：召回种子 + Plan + Agent 工具循环（§11.7）
 │   │   ├── memory/                  # Agent Memory：SessionService、会话槽位、用户偏好（第 6 周）
 │   │   ├── meta/                    # 元数据/语义库 Repository + 索引构建
 │   │   ├── retrieval/               # 混合召回（向量 + 全文 + MySQL 补全）
@@ -503,50 +510,45 @@ def require_school_scope(ctx: UserContext) -> int:
 
 ## 6. LangGraph 流水线（多阶段推理 + L1 快路径）
 
-> 对标电商问数「检索 → 过滤 → 生成 → 校验 → 执行」；在保留企业 **L1 样例快路径** 与 **sch_id 策略** 的前提下扩展节点。  
-> **第 2 周基线**（7 节点）已实现；**第 5 周**将 `retrieve_context` 拆分为下列召回/合并子阶段；**第 6 周**前置 Agent Memory（§11.5）；**第 7 周**在问数入口加载 `EffectivePolicy` 并改造 `validate_sql` / `apply_policy`（§11.6）。
+> 对标 Cursor：**统一种子召回（meta + 代码）→ Plan → 按需工具循环 → 分步 SQL → 反馈调整**；保留 L1 快路径与 SELECT 安全网关。  
+> **第 7～9 周** Agent + MySQL meta 工具（§11.7）；**第 10～12 周** Git 代码知识图谱并接入 Agent（§11.8）；**第 13 周** `EffectivePolicy`（§11.6）。
 
-### 6.1 目标流水线（第 8 周完整版）
+### 6.1 目标流水线（第 12 周完整版 · 第 14 周含 Scope）
 
 | 阶段 | 节点 | 职责 | 失败处理 |
 |------|------|------|----------|
 | 预处理 | `normalize_question` | 清洗、截断长度 | 记 `copilot_ask_span` |
-| **记忆** | **`load_session_memory`** | **读 session 槽位（P0，§11.5）** | **Fail-open** |
-| **记忆** | **`load_user_preference`** | **用户显式偏好（P2）** | **Fail-open** |
-| **记忆** | **`resolve_references`** | **指代消解（P1，可选）** | **失败则原问句不变** |
-| **权限** | **`load_effective_policy`** | **解析 grant → EffectivePolicy（§11.6）** | **Fail-closed：无 grant → 403** |
-| 召回 | `extract_keywords` | LLM/规则抽取问句关键词 | 降级为整句检索 |
-| 召回 | `recall_columns` | 字段向量召回（ES） | 空结果仍继续 |
-| 召回 | `recall_metrics` | 指标向量召回（ES） | 空结果仍继续 |
-| 召回 | `recall_field_values` | 字段取值全文召回（ES） | 空结果仍继续 |
-| 合并 | `merge_retrieved_info` | 合并三路召回 + MySQL 补全表/关系 | 记 span detail |
-| 过滤 | `filter_tables` | 按召回得分筛候选表（Top-N） | |
-| 过滤 | `filter_metrics` | 筛候选指标与口径 | |
-| 上下文 | `build_llm_context` | 拼表说明、JOIN 提示、指标公式、取值映射 | 无检索仍用白名单兜底 |
-| 快路径 | `match_curated` | L1 样例命中则 **跳过 LLM 生成** | 命中 → `degrade_level=1` |
-| 生成 | `generate_sql` | LLM 生成 SQL | 超时/失败 → L2 精简重试 1 次 |
-| 校验 | `validate_sql` | SELECT only、**用户可见表**、**列 deny-list**、LIMIT | 失败 → `correct_sql` 1 次 → L3 |
-| 策略 | `apply_policy` | **Scope 注入/校验**（多维度 AND、同维 IN）、参数绑定 | 失败 → L3 |
-| 执行 | `execute_sql` | 只读库执行，超时 10s，max 5000 行 | timeout → 记指标 |
-| 回答 | `format_answer` | 表格 + 一句话总结 | 流式可选（Phase 2） |
+| **记忆** | **`load_session_memory`** 等 | §11.5 | Fail-open |
+| **权限** | **`load_effective_policy`** | §11.6（**第 13 周起**） | Fail-closed |
+| 召回（种子） | `extract_keywords` + **`unified_recall`** | meta 四路 + **code artifact** Top-K | 空结果仍继续 |
+| **规划** | **`plan_question`** | 子目标 + **sources**（meta + code artifact id） | 降级单步 |
+| **Agent** | **`agent_loop`** | MySQL meta 工具 + **代码工具**（§11.8.4） | 超步数 fallback |
+| 上下文 | `build_agent_context` | 种子 + observations + plan | 白名单兜底 |
+| 快路径 | `match_curated` | L1 跳过 Plan/Agent | degrade_level=1 |
+| 生成 | **`generate_sql_step`** | 分步 SQL / CTE | L2 重试 |
+| 校验/执行/验证 | `validate_sql` → `execute_sql` → **`verify_answer`** | | → correct_sql / agent_loop |
+| 策略 | `apply_policy` | **第 7～12 周 sch_id 关闭**；第 13 周 Scope | L3 |
+| 回答 | `format_answer` | 表格 + LLM 解读 | SSE 含 plan/tool |
 
 **路由要点**：
 
-- `match_curated` 在 `build_llm_context` 之后：L1 命中则直接进入 `validate_sql`；**L1 命中时不注入会话 Memory**（第 6 周）。
-- `validate_sql` 失败且 `retry_count < 1` 时走 `correct_sql`（带错误信息重生成），仍失败则 L3 拒答。
-- Memory 节点 **Fail-open**；**权限节点 Fail-closed**（无 grant 拒绝问数，不降级为空查全库）。
-- **第 6 周 Memory 仅以 `user_id` 隔离**，不读取 grant；第 7 周 Scope 与 Memory **独立演进**（§2.6.3）。
+- **第 7～12 周**：`POLICY_SCH_ID_ENABLED=false`；SELECT 白名单、列校验 **保留**。
+- **第 10 周起**：`unified_recall` 增加 code artifact 一路；Plan 可引用 `code:artifact:{id}` 与 `meta:table:{name}`。
+- **不引入 Codegraph/SQLite**；代码图存 **MySQL**，检索走 **ES**。
+- 第 13 周恢复动态 Scope；Memory / 代码知识 DDL **零变更**（§2.6.3）。
 
-### 6.2 当前已落地（第 2 周基线，待演进）
+### 6.2 当前已落地 vs 演进
 
 | 节点 | 现状 | 演进方向 |
 |------|------|----------|
-| `retrieve_context` | 全量指标 + 关键词 Top-K 样例 | 拆为 §6.1 召回/合并/过滤链 |
-| `match_curated` | L1 + MVP | 保留；样例来源含前端维护的 `copilot_sql_example` |
-| `generate_sql` | 单次 LLM + L2 重试 | 接入 `build_llm_context` 结构化 Prompt |
-| 其余节点 | 已实现 | 增加 `correct_sql`（第 5 周） |
-| Agent Memory | 未实现 | 第 6 周：§11.5（**与权限解耦**） |
-| EffectivePolicy / Scope | MVP `role_policy` | 第 7 周：`load_effective_policy` + Scope 注入（§11.6） |
+| 召回链 | `extract_keywords` → `recall_*` → `build_llm_context` | 保留为 **种子召回**；不再一次性塞满 Prompt |
+| `match_curated` | L1 + MVP | 保留；复杂问句走 Plan+Agent |
+| `generate_sql` | 单次 LLM + L2 重试 | **plan + 分步 generate** + Agent 工具上下文 |
+| `correct_sql` | 最多 1 次 | 提升至 2～3 次，且可 **回 agent_loop** |
+| Agent Memory | ✅ 第 6 周 | 不变 |
+| sch_id / Scope | MVP `role_policy` | **第 7 周 Flag 关闭** → 第 13 周 `EffectivePolicy` |
+| Git 代码知识 | 无 | **第 10～12 周** §11.8 |
+| Plan / Agent Loop | 未实现 | **第 7～9 周** §11.7；**第 12 周** 接入代码工具 |
 
 **任务完成率**：`format_answer` 成功且 `execute_sql` 无异常 / 总请求。
 
@@ -837,7 +839,7 @@ L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **1
 6. 本校跑步项目上周打卡人次？（字段取值召回）  
 7. 对比本月跳绳与跑步参与人数？（多指标 + 过滤）  
 
-**月验收**：开放域评测完成率 ≥ **60%**（第 4 周基线 70% 针对含 L1 命中；**第 8 周**单独统计 `degrade_level=0` 路径）。
+**月验收**：开放域评测完成率 ≥ **60%**（第 4 周基线 70% 针对含 L1 命中；**第 14 周**单独统计 meta+code Agent 复杂报表路径）。
 
 ---
 
@@ -1028,19 +1030,19 @@ L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **1
 **与数据权限的关系（第 6 周边界 · 必读）**：
 
 - Agent Memory **仅以 `user_id` 为隔离维度**（及 `session_id` 归属校验）；**不读取** grant、**不涉及**任何业务表字段或 scope dimension。
-- 第 6 周 **故意不接入** 权限体系，避免与第 7 周动态权限重构耦合；问数 SQL 仍走当时已落地的 MVP `role_policy`（第 7 周再统一替换为 `EffectivePolicy`）。
+- 第 6 周 **故意不接入** 权限体系，避免与第 13 周动态权限重构耦合；问数 SQL 第 7～12 周 **暂停 sch_id**（§11.7.1），第 13 周再统一替换为 `EffectivePolicy`。
 - Memory 槽位中的 `last_sql` / `tables_used` 仅作 **问法指代**；第 7 月起每次执行仍须 **独立** 通过 Scope 注入与 sql_guard，**不得**因历史 SQL 绕过授权。
 - Memory 内容 **禁止**写入原始结果行数据（防 PII 扩散）；仅存问句、SQL、表名、行数等元信息。
-- **第 6 周文档与实现均不出现** 具体 scope 字段名（如 sch/region）；维度与列权限一律留待第 7 周 **配置驱动** 实现。
+- **第 6 周文档与实现均不出现** 具体 scope 字段名（如 sch/region）；维度与列权限一律留待第 13 周 **配置驱动** 实现。
 
 ### 11.5.2 鲁棒性设计（企业必选）
 
 | 原则 | 实现要求 |
 |------|----------|
 | **Fail-open** | 读会话/偏好/摘要任一环节失败 → **跳过 Memory 继续问数**，记 `copilot_ask_span`（`memory_skipped=true` + 原因），**不**升级为 5xx |
-| **Fail-closed（安全）** | Memory **永远不能**覆盖：SELECT-only、LIMIT；**不**负责行级/表级权限（属第 7 周 Scope） |
+| **Fail-closed（安全）** | Memory **永远不能**覆盖：SELECT-only、LIMIT；**不**负责行级/表级权限（属第 13 周 Scope） |
 | **归属校验** | `load_session_memory` 必须验证 `session_id` 下历史 turn 的 `user_id == ctx.user_id`；否则忽略并记 audit |
-| **Token 预算** | 会话槽位 + 摘要 + 偏好合计 **≤ `MEMORY_PROMPT_MAX_CHARS`（默认 2000）**；超出截断，优先级：**当前问句 > 策略/表白名单（第 7 周）> 槽位 > 偏好 > 摘要** |
+| **Token 预算** | 会话槽位 + 摘要 + 偏好合计 **≤ `MEMORY_PROMPT_MAX_CHARS`（默认 2000）**；超出截断，优先级：**当前问句 > 策略/表白名单（第 13 周）> 槽位 > 偏好 > 摘要** |
 | **条数上限** | 会话最多读 **最近 3 轮**成功 turn；偏好 key 白名单（防垃圾 key 灌 Prompt） |
 | **Feature Flag** | `MEMORY_ENABLED`、`SESSION_MEMORY_ENABLED`、`USER_PREFERENCE_ENABLED` 独立开关；默认 development 全开，production 可灰度 |
 | **L1 快路径** | `match_curated` 命中时 **不注入**会话 Memory（避免样例 SQL 与历史 SQL 冲突）；仍写 turn 供下轮使用 |
@@ -1225,7 +1227,246 @@ POST /ask { sessionId, question }
 
 ---
 
-## 11.6 动态数据权限设计（第 7 周）
+## 11.7 Agent 工具循环设计（第 7～9 周 · 问数准确性攻坚）
+
+> **目标**：对标 Cursor「**按需读取 → 规划分解 → 工具循环 → 根据反馈调整**」，解决复杂多维、动态列报表类问句；**不引入 Codegraph**，**不新增 SQLite**——工具层统一读 **MySQL copilot 元数据 + 业务库 introspect/probe**，检索仍用现有 **Elasticsearch** 混合召回作种子。
+
+### 11.7.0 与旧流水线关系
+
+| 能力 | 旧（第 5 周） | 新（第 7～9 周） |
+|------|---------------|------------------|
+| 上下文 | 召回 Top-K 一次拼进 Prompt | 种子召回 + **Agent 按需补读** |
+| SQL 生成 | 单次 `generate_sql` | **plan → 分步 SQL**（CTE / 多步 execute） |
+| 失败恢复 | `correct_sql` 1 次 | 工具查 schema + **verify_answer** + 最多 3 轮 |
+| 代码知识 | 无（仅 meta） | **第 10～12 周** Git 知识图谱 + ES（§11.8） |
+
+### 11.7.1 暂时关闭 sch_id 策略（第 7 周 · P0）
+
+> **动机**：行级 sch_id 注入/校验干扰复杂 SQL 调试与准确性评测；JWT/学校绑定/UI **保留**，仅 **问数 SQL 网关** 暂停 sch 逻辑。
+
+| 项 | 行为 |
+|----|------|
+| 配置 | `POLICY_SCH_ID_ENABLED=false`（默认 **development** 关闭；**production** 可按环境覆盖） |
+| 跳过 | `require_school_scope` 拦截、`MISSING_SCH_ID`、`apply_policy` sch 注入、`strip_sch_id_for_broad_roles` 强制改写 |
+| **保留** | SELECT-only、表白名单、`column_guard`、LIMIT、审计日志、JWT 登录与 `active_sch_id` 字段 |
+| 恢复 | 第 13 周 `EffectivePolicy` 落地后 Flag 改回 true |
+
+**代码触点（实现时）**：`app/agent/runner.py`、`app/agent/nodes.py`（`apply_policy`）、`app/policy/role_policy.py`、`app/sql/guard.py`（若有 sch 专用分支）。DataScope 触点见 §11.6（第 13 周）。
+
+### 11.7.2 MySQL 按需工具集（不新增 SQLite）
+
+工具注册于 `app/agent/tools/`，由 `agent_loop` 调用；均 **只读**、带 trace span。
+
+| 工具 | 数据源 | 用途 |
+|------|--------|------|
+| `list_allowed_tables` | `copilot_table_meta` + 白名单 | 浏览可问表 |
+| `describe_table(table)` | meta + `information_schema` | 全字段/备注/类型（按需，非 Top-K 截断） |
+| `list_relations(table?)` | `copilot_table_relation` | JOIN 路径 |
+| `get_join_path(from, to)` | 关系图 BFS | 多表报表 JOIN 链 |
+| `search_metrics(query)` | ES / `copilot_metric_definition` | 指标口径 |
+| `search_field_values(query)` | ES / `copilot_field_value` | 枚举/别名 → 库值 |
+| `search_sql_examples(query)` | `copilot_sql_example` | 相似 L1 参考 |
+| `run_probe_sql(sql)` | 业务只读库 | DISTINCT/COUNT/LIMIT≤10 探查 |
+| `submit_plan_step(step_json)` | 状态机 | Agent 声明当前子步骤完成 |
+| `submit_final_sql(sql)` | 状态机 | 结束 loop，进入 validate |
+
+**第 12 周起新增（代码知识 · §11.8.4）**：
+
+| 工具 | 数据源 | 用途 |
+|------|--------|------|
+| `search_code_artifacts(query)` | ES `copilot_ask_code_artifact` | 按问句召回报表/接口/SQL 片段 |
+| `get_code_artifact(id)` | MySQL artifact + snippet | 读摘要、表/JOIN/过滤提示 |
+| `trace_code_flow(symbol_or_path)` | MySQL symbol + edge | Controller→Mapper→表 调用链 |
+| `link_artifact_to_meta(artifact_id)` | artifact + table_meta | 一次返回代码口径 + 字段定义 |
+
+**禁止**：工具内任意写库；probe SQL 须过 `sql_guard` 且强制 `LIMIT`。
+
+### 11.7.3 `plan_question` 节点
+
+**输入**：问句 + 种子召回摘要（表/指标 Top-3～5，非全量）。  
+**输出**（JSON，写入 `AskGraphState.plan`）：
+
+```json
+{
+  "complexity": "high",
+  "intent": "multi_dim_report",
+  "steps": [
+    {"id": 1, "goal": "确定事实表与过滤条件", "tables": [], "needs_tool": ["describe_table", "search_field_values"]},
+    {"id": 2, "goal": "关联维度表", "needs_tool": ["get_join_path"]},
+    {"id": 3, "goal": "按年级聚合 + 动态项目列", "aggregation": "GROUP BY", "pivot_hint": "project_name"}
+  ],
+  "sources": ["meta:recall", "tool:observations", "code:artifact:42"]
+}
+```
+
+- `complexity=low` 且 L1 近邻高分 → **跳过** Plan/Agent，走原 `generate_sql`。
+- Plan 写入 `trace_log` 与 SSE progress（前端可选展示步骤）。
+
+### 11.7.4 `agent_loop` 与反馈
+
+```text
+plan_question
+  → agent_loop ⟲ (LLM 选 tool → 执行 → observation 追加)
+  → build_agent_context
+  → generate_sql_step (按 plan.steps)
+  → validate_sql → execute_sql → verify_answer
+       ├─ OK → format_answer
+       └─ FAIL → agent_loop（带 error + sample_rows）或 correct_sql
+```
+
+| 配置 | 默认 | 说明 |
+|------|------|------|
+| `AGENT_MAX_STEPS` | 6 | 单轮 ask 最大 tool 次数 |
+| `AGENT_MAX_CORRECT` | 3 | 含 verify 触发的修正次数 |
+| `AGENT_PROBE_TIMEOUT_SEC` | 3 | probe SQL 超时 |
+
+**verify_answer**：LLM 轻量判断「问句维度/指标是否在结果列体现」；结果为空 → 提示 Agent 检查 WHERE 过严。
+
+### 11.7.5 状态扩展（`AskGraphState`）
+
+新增字段：`plan`, `agent_steps`, `tool_observations`, `sql_steps`, `schema_cache`（按需 describe 缓存，进程内）。  
+`trace_log` / `copilot_ask_span` 记录每次 tool 名、参数摘要、耗时。
+
+### 11.7.6 分周交付
+
+| 周 | 交付 |
+|----|------|
+| **第 7 周** | sch_id Flag 关闭 + 工具骨架 + `describe_table` / `list_relations` / `search_*` + `plan_question` 雏形 |
+| **第 8 周** | 完整 `agent_loop` + `build_agent_context` + 分步 `generate_sql_step` + SSE progress |
+| **第 9 周** | `verify_answer` + `run_probe_sql` + 复杂问句评测集 15 条 + badcase 闭环 |
+
+**周验收（第 9 周末）**：
+
+- [ ] 复杂多维问句（≥5 表 JOIN / 动态列）span 含 plan + ≥2 次 tool 调用  
+- [ ] sch_id Flag 关闭时 SCHOOL 账户 **不因 MISSING_SCH_ID 失败**  
+- [ ] 仍 **无** Codegraph / SQLite 依赖；工具只读 MySQL  
+- [ ] 评测子集（复杂报表）完成率较第 5 周基线 **可量化提升**（目标 +15pp，见 `EVAL_QUESTIONS.md`）
+
+---
+
+## 11.8 Git 业务代码知识图谱（第 10～12 周）
+
+> **目标**：仿 Cursor「预建代码索引 + 按需 explore」，在 **不引入 Codegraph、不用 SQLite** 前提下，对超管配置的 **多个 Git 业务仓库** 建立 **MySQL 知识图谱 + ES 检索**，与 **表/字段/关系 meta** 融合，支撑复杂报表 Plan 与分步 SQL。  
+> **约束**：只 **读** 拉下来的代码；**不修改** `sport-plantform` / `youplus-base` 等参考工程；问数执行仍以 meta 白名单与 `column_guard` 为准，代码侧仅提供 **业务口径与 JOIN/过滤线索**。
+
+### 11.8.0 与 Cursor / Codegraph 的对应关系
+
+| Cursor / Codegraph | 问数实现 |
+|--------------------|----------|
+| 每项目 SQLite 符号图 | **MySQL** `copilot_code_symbol` + `copilot_code_edge` |
+| `codegraph_explore` | **`search_code_artifacts`** + **`get_code_artifact`** |
+| 调用链 trace | **`trace_code_flow`**（边表 BFS） |
+| 读项目理解业务 | artifact **summary** + 与 **`copilot_table_meta` 链接** |
+
+### 11.8.1 数据模型（DDL · `V009__code_knowledge.sql`）
+
+**`copilot_git_repo`**（超管配置 · 多项目）：
+
+| 字段 | 说明 |
+|------|------|
+| `name` | 展示名，如「体育报表后端」 |
+| `repo_url`, `branch` | Git 远程与分支 |
+| `auth_secret_ref` | 凭证环境变量名，**不入库明文** |
+| `include_paths_json` | 如 `["**/report/**","**/mapper/**"]` |
+| `exclude_paths_json` | 如 `["**/test/**"]` |
+| `local_path` | sync 后工作目录（如 `data/repos/{id}/`） |
+| `last_sync_at`, `sync_status`, `content_hash` | 同步状态 |
+
+**`copilot_code_symbol`**（图节点）：
+
+| 字段 | 说明 |
+|------|------|
+| `repo_id`, `symbol_kind` | `class` / `method` / `mapper_statement` / `route` |
+| `qualified_name` | 如 `SportActivityNewReportController.listBySchool` |
+| `file_path`, `start_line`, `end_line` | 定位 |
+| `signature`, `doc_comment` | Java 文档 |
+| `http_method`, `http_path` | Controller 接口（可空） |
+
+**`copilot_code_edge`**（图边）：
+
+| `edge_type` | 含义 |
+|-------------|------|
+| `calls` | 方法调用 |
+| `uses_mapper` | Java Mapper → XML statement id |
+| `references_table` | SQL/代码 → 业务表名 |
+| `imports` | import 关系（可选） |
+
+**`copilot_code_artifact`**（问数主召回单元 · 报表/接口级）：
+
+| 字段 | 说明 |
+|------|------|
+| `artifact_type` | `controller_method` / `mybatis_select` / `service_rule` |
+| `title`, `summary_text` | 规则/LLM 摘要 |
+| `tables_json`, `join_hints_json`, `filter_hints_json` | 结构化线索 |
+| `dimensions_json`, `metrics_json` | 多维/动态列提示 |
+| `raw_snippet` | 原文（Controller + 对应 XML 块） |
+| `search_text` | 入 ES 的拼接文本 |
+
+**`copilot_code_table_link`**（代码 ↔ meta 桥梁）：
+
+| 字段 | 说明 |
+|------|------|
+| `artifact_id` | FK artifact |
+| `table_name` | 对应 `copilot_table_meta.table_name` |
+| `link_type` | `primary_fact` / `join_dim` / `filter` |
+| `confidence` | 规则 1.0 / LLM 0.8 |
+
+### 11.8.2 同步与解析流水线
+
+```text
+超管 POST /admin/code/repos + 触发 sync
+  → git clone --depth 1 / git pull（按 repo 串行或队列）
+  → 解析（第 10 周 P0）：
+       *ReportController.java  → route、方法、注释
+       *Mapper.xml <select>   → SQL 块、表名 regex
+  → 写 symbol / edge / artifact / table_link
+  → （第 11 周）离线 LLM 批处理 summary_text、dimensions_json
+  → MetaKnowledgeService 扩展：rebuild_code_index → ES copilot_ask_code_artifact
+```
+
+解析器位置建议：`app/code/parser/`（java_controller、mybatis_xml）；同步 job：`app/code/sync_worker.py` 或 CLI `scripts/sync_git_repos.py`。
+
+### 11.8.3 检索与 Plan 融合
+
+**`UnifiedRetriever`**（扩展 `HybridRetriever` 或独立模块）：
+
+- 问句并行：**meta 四路** + **`recall_code_artifacts`**
+- 交叉加权：artifact 中 `tables_json` 命中 → boost 对应 `copilot_table_meta` 得分
+- 输出写入 `build_agent_context` 的 **【相关业务接口/报表口径】** 段
+
+**`plan_question` 扩展**：`sources` 允许 `code:artifact:{id}` 与 `meta:table:{name}` 并列；动态列步骤引用 `dimensions_json` / `pivot_hint`。
+
+### 11.8.4 Agent 代码工具
+
+见 §11.7.2 表格（第 12 周接入 `agent_loop`）。所有工具只读；snippet 长度截断（如 8KB）防 Prompt 膨胀。
+
+### 11.8.5 管理 API 与前端（仅 ADMIN）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST/PUT/DELETE | `/api/v1/admin/code/repos` | 仓库 CRUD |
+| POST | `/api/v1/admin/code/repos/{id}/sync` | 手动同步 |
+| GET | `/api/v1/admin/code/repos/{id}/status` | 最近 sync、symbol/artifact 计数 |
+| POST | `/api/v1/admin/code/rebuild-index` | artifact → ES |
+| GET | `/api/v1/admin/code/artifacts` | 列表/搜索（运营审核摘要） |
+
+前端：`AdminCodeRepos.vue`（配置 Git + sync 按钮 + 索引重建）；可选 artifact 预览页。
+
+### 11.8.6 分周交付与验收
+
+| 周 | 交付 | 验收 |
+|----|------|------|
+| **第 10 周** | V009 DDL + repo CRUD + sync + Java/XML **规则解析** + symbol/artifact 入库 | 至少 1 个业务仓 sync 成功；≥10 条 artifact |
+| **第 11 周** | ES 代码索引 + `recall_code_artifacts` + LLM 摘要 job + `table_link` | 问句「活动报表」召回相关 Controller；link 覆盖已注册 meta 表 |
+| **第 12 周** | 代码 Agent 工具 + `UnifiedRetriever` + Plan sources + 运营页 | 复杂报表用例 **同时** span 含 code artifact 与 meta tool；badcase 可补 artifact 摘要 |
+
+**与 §11.7 衔接**：第 7～9 周 Agent **不依赖** 代码索引；第 12 周将代码工具 **并入** 已有 `agent_loop`，不推翻图结构。
+
+**运营闭环**：badcase 若因「口径不理解」→ 补 artifact `summary_text` 或 meta metric → 重建 ES → `replay_eval`。
+
+---
+
+## 11.6 动态数据权限设计（第 13 周 · 顺延）
 
 > **目标**：权限 **完全配置驱动**——行级维度、表↔列绑定、表 allow、列 deny 均由运营在 meta/用户管理维护；**代码只认 dimension_code + table_name + column_name**，不写死任何业务字段名。产品决策见 **§2.6.1**。
 
@@ -1246,14 +1487,14 @@ POST /ask { sessionId, question }
 
 ### 11.6.1 与第 6 周 Memory 的隔离
 
-| 项 | Agent Memory（第 6 周） | DataScope（第 7 周） |
+| 项 | Agent Memory（第 6 周） | DataScope（第 13 周） |
 |----|-------------------------|----------------------|
 | 隔离键 | `user_id` | `user_id` + grant |
 | 是否改 Memory 表/API | — | **否** |
 | 问数失败策略 | Fail-open | **Fail-closed**（无 grant → 403） |
 | Prompt 注入 | 会话槽位、用户偏好 | EffectivePolicy 摘要、可见表、Scope  hint |
 
-### 11.6.2 数据模型（DDL 草案 · V008）
+### 11.6.2 数据模型（DDL 草案 · `V010__data_scope.sql`）
 
 **`copilot_scope_dimension`**（范围维度注册 · **运营可增删改**）：
 
@@ -1299,7 +1540,7 @@ POST /ask { sessionId, question }
 | `column_name` | 须存在于 `copilot_column_meta` |
 | `reason` | 审计说明 |
 
-**`copilot_table_meta.sch_id_column`**：第 7 周起 **废弃写入新逻辑**；已有数据迁移到 `table_scope_binding`（如维度 `school` → 原 `sch_id_column` 值）。UI 改为「维度绑定」多行配置。
+**`copilot_table_meta.sch_id_column`**：第 13 周起 **废弃写入新逻辑**；已有数据迁移到 `table_scope_binding`（如维度 `school` → 原 `sch_id_column` 值）。UI 改为「维度绑定」多行配置。
 
 **迁移**：`copilot_sys_user_school` → 在维度 `school`（或运营定义的 code）下写入 `user_data_grant` + `table_grant`；**不假设** DB 列名必须为 `sch_id`。
 
@@ -1319,7 +1560,7 @@ app/policy/effective_policy.py
     is_admin_bypass: bool
 ```
 
-- 第 7 周第 1 步：`role_policy` **适配**为读「已注册维度 + 绑定列」生成策略（兼容 MVP 单测）；Python 内 **无** 业务列名字面量。
+- 第 13 周第 1 步：`role_policy` **适配**为读「已注册维度 + 绑定列」生成策略（兼容 MVP 单测）；Python 内 **无** 业务列名字面量。
 - `UserContext` 增加 `effective_policy`；JWT 逐步由 `active_sch_id` 迁为 **`active_scopes: dict[str, Any]`**（与 Memory 无关）。
 
 ### 11.6.4 Scope 执行（sql_guard + apply_policy）
@@ -1366,9 +1607,9 @@ app/policy/effective_policy.py
 
 ---
 
-## 12. 开发计划（8 周）
+## 12. 开发计划（14 周）
 
-> **第 1～2 周已完成**（见 [PROGRESS.md](./PROGRESS.md)）。**第 3～5 周**：元数据、混合召回、LangGraph。**第 6 周**：Agent Memory（**仅 user 维度**）。**第 7 周**：动态数据权限。**第 8 周**：评测、试点、MVP。
+> **第 1～6 周已完成**。**第 7～9 周**：Agent + MySQL meta 工具（§11.7）。**第 10～12 周**：Git 代码知识图谱（§11.8）。**第 13 周**：DataScope（§11.6）。**第 14 周**：全量评测与 MVP。
 
 ### 第 1～2 周：地基 + LangGraph 基线 ✅
 
@@ -1445,7 +1686,7 @@ app/policy/effective_policy.py
 
 - [ ] 同 `sessionId` 下 follow-up 问句 **结构化槽位**可注入且 span 可见  
 - [ ] Memory 任意环节失败时问数 **仍成功或按原逻辑降级**，不出现 500  
-- [ ] Memory **仅以 `user_id` 隔离**；**不读 grant、不涉及任何业务字段/dimension**；第 7 周权限重构 **不改** Memory DDL/API  
+- [ ] Memory **仅以 `user_id` 隔离**；第 13 周权限重构 **不改** Memory DDL/API  
 - [ ] 越权 `session_id`（他人 session）**零注入**  
 - [ ] L1 命中时不注入会话 Memory  
 - [ ] 偏好 API 可用；inferred 类偏好 **不进** Prompt  
@@ -1456,11 +1697,124 @@ app/policy/effective_policy.py
 
 ---
 
-### 第 7 周：动态数据权限（DataScope + 表/字段策略）
+### 第 7 周：准确性攻坚 P0 — 暂停 sch_id + Agent 地基
 
 | 天 | 任务 | 交付物 |
 |----|------|--------|
-| 1 | `V008__data_scope.sql`：维度/表绑列/行级 grant/表 grant/列 deny；**无业务列名字段** | 迁移脚本 |
+| 1 | `POLICY_SCH_ID_ENABLED` + 问数链路 sch 分支 Feature Flag 关闭 | `settings.py` + 单测：关闭时不报 MISSING_SCH_ID |
+| 1～2 | 梳理并标注 `role_policy` / `apply_policy` / `runner` sch 触点 | 文档注释 + `@deprecated` 标记待第 13 周替换 |
+| 2～3 | `app/agent/tools/` 骨架 + `describe_table` / `list_relations` / `get_join_path` | 工具单测（Mock meta） |
+| 3～4 | `search_metrics` / `search_field_values` / `search_sql_examples` 封装 HybridRetriever | 与种子召回复用 ES |
+| 4～5 | `plan_question` 节点 + `AskGraphState.plan` | span 可见 plan JSON |
+| 5～7 | LangGraph 插入点设计：`build_llm_context` 后 → `plan_question`（L1 绕过） | 图编译 + 路由单测 |
+
+**周验收**：
+
+- [ ] development 默认 **无 sch_id 问数失败**  
+- [ ] 至少 3 个 MySQL 工具可在图内调用并写 span  
+- [ ] plan 对复杂问句输出 ≥2 步（人工 spot check 5 条）
+
+---
+
+### 第 8 周：Agent 工具循环 + 分步 SQL
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1～2 | `agent_loop` 节点（ReAct：选 tool → observation） | `AGENT_MAX_STEPS` 可配置 |
+| 2～3 | `build_agent_context`：种子召回 + observations + plan | 替代一次性超长 Prompt |
+| 3～4 | `generate_sql_step`：按 plan 生成 CTE/分步 SQL | 多表 JOIN 用例 spot check |
+| 4～5 | `run_probe_sql`（LIMIT 10、3s 超时） | sql_guard 单测 |
+| 5～6 | SSE progress：`plan_question` / `agent_loop` / tool 名 | 前端可选展示 |
+| 6～7 | `correct_sql` 提升至 2 次且可带 tool 上下文 | 路由单测更新 |
+
+**周验收**：
+
+- [ ] 复杂问句 trace 含 **tool 调用链**  
+- [ ] 分步 SQL 至少 1 条评测用例端到端成功  
+- [ ] **未引入** Codegraph / SQLite
+
+---
+
+### 第 9 周：语义验证 + 复杂报表评测
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1～2 | `verify_answer` 节点（空结果 / 列不匹配 → 回 Agent） | `AGENT_MAX_CORRECT=3` |
+| 2～3 | `format_answer` 复杂路径 LLM 解读（可选 Flag） | 动态列报表可读摘要 |
+| 3～4 | `EVAL_QUESTIONS.md` 新增 **复杂报表** 15 条 + `replay_eval.py --subset agent` | 基线报告 |
+| 4～5 | Top5 badcase → 补 meta / L1 / relation | 运营闭环 |
+| 5～7 | 性能与降级：Agent 超步数 fallback 到单次 generate | degrade_level 可追踪 |
+
+**周验收（第 9 周末 · Agent MVP）**：
+
+- [ ] 复杂报表评测子集完成率 ≥ **50%**（meta-only Agent 基线；含代码后第 14 周目标 **65%+**）  
+- [ ] verify 触发修正至少 1 条成功案例可复现  
+- [ ] sch_id 仍关闭；SELECT 安全网关完整  
+
+---
+
+### 第 10 周：Git 仓库 + 代码解析入库（§11.8 P0）
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1 | `V009__code_knowledge.sql`：repo / symbol / edge / artifact / table_link | 迁移脚本 |
+| 1～2 | `app/code/`：`GitRepoRepository` + sync（clone/pull + path filter） | `scripts/sync_git_repos.py` |
+| 2 | `/admin/code/repos` CRUD + `POST .../sync`（仅 ADMIN） | API + 单测 |
+| 3～4 | `java_controller` + `mybatis_xml` 解析器 → symbol/artifact | 单测 fixture |
+| 4～5 | 从 SQL 块抽表名 → `references_table` 边 + `table_link` 草稿 | 与 meta 表名对齐 |
+| 5～7 | 种子：配置 1～2 个业务仓（如 sport-plantform 只读镜像路径） | ≥10 artifact |
+
+**周验收**：
+
+- [ ] 超管可配 Git 并 sync；symbol/artifact 写入 MySQL  
+- [ ] artifact 含 `raw_snippet` 与 `tables_json`  
+- [ ] **无** Codegraph / SQLite  
+
+---
+
+### 第 11 周：代码 ES 索引 + 混合召回
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1～2 | `build_code_search_text` + `MetaKnowledgeService.rebuild_code_index` | ES `copilot_ask_code_artifact` |
+| 2 | `HybridRetriever.recall_code_artifacts` + keyword 降级 | 单测 |
+| 3 | 离线 LLM job：`summary_text` / `dimensions_json`（sync 后异步） | `scripts/enrich_code_artifacts.py` |
+| 3～4 | `UnifiedRetriever`：meta 四路 + code 一路并行加权 | `app/retrieval/unified.py` |
+| 4～5 | `build_agent_context` 增加【报表口径/接口】段 | span 含 code_recall_count |
+| 5～6 | `AdminCodeRepos.vue` + rebuild-index 按钮 | 前端 ADMIN |
+| 6～7 | `plan_question` 支持 `code:artifact` sources | 路由单测 |
+
+**周验收**：
+
+- [ ] 业务问句召回 ≥1 相关 artifact（人工 spot check 5 条）  
+- [ ] table_link 覆盖已注册 meta 表名  
+- [ ] rebuild-index 可重复执行  
+
+---
+
+### 第 12 周：代码 Agent 工具 + meta 融合
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1～2 | Agent 工具：`search_code_artifacts` / `get_code_artifact` / `trace_code_flow` / `link_artifact_to_meta` | §11.7.2 |
+| 2～3 | 并入 `agent_loop`；Plan 复杂路径默认先 `search_code` | 图路由更新 |
+| 3～4 | 复杂报表评测 +5 条（依赖代码口径）+ `replay_eval --subset code` | 基线 |
+| 4～5 | badcase → 补 artifact 摘要或 meta relation 草稿 | 运营闭环 |
+| 5～7 | **`CODE_KNOWLEDGE.md`**；凭证与 sync 故障排查 | 文档 |
+
+**周验收（第 12 周末 · meta+代码 Agent）**：
+
+- [ ] 复杂报表 trace **同时**含 code tool 与 meta tool  
+- [ ] `link_artifact_to_meta` 一次返回 snippet + describe_table  
+- [ ] 较第 9 周 meta-only 基线 completion **+10pp**（同评测子集）  
+
+---
+
+### 第 13 周：动态数据权限（DataScope + 表/字段策略 · 原第 7 周顺延）
+
+| 天 | 任务 | 交付物 |
+|----|------|--------|
+| 1 | `V010__data_scope.sql`：维度/表绑列/行级 grant/表 grant/列 deny | 迁移脚本 |
 | 1 | `/admin/meta/scope-dimensions` CRUD；种子 **示例** 维度（如 `school`→列由 binding 指定，非 DDL 写死） | 维度管理 API |
 | 1～2 | `EffectivePolicy` + `load_effective_policy`；`ScopeInjector` **只读 binding** | `app/policy/effective_policy.py` |
 | 2 | 问数入口加载 policy；**无 grant → 403 NO_DATA_SCOPE** | 单测：新 OPERATOR 默认不可问数 |
@@ -1472,7 +1826,7 @@ app/policy/effective_policy.py
 | 6 | 迁移：`copilot_sys_user_school` → 映射到 **已注册 school 维度** 的 grant | 回归 SCHOOL |
 | 6～7 | JWT `active_scopes`；列 deny 管理；**DATA_SCOPE.md** | 与 Memory 零交叉 |
 
-**周验收标准（第 7 周末）**：
+**周验收标准（第 13 周末）**：
 
 - [ ] **默认无数据**：无 grant 账户问数 **403**  
 - [ ] 运营可配置 **任意已注册维度** 的多值 IN（如维度 A 三个值、维度 B 六个值），**一次问数** SQL 合法执行  
@@ -1484,24 +1838,23 @@ app/policy/effective_policy.py
 
 ---
 
-### 第 8 周：评测 + 试点 + 文档
+### 第 14 周：全量评测 + 试点 + MVP 文档
 
 | 天 | 任务 | 交付物 |
 |----|------|--------|
-| 1～2 | `EVAL_QUESTIONS.md` 15～30 条 + `replay_eval.py`（L1 / LLM / Memory / **Scope** 路径） | 基线报告 |
-| 2～3 | 限流、错误码统一；`META_KNOWLEDGE.md`；`MEMORY_OPS.md`；**`DATA_SCOPE.md`** | 运营文档 |
-| 3～4 | 周报 SQL：P95、降级率、召回 fallback、memory_skipped、**no_grant 403 率** | `WEEKLY_METRICS` 模板 |
-| 4～5 | 部署文档、`.env.example` 补 Memory + **Policy** 变量 | 同事可复现 |
-| 5～7 | 修 Top5 badcase；含多轮 Memory + **多维度 Scope（配置驱动）** 场景 | **MVP 演示** |
+| 1～2 | `EVAL_QUESTIONS.md` 扩至 **30+** 条 + `replay_eval.py`（L1 / Agent / **Code** / Memory / Scope） | 基线报告 |
+| 2～3 | `META_KNOWLEDGE.md`；`MEMORY_OPS.md`；`DATA_SCOPE.md`；`AGENT_OPS.md`；`CODE_KNOWLEDGE.md` 定稿 | 运营文档 |
+| 3～4 | 周报 SQL：P95、agent_steps、**code_recall_hit_rate**、no_grant 403 率 | 模板 |
+| 4～5 | `.env.example` 补 Agent + Git sync + Policy 变量 | 可复现 |
+| 5～7 | 修 Top5 badcase；含 **代码口径 + Scope** 场景 | **MVP 演示** |
 
-**月验收标准（第 8 周末 · MVP）**：
+**月验收标准（第 14 周末 · MVP）**：
 
-- [ ] 动态权限：默认拒绝 + 超管授权 + AND/IN + 列 deny（§2.6.1）  
-- [ ] Agent Memory P0～P3 达标（第 6 周，与权限解耦）  
-- [ ] 元数据/语义库可前端完整维护；索引可一键重建  
-- [ ] 混合召回 span 完整；ES 故障可 keyword 降级  
-- [ ] 评测集总完成率 ≥ 70%；**纯 LLM 路径（degrade_level=0）≥ 60%**  
-- [ ] badcase → 补 meta/指标或 L1 样例闭环  
+- [ ] Git 代码知识：多仓 sync + artifact 召回 + Agent 代码工具（§11.8）  
+- [ ] Agent：Plan + Tool Loop + verify（§11.7）  
+- [ ] 动态权限：默认拒绝 + AND/IN + 列 deny（§2.6.1）  
+- [ ] 评测集总完成率 ≥ **70%**；**复杂报表（meta+code）≥ 65%**  
+- [ ] badcase → 补 meta / artifact / L1 闭环  
 
 ---
 
@@ -1519,7 +1872,7 @@ app/policy/effective_policy.py
 | **硬编码列名回潮** | CR 检查 + 单测 fixture 仅用自定义维度；§11.6.0 原则 |
 | **LLM 写 grant 外 scope** | AST 校验 + 参数化 IN；不信任字面量 |
 | **无 grant 误放行** | 默认拒绝；`load_effective_policy` Fail-closed |
-| **Scope 与 Memory 耦合** | 第 6 周 Memory 不读 grant；第 7 周不改 Memory 表（§2.6.3） |
+| **Scope 与 Memory 耦合** | 第 6 周 Memory 不读 grant；第 13 周不改 Memory / 代码表（§2.6.3） |
 | **敏感列泄露** | 全局 + 用户级 **column_deny**（meta 表列名）；sqlglot 遍历 SELECT |
 | 默认超管密码泄露 | 生产必须改 `SEED_ADMIN_PASSWORD`；首次登录强制改密（二期） |
 | 与体育后台账号两套 | 文档写清；避免用户混淆；二期再评估 SSO |
@@ -1528,7 +1881,12 @@ app/policy/effective_policy.py
 | **Memory 读失败拖垮问数** | Fail-open + `memory_skipped` span |
 | **会话越权** | `load_session_memory` / Session API 校验 `user_id` |
 | **对话历史膨胀** | `SESSION_MAX_PER_USER=20` + `oldest` 淘汰；单对话 UI 可选 `SESSION_UI_TURN_LIMIT` |
-| **Memory 与权限混淆** | 第 6 周仅 `user_id`；第 7 周 Scope 配置驱动（§11.6.0） |
+| **Memory 与权限混淆** | 第 6 周仅 `user_id`；第 13 周 Scope 配置驱动（§11.6.0） |
+| **Agent 工具越权读表** | 工具只读 meta 白名单 + probe 过 sql_guard；禁止任意 SQL |
+| **Agent 步数/成本膨胀** | `AGENT_MAX_STEPS` + 超步 fallback；span 记录 token |
+| **Git 凭证泄露** | `auth_secret_ref` 只存 env 名；sync 日志不打 token；exclude `.env` 等路径 |
+| **代码索引陈旧** | 手动 sync + 可选 cron；artifact `content_hash` 变更触发 re-enrich |
+| **sch_id 暂停期数据泄露** | 仅内网/development 默认关闭；production 第 13 周前须评估；审计仍记录 user/role |
 | Docker 访问本机 MySQL 失败 | 使用 `host.docker.internal`；Linux 生产可改用宿主机 IP |
 | RAGFlow 与 Ollama 抢 GPU | RAGFlow 用 CPU 版；LLM 走宿主机 Ollama；embedding 高峰勿与 14B 同时满载 |
 
@@ -1538,6 +1896,7 @@ app/policy/effective_policy.py
 
 - 对接体育后台 SSO  
 - 渠道商租户模型（新增 dimension，如 `channel_id`）  
+- **Git 业务仓库同步 + 代码知识图谱深化**（更多语言/parser、自动 suggestion 写 relation/metric）  
 - **SSE 流式**问数进度（对标 shopkeeper `/api/query`）  
 - Langfuse / OpenTelemetry  
 - 图表（AntV）  
@@ -1629,7 +1988,19 @@ SESSION_MAX_PER_USER=20
 SESSION_EVICT_POLICY=oldest
 SESSION_UI_TURN_LIMIT=50
 
-# ---------- 动态数据权限（第 7 周）----------
+# ---------- Agent 工具循环（第 7～9 周）----------
+AGENT_ENABLED=true
+AGENT_MAX_STEPS=6
+AGENT_MAX_CORRECT=3
+AGENT_PROBE_TIMEOUT_SEC=3
+POLICY_SCH_ID_ENABLED=false
+
+# ---------- Git 代码知识（第 10～12 周）----------
+GIT_REPOS_DATA_DIR=data/repos
+GIT_SYNC_TIMEOUT_SEC=300
+CODE_ARTIFACT_SNIPPET_MAX_CHARS=8192
+
+# ---------- 动态数据权限（第 13 周）----------
 POLICY_DEFAULT_DENY=true
 POLICY_CACHE_TTL_SEC=60
 
@@ -1713,13 +2084,15 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 
 ---
 
-**文档版本**：v2.5  
+**文档版本**：v2.7  
 **变更（v2.0）**：明确问数核心路线为 **元数据知识库 + 语义库（前端可配置）+ 向量/全文混合召回 + 多阶段 LangGraph**；计划由 4 周扩展为 **6 周**（第 3～6 周详述）；新增 §9  meta/语义库、§10.6 管理 API、§6.1 多阶段节点。  
 **变更（v2.1）**：§9.2 区分 **自动读取**（`table_comment_auto` / `column_comment_auto` / `data_type`）与 **人工定义**（`description_manual`）；人工非空优先；新增 `GET /introspect/tables/{tableName}` 与前端表名录入向导。  
 **变更（v2.2）**：计划扩展为 **7 周**；新增 **§11.5 Agent Memory**（P0～P3）；原评测周后移。  
-**变更（v2.4）**：§2.6.1 增 **零硬编码字段名**；§11.6.0 配置驱动原则；第 6 周 Memory 去除 sch/region 表述；第 7 周权限改为 dimension_code + table/column meta 动态绑定，JWT `active_scopes` 替代 active_sch_id 硬编码。  
-**变更（v2.5）**：新增 **§11.5.6 对话历史管理**——问数页 **左侧对话栏**、新对话、每用户 **20** 条 session 上限、`/api/v1/sessions` API；与 L1/L2 Memory 边界写清；§8.1 / 第 6 周任务与验收同步更新。  
-**维护**：随 meta、Memory、DataScope DDL、评测集更新同步改第 2.6、9、11.5、11.6、12、15 节；每完成里程碑更新 [PROGRESS.md](./PROGRESS.md)。
+**变更（v2.4）**：§2.6.1 增 **零硬编码字段名**；§11.6.0 配置驱动原则；第 6 周 Memory 去除 sch/region 表述；权限改为 dimension_code + table/column meta 动态绑定。  
+**变更（v2.5）**：新增 **§11.5.6 对话历史管理**——左侧对话栏、每用户 20 session、`/api/v1/sessions` API。  
+**变更（v2.6）**：总周期 **11 周**；**§11.7** Cursor 式 Agent（MySQL 工具）；sch_id 暂停；DataScope/评测顺延。  
+**变更（v2.7）**：总周期 **14 周**；新增 **§11.8 Git 业务代码知识图谱**（MySQL 图 + ES + 与 meta 融合，**不用 Codegraph/SQLite**）；**第 10～12 周**代码索引与 Agent 代码工具；DataScope → **第 13 周**，MVP → **第 14 周**；DDL 编号 `V009` 代码知识、`V010` DataScope。  
+**维护**：随 meta、Memory、Agent、Code、DataScope 更新同步改第 2.6、6、9、11.5～11.8、12、15 节；每完成里程碑更新 [PROGRESS.md](./PROGRESS.md)。
 
 ---
 

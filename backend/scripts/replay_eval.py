@@ -21,16 +21,20 @@ import httpx
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = ROOT.parent
-CASE_FILE = REPO_ROOT / "docs" / "eval" / "memory_multiturn.json"
+CASE_FILES = {
+    "memory": REPO_ROOT / "docs" / "eval" / "memory_multiturn.json",
+    "agent": REPO_ROOT / "docs" / "eval" / "agent_complex_report.json",
+}
 
 
 def load_cases(subset: str) -> list[dict]:
     """加载评测用例 JSON。"""
-    if subset != "memory":
-        raise SystemExit(f"未知子集: {subset}，当前仅支持 memory")
-    if not CASE_FILE.is_file():
-        raise SystemExit(f"用例文件不存在: {CASE_FILE}")
-    data = json.loads(CASE_FILE.read_text(encoding="utf-8"))
+    case_file = CASE_FILES.get(subset)
+    if case_file is None:
+        raise SystemExit(f"未知子集: {subset}，支持: {', '.join(CASE_FILES)}")
+    if not case_file.is_file():
+        raise SystemExit(f"用例文件不存在: {case_file}")
+    data = json.loads(case_file.read_text(encoding="utf-8"))
     return data.get("cases", [])
 
 
@@ -96,7 +100,7 @@ def run_case(client: httpx.Client, case: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="问数评测回放")
-    parser.add_argument("--subset", default="memory", help="评测子集（memory）")
+    parser.add_argument("--subset", default="memory", help="评测子集（memory / agent）")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--token", required=True, help="Bearer JWT")
     args = parser.parse_args()

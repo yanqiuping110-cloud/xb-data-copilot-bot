@@ -82,6 +82,31 @@ async def run_ask_graph(
         )
         raise
     except Exception as exc:
+        from langgraph.errors import GraphRecursionError
+
+        if isinstance(exc, GraphRecursionError):
+            logger.warning(
+                "[trace=%s] 问数图步数超限 recursion_limit=%s",
+                trace_id,
+                settings.graph_recursion_limit,
+            )
+            final_state = {
+                "status": "fail",
+                "error_code": "GRAPH_RECURSION",
+                "error_message": "问数步骤过多已中止，请简化问法或稍后重试",
+                "degrade_level": 3,
+            }
+            return await _finalize_ask_run(
+                copilot_session,
+                settings=settings,
+                ctx=ctx,
+                trace_id=trace_id,
+                session_id=session_id,
+                question=question,
+                final_state=final_state,
+                t0=t0,
+                collector=collector,
+            )
         logger.exception("[trace=%s] 问数失败 code=GRAPH_ERROR: %s", trace_id, exc)
         await _finish_turn_on_fatal(
             copilot_session,
@@ -215,6 +240,32 @@ async def stream_ask_graph(
         )
         raise
     except Exception as exc:
+        from langgraph.errors import GraphRecursionError
+
+        if isinstance(exc, GraphRecursionError):
+            logger.warning(
+                "[trace=%s] 问数流图步数超限 recursion_limit=%s",
+                trace_id,
+                settings.graph_recursion_limit,
+            )
+            response = await _finalize_ask_run(
+                copilot_session,
+                settings=settings,
+                ctx=ctx,
+                trace_id=trace_id,
+                session_id=session_id,
+                question=question,
+                final_state={
+                    "status": "fail",
+                    "error_code": "GRAPH_RECURSION",
+                    "error_message": "问数步骤过多已中止，请简化问法或稍后重试",
+                    "degrade_level": 3,
+                },
+                t0=t0,
+                collector=collector,
+            )
+            yield done_event(response)
+            return
         logger.exception(
             "[trace=%s] 问数流错误 code=STREAM_ERROR: %s",
             trace_id,
@@ -245,7 +296,8 @@ async def _prepare_ask_run(
     if not question:
         raise AskError("EMPTY_QUESTION", "问题不能为空")
 
-    if ctx.role == UserRole.SCHOOL:
+    if ctx.role == UserRole.SCHOOL and settings.policy_sch_id_enabled:
+        # 第 13 周前：仅 POLICY_SCH_ID_ENABLED=true 时强制校维度（§11.7.1）
         require_school_scope(ctx)
 
     session_svc = SessionService(copilot_session, settings)
@@ -279,6 +331,7 @@ async def _prepare_ask_run(
 
     collector = TraceLogCollector(trace_id, stream=stream)
     config = {
+        "recursion_limit": settings.graph_recursion_limit,
         "configurable": {
             "trace_id": trace_id,
             "session_id": session_id,
@@ -492,6 +545,36 @@ def _progress_detail(node_name: str, update: dict) -> dict | None:
         return {"rowCount": len(rows)}
     if node_name == "build_llm_context" and update.get("context_text"):
         return {"chars": len(update["context_text"])}
+    if node_name == "plan_question" and update.get("plan"):
+        plan = update["plan"]
+        return {
+            "complexity": plan.get("complexity"),
+            "stepCount": len(plan.get("steps") or []),
+            "skipped": update.get("plan_skipped"),
+            "tools": [o.get("tool") for o in (update.get("tool_observations") or [])[:5]],
+        }
+    if node_name == "agent_loop":
+        tools = [s.get("tool") for s in (update.get("agent_steps") or []) if s.get("tool")]
+        return {
+            "stepCount": update.get("agent_step_count"),
+            "done": update.get("agent_loop_done"),
+            "tool": tools[-1] if tools else None,
+            "tools": tools[-5:],
+        }
+    if node_name == "build_agent_context" and update.get("context_text"):
+        return {"chars": len(update["context_text"])}
+    if node_name == "generate_sql_step":
+        return {
+            "hasSql": bool(update.get("raw_sql")),
+            "sqlStepCount": len(update.get("sql_steps") or []),
+        }
+    if node_name == "verify_answer":
+        vr = update.get("verify_result") or {}
+        return {
+            "passed": update.get("verify_passed"),
+            "reason": vr.get("reason"),
+            "attempts": update.get("verify_attempts"),
+        }
     return None
 
 

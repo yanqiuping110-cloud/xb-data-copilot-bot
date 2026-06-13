@@ -5,9 +5,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.code.index_text import build_indexable_search_text
+from app.code.repository import CodeKnowledgeRepository
 from app.meta.index_text import (
     build_column_search_text,
     build_field_value_search_text,
@@ -81,6 +84,21 @@ class RecalledFieldValue:
 
 
 @dataclass
+class RecalledCodeArtifact:
+    """代码 artifact 召回结果（§11.8 · 第 11 周）。"""
+
+    artifact_id: int
+    repo_id: int
+    title: str
+    artifact_type: str
+    search_text: str
+    score: float
+    recall_mode: str
+    summary_text: str | None = None
+    tables: list[str] = field(default_factory=list)
+
+
+@dataclass
 class HybridRecallResult:
     """多路召回合并结果。"""
 
@@ -89,6 +107,7 @@ class HybridRecallResult:
     columns: list[RecalledColumn] = field(default_factory=list)
     metrics: list[RecalledMetric] = field(default_factory=list)
     field_values: list[RecalledFieldValue] = field(default_factory=list)
+    code_artifacts: list[RecalledCodeArtifact] = field(default_factory=list)
     recall_mode: str = "hybrid"
 
 
@@ -479,3 +498,84 @@ class HybridRetriever:
 
         rows = await self._repo.list_indexable_field_values()
         return rank_field_values_by_keywords(rows, keywords, top_k=top_k)
+
+    async def recall_code_artifacts(
+        self,
+        question: str,
+        keywords: list[str] | None = None,
+        *,
+        top_k: int | None = None,
+    ) -> tuple[list[RecalledCodeArtifact], str]:
+        """代码 artifact 向量/关键词召回。"""
+        if not self._settings.code_knowledge_enabled:
+            return [], "disabled"
+        kws = keywords if keywords is not None else extract_keywords(question)
+        limit = top_k or self._settings.recall_top_k_code
+        code_repo = CodeKnowledgeRepository(self._session)
+        use_es = await self._es_available()
+        if use_es:
+            try:
+                query_text = " ".join(kws) or question
+                vectors = await self._embedding.embed_texts([query_text])
+                if vectors:
+                    hits = await self._es.search_vector("code_artifact", vectors[0], top_k=limit)
+                    if hits:
+                        items: list[RecalledCodeArtifact] = []
+                        for h in hits:
+                            tables_raw = h.get("tables_json") or "[]"
+                            try:
+                                import json
+
+                                tables = json.loads(tables_raw) if isinstance(tables_raw, str) else tables_raw
+                            except Exception:
+                                tables = []
+                            items.append(
+                                RecalledCodeArtifact(
+                                    artifact_id=int(h["artifact_id"]),
+                                    repo_id=int(h.get("repo_id") or 0),
+                                    title=str(h.get("title") or ""),
+                                    artifact_type=str(h.get("artifact_type") or ""),
+                                    search_text=str(h.get("search_text") or ""),
+                                    score=float(h.get("_score") or 0.0),
+                                    recall_mode="es_vector",
+                                    summary_text=h.get("summary_text"),
+                                    tables=list(tables) if isinstance(tables, list) else [],
+                                )
+                            )
+                        return items, "hybrid"
+            except Exception:
+                use_es = False
+
+        rows = await code_repo.list_indexable_artifacts()
+        scored: list[tuple[float, object]] = []
+        for row in rows:
+            text = build_indexable_search_text(row)
+            score = _keyword_score(text, kws)
+            if score > 0:
+                scored.append((score, row))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        import json
+
+        items = []
+        for score, row in scored[:limit]:
+            tables: list[str] = []
+            if row.tables_json:
+                try:
+                    tables = json.loads(row.tables_json)
+                except json.JSONDecodeError:
+                    tables = []
+            items.append(
+                RecalledCodeArtifact(
+                    artifact_id=row.artifact_id,
+                    repo_id=row.repo_id,
+                    title=row.title,
+                    artifact_type=row.artifact_type,
+                    search_text=row.search_text,
+                    score=score,
+                    recall_mode="keyword_fallback",
+                    summary_text=row.summary_text,
+                    tables=tables if isinstance(tables, list) else [],
+                )
+            )
+        mode = "keyword_fallback" if items else "empty"
+        return items, mode

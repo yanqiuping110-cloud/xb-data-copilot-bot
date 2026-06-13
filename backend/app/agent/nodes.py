@@ -30,7 +30,7 @@ from app.meta.repository import MetaRepository
 from app.sql.column_guard import validate_sql_columns
 from app.sql.guard import SqlGuardError, validate_sql
 from app.sql.whitelist import refresh_allowed_tables
-from config.settings import Settings
+from config.settings import Settings, get_settings
 
 _MAX_QUESTION_LEN = 2000
 logger = get_logger("agent")
@@ -38,6 +38,32 @@ logger = get_logger("agent")
 
 def _cfg(config: RunnableConfig) -> dict[str, Any]:
     return config.get("configurable") or {}
+
+
+def _append_plan_context(context_text: str, state: AskGraphState) -> str:
+    """将 plan_question 产物（规划步骤 + 工具观察）追加进 generate_sql Prompt。"""
+    plan = state.get("plan")
+    observations = state.get("tool_observations") or []
+    if not plan and not observations:
+        return context_text
+
+    parts = [context_text, "", "【问句规划 plan_question】"]
+    if plan:
+        parts.append(f"- complexity: {plan.get('complexity')}")
+        parts.append(f"- intent: {plan.get('intent')}")
+        for step in plan.get("steps") or []:
+            goals = step.get("goal") or ""
+            tools = ", ".join(step.get("needs_tool") or [])
+            parts.append(f"  步骤 {step.get('id')}: {goals}" + (f"（工具: {tools}）" if tools else ""))
+    if observations:
+        parts.append("")
+        parts.append("【Agent 工具观察】")
+        for obs in observations[:6]:
+            tool = obs.get("tool")
+            result = obs.get("result") or {}
+            preview = result.get("error") or f"count={result.get('count', result.get('column_count', 'ok'))}"
+            parts.append(f"- {tool}: {preview}")
+    return "\n".join(parts)
 
 
 async def _span(
@@ -100,7 +126,8 @@ async def generate_sql(state: AskGraphState, config: RunnableConfig) -> dict:
     question = state.get("normalized_question") or ""
     context_text = state.get("context_text") or ""
     if context_text and not context_text.startswith("【当前用户角色】"):
-        context_text = f"{build_role_context_header(ctx)}\n\n{context_text}"
+        context_text = f"{build_role_context_header(ctx, settings=settings)}\n\n{context_text}"
+    context_text = _append_plan_context(context_text, state)
     retry_count = state.get("retry_count") or 0
     l2_retry = False
 
@@ -195,8 +222,8 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
         }
 
     try:
-        final_sql = validate_sql(raw, ctx, max_rows=settings.sql_max_rows)
-        final_sql = strip_sch_id_for_broad_roles(final_sql, ctx)
+        final_sql = validate_sql(raw, ctx, max_rows=settings.sql_max_rows, settings=settings)
+        final_sql = strip_sch_id_for_broad_roles(final_sql, ctx, settings=settings)
 
         meta_repo = MetaRepository(c["copilot_session"])
         table_names = list(
@@ -232,7 +259,12 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
 
 
 async def apply_policy(state: AskGraphState, config: RunnableConfig) -> dict:
-    """学校账户补 sch_id 参数；与 matched 路径共用 params。"""
+    """
+    学校账户补 sch_id 参数；与 matched 路径共用 params。
+
+    第 7～12 周 `POLICY_SCH_ID_ENABLED=false` 时跳过 sch 注入（§11.7.1）。
+    第 13 周由 EffectivePolicy 替代（§11.6）。
+    """
     if state.get("error_code"):
         return {}
 
@@ -247,7 +279,7 @@ async def apply_policy(state: AskGraphState, config: RunnableConfig) -> dict:
         params = dict(matched.params)
         if ctx.role == UserRole.SCHOOL and ":sch_id" in final_sql.lower():
             params["sch_id"] = require_school_scope(ctx)
-    elif applies_sch_id_filter(ctx):
+    elif applies_sch_id_filter(ctx, settings=c["settings"]):
         if ":sch_id" not in final_sql.lower() and "sch_id" not in final_sql.lower():
             await _span(config, "apply_policy", t0, "fail", {"error": "MISSING_SCH_ID"})
             return {
@@ -267,8 +299,8 @@ async def apply_policy(state: AskGraphState, config: RunnableConfig) -> dict:
                 "degrade_level": 3,
             }
 
-    if not applies_sch_id_filter(ctx):
-        stripped_sql = strip_sch_id_for_broad_roles(final_sql, ctx)
+    if not applies_sch_id_filter(ctx, settings=c["settings"]):
+        stripped_sql = strip_sch_id_for_broad_roles(final_sql, ctx, settings=c["settings"])
         if stripped_sql != final_sql:
             final_sql = stripped_sql
             params.pop("sch_id", None)
@@ -300,9 +332,9 @@ async def execute_sql(state: AskGraphState, config: RunnableConfig) -> dict:
     if not final_sql:
         return {"status": "fail", "error_code": "NO_SQL", "degrade_level": 3}
 
-    final_sql = strip_sch_id_for_broad_roles(final_sql, ctx)
+    final_sql = strip_sch_id_for_broad_roles(final_sql, ctx, settings=settings)
     params = dict(params)
-    if not applies_sch_id_filter(ctx):
+    if not applies_sch_id_filter(ctx, settings=settings):
         params.pop("sch_id", None)
 
     trace_id = c.get("trace_id", "-")
@@ -380,9 +412,23 @@ def _format_answer_text(state: AskGraphState) -> str:
 
 
 async def format_answer(state: AskGraphState, config: RunnableConfig) -> dict:
-    """生成一句话回答或 L3 拒答文案。"""
+    """生成一句话回答或 L3 拒答文案；复杂 Agent 路径可选用 LLM 解读。"""
     t0 = time.perf_counter()
-    if state.get("error_code"):
+    error_code = state.get("error_code")
+    rows = state.get("rows") or []
+    # 语义验证仅因空结果失败且已耗尽修正：仍返回可读答复，避免多轮记忆链断裂
+    if error_code == "VERIFY_FAILED" and not rows:
+        answer = _format_answer_text(state) or "查询结果为空，请尝试调整时间范围或筛选条件。"
+        await _span(
+            config,
+            "format_answer",
+            t0,
+            "success",
+            {"answer_preview": answer, "verify_empty_graceful": True},
+        )
+        return {"answer": answer, "status": "success", "error_code": None, "error_message": None}
+
+    if error_code:
         msg = state.get("error_message") or "无法完成本次问数，请调整问法或联系管理员。"
         await _span(
             config,
@@ -397,14 +443,68 @@ async def format_answer(state: AskGraphState, config: RunnableConfig) -> dict:
         return {"answer": msg, "status": "fail"}
 
     answer = _format_answer_text(state)
+    c = _cfg(config)
+    settings: Settings = c["settings"]
+    use_agent = state.get("use_agent_path") and not state.get("plan_skipped")
+    columns = state.get("columns") or []
+    rows = state.get("rows") or []
+
+    if (
+        settings.format_answer_llm_enabled
+        and use_agent
+        and rows
+        and len(columns) > 1
+    ):
+        llm_answer = await _format_answer_with_llm(
+            settings,
+            question=state.get("normalized_question") or "",
+            columns=columns,
+            rows=rows,
+            fallback=answer,
+        )
+        if llm_answer:
+            answer = llm_answer
+
     await _span(
         config,
         "format_answer",
         t0,
         "success",
-        {"answer_preview": answer},
+        {"answer_preview": answer, "llm_formatted": use_agent and settings.format_answer_llm_enabled},
     )
     return {"answer": answer, "status": "success"}
+
+
+async def _format_answer_with_llm(
+    settings: Settings,
+    *,
+    question: str,
+    columns: list[str],
+    rows: list[list],
+    fallback: str,
+) -> str | None:
+    """复杂多维结果：LLM 生成可读摘要（失败时回退模板）。"""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from app.agent.llm_sql import build_llm
+
+    llm = build_llm(settings)
+    sample = rows[:5]
+    system = (
+        "你是数据解读助手。根据问句、列名与样例行，用一两句中文总结查询结果。"
+        "若列为动态透视（多项目列），说明主要数值；不要编造不存在的数据。"
+    )
+    user = (
+        f"问句：{question}\n列名：{columns}\n"
+        f"样例行（最多5行）：{sample}\n总行数：{len(rows)}"
+    )
+    try:
+        resp = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+        content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        text = content.strip()
+        return text if len(text) > 4 else None
+    except Exception:
+        return None
 
 
 _CORRECTABLE_CODES = frozenset(
@@ -415,17 +515,20 @@ _CORRECTABLE_CODES = frozenset(
         "TABLE_NOT_ALLOWED",
         "MISSING_SCH_ID",
         "SQL_EXEC_ERROR",
+        "VERIFY_FAILED",
+        "COLUMN_NOT_FOUND",
     }
 )
 
 
 async def correct_sql(state: AskGraphState, config: RunnableConfig) -> dict:
-    """校验失败时带错误信息重生成 SQL（最多 1 次）。"""
+    """校验失败时带错误信息与工具观察重生成 SQL（最多 AGENT_MAX_CORRECT 次）。"""
     t0 = time.perf_counter()
     c = _cfg(config)
     settings: Settings = c["settings"]
     question = state.get("normalized_question") or ""
     context_text = state.get("context_text") or ""
+    context_text = _append_plan_context(context_text, state)
     previous_sql = state.get("raw_sql") or state.get("final_sql") or ""
     error_msg = state.get("validation_error") or state.get("error_message") or "SQL 校验失败"
     correct_count = (state.get("correct_sql_count") or 0) + 1
@@ -478,12 +581,16 @@ async def correct_sql(state: AskGraphState, config: RunnableConfig) -> dict:
     }
 
 
+def _max_correct_sql() -> int:
+    return get_settings().agent_max_correct
+
+
 def route_after_validate(state: AskGraphState) -> str:
     if state.get("error_code"):
         code = state.get("error_code") or ""
         if (
             state.get("matched") is None
-            and (state.get("correct_sql_count") or 0) < 1
+            and (state.get("correct_sql_count") or 0) < _max_correct_sql()
             and code in _CORRECTABLE_CODES
         ):
             return "correct_sql"
@@ -492,13 +599,14 @@ def route_after_validate(state: AskGraphState) -> str:
 
 
 def route_after_execute(state: AskGraphState) -> str:
-    """执行失败且可修正时重走 correct_sql（最多 1 次）。"""
+    """执行失败且可修正时重走 correct_sql；成功则进入 verify_answer。"""
     if state.get("error_code"):
         code = state.get("error_code") or ""
         if (
             state.get("matched") is None
-            and (state.get("correct_sql_count") or 0) < 1
+            and (state.get("correct_sql_count") or 0) < _max_correct_sql()
             and code in _CORRECTABLE_CODES
         ):
             return "correct_sql"
-    return "format_answer"
+        return "verify_answer"
+    return "verify_answer"

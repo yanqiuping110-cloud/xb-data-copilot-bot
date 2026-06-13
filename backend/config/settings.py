@@ -134,6 +134,78 @@ class Settings(BaseSettings):
         description="L1 样例软参考最低相关性得分，低于此值不注入 Prompt",
     )
 
+    # ---------- Agent Plan + 工具（第 7 周 · §11.7）----------
+    policy_sch_id_enabled: bool = Field(
+        default=False,
+        alias="POLICY_SCH_ID_ENABLED",
+        description="问数 SQL 是否启用 sch_id 注入/校验；development 默认关闭以便调试复杂 SQL",
+    )
+    agent_plan_enabled: bool = Field(
+        default=True,
+        alias="AGENT_PLAN_ENABLED",
+        description="是否在 build_llm_context 后执行 plan_question（L1 高分可跳过）",
+    )
+    plan_l1_fast_path_score: int = Field(
+        default=12,
+        alias="PLAN_L1_FAST_PATH_SCORE",
+        description="L1 样例得分 ≥ 此值时跳过 Plan，走原 generate_sql（与 example_ranker 全规则命中加成一致）",
+    )
+    agent_loop_enabled: bool = Field(
+        default=True,
+        alias="AGENT_LOOP_ENABLED",
+        description="复杂问句是否在 plan_question 后进入 ReAct agent_loop",
+    )
+    agent_max_steps: int = Field(
+        default=6,
+        alias="AGENT_MAX_STEPS",
+        description="单轮 ask 最大 Agent tool 调用次数",
+    )
+    agent_max_correct: int = Field(
+        default=3,
+        alias="AGENT_MAX_CORRECT",
+        description="correct_sql / verify 触发的最大修正次数（第 9 周默认 3）",
+    )
+    verify_answer_enabled: bool = Field(
+        default=True,
+        alias="VERIFY_ANSWER_ENABLED",
+        description="execute_sql 后是否执行 verify_answer 语义验证",
+    )
+    verify_answer_llm_enabled: bool = Field(
+        default=False,
+        alias="VERIFY_ANSWER_LLM_ENABLED",
+        description="启发式验证失败时是否调用 LLM 二次确认",
+    )
+    format_answer_llm_enabled: bool = Field(
+        default=True,
+        alias="FORMAT_ANSWER_LLM_ENABLED",
+        description="复杂 Agent 路径是否用 LLM 生成可读摘要",
+    )
+    recall_top_k_code: int = Field(
+        default=5,
+        alias="RECALL_TOP_K_CODE",
+        description="代码 artifact ES 召回 Top-K",
+    )
+    code_knowledge_enabled: bool = Field(
+        default=True,
+        alias="CODE_KNOWLEDGE_ENABLED",
+        description="是否启用 Git 代码知识图谱召回与 Agent 工具",
+    )
+    agent_probe_timeout_sec: int = Field(
+        default=3,
+        alias="AGENT_PROBE_TIMEOUT_SEC",
+        description="run_probe_sql 业务库执行超时（秒）",
+    )
+    graph_recursion_limit: int = Field(
+        default=64,
+        alias="GRAPH_RECURSION_LIMIT",
+        description="LangGraph 单轮 ask 最大节点步数（复杂 Agent 路径需高于默认 25）",
+    )
+    verify_max_correct: int = Field(
+        default=1,
+        alias="VERIFY_MAX_CORRECT",
+        description="verify_answer 失败后最多触发的 correct_sql 次数（与校验失败共用 correct_sql_count 预算）",
+    )
+
     # ---------- Agent Memory（第 6 周）----------
     memory_enabled: bool = Field(default=True, alias="MEMORY_ENABLED")
     session_memory_enabled: bool = Field(default=True, alias="SESSION_MEMORY_ENABLED")

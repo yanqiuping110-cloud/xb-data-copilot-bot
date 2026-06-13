@@ -21,6 +21,7 @@ from app.retrieval.hybrid import (
     RecalledMetric,
     RecalledTable,
 )
+from app.retrieval.unified import boost_tables_by_code_artifacts
 from app.sql.whitelist import get_allowed_tables
 from config.settings import Settings, get_settings
 
@@ -35,6 +36,7 @@ class MergedRecallContext:
     columns: list[RecalledColumn] = field(default_factory=list)
     metrics: list[RecalledMetric] = field(default_factory=list)
     field_values: list[RecalledFieldValue] = field(default_factory=list)
+    code_artifacts: list = field(default_factory=list)
     tables: list[TableMetaRow] = field(default_factory=list)
     table_names: list[str] = field(default_factory=list)
     prompt_columns: dict[str, list[str]] = field(default_factory=dict)
@@ -100,6 +102,7 @@ def merge_retrieved_info(recall: HybridRecallResult) -> MergedRecallContext:
         columns=list(recall.columns),
         metrics=list(recall.metrics),
         field_values=list(recall.field_values),
+        code_artifacts=list(recall.code_artifacts),
     )
 
 
@@ -176,6 +179,12 @@ def filter_tables(
         )
     else:
         merged.table_names = merged.table_names[: settings.max_tables_in_prompt]
+
+    if merged.code_artifacts:
+        merged.recalled_tables = boost_tables_by_code_artifacts(
+            merged.recalled_tables,
+            merged.code_artifacts,
+        )
 
     return merged
 
@@ -302,7 +311,7 @@ async def build_llm_context_text(
     example_min_score = cfg.curated_example_min_score
 
     parts: list[str] = [
-        build_role_context_header(ctx),
+        build_role_context_header(ctx, settings=cfg),
         "",
     ]
     if memory_prompt_text:
@@ -385,6 +394,17 @@ async def build_llm_context_text(
             parts.append(f"- {t.table_name}：{t.search_text[:120]}（score={t.score:.3f}）")
         parts.append("")
 
+    if merged.code_artifacts:
+        parts.append("【相关业务接口/报表口径（代码知识）】")
+        for art in merged.code_artifacts[:5]:
+            summary = (getattr(art, "summary_text", None) or art.search_text)[:200]
+            tables_hint = ", ".join(getattr(art, "tables", []) or [])[:120]
+            parts.append(
+                f"- [{getattr(art, 'artifact_type', 'artifact')}] {art.title}"
+                f"（artifact_id={art.artifact_id}，表={tables_hint or '—'}）：{summary}"
+            )
+        parts.append("")
+
     if merged.columns:
         parts.append("【相关字段（字段召回）】")
         for col in merged.columns[:15]:
@@ -434,8 +454,139 @@ async def build_llm_context_text(
             parts.append("")
 
     parts.append("【生成约束】")
-    parts.extend(build_llm_sql_generation_constraints(ctx))
+    parts.extend(build_llm_sql_generation_constraints(ctx, settings=cfg))
 
+    return "\n".join(parts)
+
+
+def _format_tool_observations(observations: list[dict], *, max_chars: int = 4000) -> list[str]:
+    """将 Agent 工具观察格式化为 Prompt 段落。"""
+    lines: list[str] = ["【Agent 工具观察】"]
+    used = len(lines[0])
+    for obs in observations[:12]:
+        tool = obs.get("tool")
+        result = obs.get("result") or {}
+        args = obs.get("args") or {}
+        if result.get("error"):
+            line = f"- {tool}({args}): 错误 {result.get('error')} {result.get('message', '')}"
+        elif tool == "run_probe_sql":
+            cols = result.get("columns") or []
+            rows = result.get("rows") or []
+            line = f"- run_probe_sql: 列={cols} 样例行={rows[:3]}"
+        elif "columns" in result and isinstance(result["columns"], list):
+            cols = result["columns"][:8]
+            line = f"- describe_table({args.get('table')}): {cols}"
+        elif "relations" in result:
+            rels = (result.get("relations") or [])[:4]
+            line = f"- list_relations: {rels}"
+        elif "path" in result:
+            line = f"- get_join_path: {result.get('path')}"
+        elif "metrics" in result:
+            line = f"- search_metrics: count={result.get('count', len(result.get('metrics') or []))}"
+        elif "values" in result:
+            line = f"- search_field_values: count={result.get('count', len(result.get('values') or []))}"
+        else:
+            line = f"- {tool}: count={result.get('count', 'ok')}"
+        if used + len(line) > max_chars:
+            lines.append("- …（观察截断）")
+            break
+        lines.append(line)
+        used += len(line)
+    return lines
+
+
+async def build_agent_context_text(
+    question: str,
+    merged: MergedRecallContext | None,
+    copilot_session: AsyncSession,
+    ctx: UserContext,
+    *,
+    plan: dict | None = None,
+    observations: list[dict] | None = None,
+    settings: Settings | None = None,
+    memory_prompt_text: str = "",
+) -> str:
+    """
+    Agent 路径专用上下文：种子召回摘要 + plan + 工具观察 + 约束。
+
+    比 build_llm_context_text 更紧凑，避免重复注入全量召回后再叠观察导致 Prompt 膨胀。
+    """
+    cfg = settings or get_settings()
+    allowed = sorted(get_allowed_tables())
+    parts: list[str] = [
+        build_role_context_header(ctx, settings=cfg),
+        "",
+    ]
+    if memory_prompt_text:
+        parts.extend([memory_prompt_text, ""])
+
+    parts.extend(
+        [
+            "【允许查询的业务表】",
+            ", ".join(allowed) or "（未配置）",
+            "",
+        ]
+    )
+
+    if merged is not None:
+        parts.extend(
+            [
+                f"【种子召回】模式={merged.recall_mode}；关键词={', '.join(merged.keywords) or '（整句）'}",
+                f"候选表：{', '.join(merged.table_names[:8]) or '（无）'}",
+            ]
+        )
+        if merged.metrics:
+            parts.append(
+                "指标："
+                + ", ".join(f"{m.metric_name}({m.metric_code})" for m in merged.metrics[:4])
+            )
+        if merged.field_values:
+            parts.append(
+                "过滤取值："
+                + ", ".join(
+                    f"{v.table_name}.{v.column_name}={v.value_text}"
+                    for v in merged.field_values[:5]
+                )
+            )
+        if merged.prompt_columns:
+            parts.append("【候选表字段（仅可使用下列列名）】")
+            meta_repo = MetaRepository(copilot_session)
+            for table_name in merged.table_names[:6]:
+                names = merged.prompt_columns.get(table_name, [])
+                if names:
+                    parts.append(f"- {table_name}: {', '.join(names[:15])}")
+        if merged.code_artifacts:
+            parts.append("【相关业务接口/报表口径】")
+            for art in merged.code_artifacts[:4]:
+                summary = (getattr(art, "summary_text", None) or art.search_text)[:180]
+                parts.append(f"- code:artifact:{art.artifact_id} {art.title}：{summary}")
+        parts.append("")
+
+    if plan:
+        parts.append("【问句规划 plan】")
+        parts.append(f"- complexity: {plan.get('complexity')}")
+        parts.append(f"- intent: {plan.get('intent')}")
+        for step in plan.get("steps") or []:
+            goals = step.get("goal") or ""
+            tools = ", ".join(step.get("needs_tool") or [])
+            agg = step.get("aggregation") or ""
+            pivot = step.get("pivot_hint") or ""
+            extra = ""
+            if agg:
+                extra += f" aggregation={agg}"
+            if pivot:
+                extra += f" pivot={pivot}"
+            parts.append(f"  步骤 {step.get('id')}: {goals}" + (f"（工具: {tools}）" if tools else "") + extra)
+        parts.append("")
+
+    if observations:
+        parts.extend(_format_tool_observations(observations))
+        parts.append("")
+
+    parts.append(f"【用户问句】{question}")
+    parts.append("")
+    parts.append("【生成约束】")
+    parts.extend(build_llm_sql_generation_constraints(ctx, settings=cfg))
     return "\n".join(parts)
 
 
@@ -469,5 +620,15 @@ def span_detail_from_merged(merged: MergedRecallContext) -> dict:
                 "score": v.score,
             }
             for v in merged.field_values[:5]
+        ],
+        "code_recall_count": len(merged.code_artifacts),
+        "code_artifacts": [
+            {
+                "id": a.artifact_id,
+                "title": a.title,
+                "score": a.score,
+                "type": getattr(a, "artifact_type", ""),
+            }
+            for a in merged.code_artifacts[:5]
         ],
     }

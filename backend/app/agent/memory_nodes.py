@@ -95,6 +95,6 @@ async def resolve_references_node(state: AskGraphState, config: RunnableConfig) 
         "memory_prompt_text": memory_text,
         "reference_hint": hint,
     }
-    if matched and hint:
+    if matched and resolved != question:
         result["normalized_question"] = resolved
     return result

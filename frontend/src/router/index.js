@@ -27,6 +27,12 @@ const routes = [
     meta: { requiresAdmin: true },
   },
   {
+    path: '/admin/code/repos',
+    name: 'AdminCodeRepos',
+    component: () => import('../views/AdminCodeRepos.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
     path: '/admin/meta/tables',
     name: 'AdminMetaTables',
     component: () => import('../views/AdminMetaTables.vue'),

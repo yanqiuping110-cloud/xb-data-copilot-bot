@@ -61,7 +61,26 @@ python scripts/replay_eval.py --subset memory --token "<JWT>"
 
 ---
 
-## 三、badcase → L1 闭环（P3）
+## 四、复杂报表 Agent 子集（第 9 周 · 15 条）
+
+机器可读用例：`docs/eval/agent_complex_report.json`。
+
+```powershell
+cd backend
+python scripts/replay_eval.py --subset agent --token "<JWT>"
+```
+
+| ID | 问句类型 | 验收要点 |
+|----|----------|----------|
+| agent-01～05 | 多项目对比 / 交叉表 | span 含 plan + tool；`degrade_level≤3` |
+| agent-06～10 | 年级/维度聚合 | verify_answer 或 correct_sql 可追踪 |
+| agent-11～15 | 动态列 / 多维报表 | Agent 路径 `use_agent_path=true` |
+
+目标：meta-only Agent 基线完成率 **≥50%**（第 14 周含代码目标 65%+）。
+
+---
+
+## 五、badcase → L1 闭环（P3）
 
 1. 问数点踩 / 标记 badcase  
 2. 运营在 Badcase 页 **修正 SQL** → **转 L1 草稿**  
@@ -70,7 +89,7 @@ python scripts/replay_eval.py --subset memory --token "<JWT>"
 
 ---
 
-## 四、指标（参考）
+## 六、指标（参考）
 
 | 阶段 | 指标 |
 |------|------|

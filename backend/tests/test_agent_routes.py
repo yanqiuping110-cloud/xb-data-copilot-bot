@@ -26,9 +26,26 @@ def test_route_correct_sql_on_exec_error():
     assert route_after_execute(state) == "correct_sql"
 
 
-def test_route_format_after_exec_error_when_already_corrected():
+def test_route_correct_sql_second_attempt():
     state: AskGraphState = {
         "error_code": "SQL_EXEC_ERROR",
         "correct_sql_count": 1,
+        "validation_error": "still wrong",
     }
-    assert route_after_execute(state) == "format_answer"
+    assert route_after_execute(state) == "correct_sql"
+
+
+def test_route_correct_sql_third_attempt_on_exec_error():
+    state: AskGraphState = {
+        "error_code": "SQL_EXEC_ERROR",
+        "correct_sql_count": 2,
+    }
+    assert route_after_execute(state) == "correct_sql"
+
+
+def test_route_verify_after_exec_error_when_correct_exhausted():
+    state: AskGraphState = {
+        "error_code": "SQL_EXEC_ERROR",
+        "correct_sql_count": 3,
+    }
+    assert route_after_execute(state) == "verify_answer"

@@ -227,6 +227,6 @@ def test_route_format_after_correct_exhausted():
     state = {
         "error_code": "TABLE_NOT_ALLOWED",
         "matched": None,
-        "correct_sql_count": 1,
+        "correct_sql_count": 3,
     }
     assert route_after_validate(state) == "format_answer"

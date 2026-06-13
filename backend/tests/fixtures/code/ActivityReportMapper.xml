@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sport.mapper.ActivityReportMapper">
+
+    <!-- 活动参与记录查询 -->
+    <select id="selectQzsBySchool" resultType="map">
+        SELECT r.sch_id, r.project_id, COUNT(*) AS cnt
+        FROM sport_activity_qzs_record r
+        INNER JOIN sport_project p ON p.id = r.project_id
+        WHERE r.status = 1
+        GROUP BY r.sch_id, r.project_id
+    </select>
+
+    <select id="selectGradePivot" resultType="map">
+        SELECT g.grade_name, r.project_id, COUNT(DISTINCT r.user_id) AS user_cnt
+        FROM sport_activity_qzs_record r
+        LEFT JOIN sport_grade g ON g.id = r.grade_id
+        WHERE r.sch_id = #{schId}
+        GROUP BY g.grade_name, r.project_id
+    </select>
+
+</mapper>

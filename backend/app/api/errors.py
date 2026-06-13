@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.ask.exceptions import AskError
 from app.auth import jwt_tokens
 from app.auth.service import AuthError
+from app.code.exceptions import CodeKnowledgeError
 from app.meta.exceptions import MetaError
 from app.policy.role_policy import PolicyError
 
@@ -52,6 +53,14 @@ async def ask_error_handler(_: Request, exc: AskError) -> JSONResponse:
 
 async def meta_error_handler(_: Request, exc: MetaError) -> JSONResponse:
     """元数据/introspect 业务错误。"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_error_body(exc.code, exc.message),
+    )
+
+
+async def code_knowledge_error_handler(_: Request, exc: CodeKnowledgeError) -> JSONResponse:
+    """Git 代码知识库业务错误。"""
     return JSONResponse(
         status_code=exc.status_code,
         content=_error_body(exc.code, exc.message),

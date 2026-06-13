@@ -1,11 +1,11 @@
 # 问数项目 · 开发进度
 
-> 与 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) **6 周计划**对照更新（v2.0：元数据知识库 + 语义库 + 混合召回 + 多阶段推理）。  
+> 与 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) **14 周计划**对照更新（v2.7：Agent + Git 代码知识图谱 + DataScope/评测顺延）。  
 > **代码注释规范**：所有业务代码须写**中文注释**（见开发计划 §0、§5.1）。
 
 ---
 
-## 总览（截至 2026-06-05）
+## 总览（截至 2026-06-13）
 
 | 模块 | 进度 | 说明 |
 |------|------|------|
@@ -30,7 +30,11 @@
 | **多阶段 LangGraph** | ✅ 完成 | 召回链 + `correct_sql`；见 §6.1 |
 | **前端 meta 管理页** | ✅ 完成 | 表/字段/关系/取值/指标/L1/badcase + 问数页反馈 |
 | **Agent Memory（第 6 周）** | ✅ 完成 | Memory + 偏好抽屉 + badcase→L1 草稿 + 多轮评测子集 |
-| 评测集 | 🟡 部分 | `EVAL_QUESTIONS.md` + `replay_eval.py`（Memory 子集）；全量第 8 周 |
+| 评测集 | ✅ Agent 子集 | `docs/eval/agent_complex_report.json` 15 条 + `replay_eval.py --subset agent` |
+| **Agent Plan + Tool Loop（第 7～9 周）** | ✅ 完成 | agent_loop + verify_answer + 复杂报表评测 |
+| **Git 代码知识图谱（第 10～12 周）** | ✅ 完成 | V009 + sync/解析 + ES + 代码 Agent 工具 + `AdminCodeRepos.vue` |
+| **动态 DataScope（第 13 周）** | ⬜ 顺延 | §11.6；`V010__data_scope.sql` |
+| **MVP 评测（第 14 周）** | ⬜ 顺延 | meta + code + Scope 全量评测 |
 
 ---
 
@@ -114,7 +118,90 @@
 
 ---
 
-## LangGraph 流水线
+## 第 7 周（Agent Plan 地基 · 已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `POLICY_SCH_ID_ENABLED` Feature Flag | ✅ | `settings.py`；development 默认 `false` |
+| sch 触点门控 | ✅ | `role_policy` / `guard` / `runner` / `apply_policy` |
+| `app/agent/tools/` 只读工具 | ✅ | 6 个：describe / relations / join_path / search_* |
+| 工具 span | ✅ | `tool_<name>` 写入 `copilot_ask_span` + trace_log |
+| `plan_question` 节点 | ✅ | L1 高分跳过；启发式 + LLM plan；执行 needs_tool |
+| LangGraph 接入 | ✅ | `build_llm_context` → `plan_question` → `generate_sql` |
+| `AskGraphState` 扩展 | ✅ | `plan` / `tool_observations` / `plan_skipped` 等 |
+| 单测 | ✅ | `test_policy_sch_id_flag` / `test_agent_tools` / 图编译 |
+
+**周验收**：
+
+- [x] development 默认 **无 sch_id 问数失败**
+- [x] ≥3 个 MySQL 工具可在图内调用并写 span
+- [x] 复杂问句 fallback plan ≥2 步（启发式 + `_fallback_plan`）
+
+---
+
+## 第 8 周（Agent 工具循环 · 已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `agent_loop` ReAct 节点 | ✅ | `app/agent/agent_nodes.py` |
+| `build_agent_context` | ✅ | 种子 + plan + observations |
+| `generate_sql_step` | ✅ | 分步 CTE SQL |
+| `run_probe_sql` | ✅ | `probe_tools.py` + sql_guard |
+| `AGENT_MAX_STEPS` / SSE progress | ✅ | settings + streaming |
+| 单测 | ✅ | `test_agent_week8.py` |
+
+---
+
+## 第 9 周（语义验证 + 复杂报表评测 · 已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `verify_answer` 节点 | ✅ | `app/agent/verify_nodes.py` |
+| `AGENT_MAX_CORRECT=3` | ✅ | `VERIFY_FAILED` 触发 correct_sql |
+| `format_answer` LLM 复杂路径 | ✅ | `FORMAT_ANSWER_LLM_ENABLED` |
+| 评测 15 条 | ✅ | `docs/eval/agent_complex_report.json` |
+| `replay_eval.py --subset agent` | ✅ | 基线回放脚本 |
+| 单测 | ✅ | `test_verify_answer.py` |
+
+---
+
+## 第 10 周（Git 解析入库 · 已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `V009__code_knowledge.sql` | ✅ | repo/symbol/edge/artifact/table_link |
+| `app/code/` 解析 + sync | ✅ | Java Controller + MyBatis XML |
+| `/admin/code/repos` CRUD + sync | ✅ | `app/api/admin_code.py` |
+| `scripts/sync_git_repos.py` | ✅ | CLI 同步 |
+| 单测 fixture | ✅ | `tests/fixtures/code/` + `test_code_parser.py` |
+| 本机执行 V009 迁移 | ⬜ | 需手工跑 SQL |
+
+---
+
+## 第 11 周（代码 ES + 混合召回 · 已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `rebuild_code_index` | ✅ | `MetaKnowledgeService` → ES `code_artifact` |
+| `HybridRetriever.recall_code_artifacts` | ✅ | 向量 + keyword 降级 |
+| `UnifiedRetriever` | ✅ | `app/retrieval/unified.py` |
+| Prompt 【报表口径/接口】段 | ✅ | `build_llm_context` / `build_agent_context` |
+| `plan_question` code sources | ✅ | `code:artifact:{id}` |
+| `scripts/enrich_code_artifacts.py` | ✅ | LLM 摘要 job |
+| `AdminCodeRepos.vue` | ✅ | `/admin/code/repos` |
+
+---
+
+## 第 12 周（代码 Agent 工具 · 已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `search_code_artifacts` 等 4 工具 | ✅ | `app/agent/tools/code_tools.py` |
+| 并入 `agent_loop` | ✅ | `executor.py` + `agent_llm.py` |
+| meta 融合 Plan | ✅ | `_inject_code_sources` |
+| 单测 | ✅ | `test_code_tools.py` |
+
+---
 
 ### 已落地（基线）
 
@@ -137,6 +224,14 @@
 | `recall_columns` / `recall_metrics` / `recall_field_values` | `app/agent/recall_nodes.py` + `app/retrieval/hybrid.py` |
 | `merge_retrieved_info` / `filter_tables` / `filter_metrics` / `build_llm_context` | `app/agent/recall_nodes.py` + `app/agent/context_builder.py` |
 | `correct_sql` | `app/agent/nodes.py` |
+
+### 已新增（第 7 周）
+
+| 节点 / 工具 | 实现位置 |
+|-------------|----------|
+| `plan_question` | `app/agent/plan_nodes.py` |
+| `tool_describe_table` 等 span | `app/agent/tools/executor.py` |
+| MySQL 只读工具集 | `app/agent/tools/meta_tools.py`、`search_tools.py` |
 
 入口：`POST /api/v1/ask` → `app/ask/service.py` → `app/agent/runner.py`。
 
@@ -174,7 +269,10 @@
 | 2026-06-03 | LangGraph + LLM；开发计划 v2.0/v2.1 |
 | 2026-06-03 | **第 3 周启动**：V004 DDL、`app/meta`、`/admin/meta` API、白名单接 table_meta |
 | 2026-06-05 | 语义库 CRUD API（关系/取值/指标/L1）+ feedback/badcase + 前端全套管理页 |
-| 2026-06-05 | **第 5 周**：`HybridRetriever`、多阶段 LangGraph 召回链、`correct_sql`、单测 53 通过 |
+| 2026-06-13 | **第 9～12 周完成**：verify_answer + V009 代码图谱 + ES + 代码 Agent 工具 + AdminCodeRepos |
+| 2026-06-13 | **第 7～8 周完成**：agent_loop + 分步 SQL + probe |
+| 2026-06-12 | **计划 v2.7**：14 周；§11.8 Git 代码知识图谱（第 10～12 周）；DataScope→13、MVP→14 |
+| 2026-06-12 | **计划 v2.6**：11 周；§11.7 Agent；sch_id 暂停 |
 
 ---
 
@@ -212,9 +310,15 @@ python scripts/build_search_index.py
 
 ---
 
-## 下一步
+## 下一步（v2.7 计划）
 
-1. **多轮评测**：`python scripts/replay_eval.py --subset memory --token "<JWT>"`  
-2. **第 7 周**：动态数据权限（`V008` + `EffectivePolicy`）。  
-3. **第 8 周**：扩展 `EVAL_QUESTIONS` 至 15～30 条开放域 + 全量 `replay_eval`。  
-4. 运营闭环：badcase → 转 L1 草稿 → 审核发布 → 再问数验证。
+1. ~~**第 7 周**：`POLICY_SCH_ID_ENABLED=false` + MySQL Agent 工具 + `plan_question`~~ ✅  
+2. ~~**第 8 周**：`agent_loop` + `build_agent_context` + 分步 `generate_sql_step`~~ ✅  
+3. ~~**第 9 周**：`verify_answer` + 复杂报表评测 15 条~~ ✅  
+4. ~~**第 10 周**：`V009` Git repo + sync + Java/MyBatis 解析入库~~ ✅  
+5. ~~**第 11 周**：代码 ES 索引 + `UnifiedRetriever` + `AdminCodeRepos.vue`~~ ✅  
+6. ~~**第 12 周**：代码 Agent 工具 + meta 融合 Plan~~ ✅  
+7. **第 13 周**：DataScope（`V010`）  
+8. **第 14 周**：全量 MVP 评测与文档  
+
+**不做**：Codegraph、SQLite；代码权威存 **MySQL copilot**，检索用 **ES**。

@@ -13,20 +13,18 @@ from app.policy.role_policy import LLM_JOIN_ALIAS_SYSTEM_HINT
 from config.settings import Settings
 
 _SQL_BLOCK_RE = re.compile(r"```(?:sql)?\s*([\s\S]*?)```", re.IGNORECASE)
-_SELECT_RE = re.compile(r"(SELECT[\s\S]+)", re.IGNORECASE)
+_SQL_START_RE = re.compile(r"((?:WITH|SELECT)[\s\S]+)", re.IGNORECASE)
 
 
 def _extract_sql(text: str) -> str | None:
-    """从模型输出中提取 SELECT 语句。"""
+    """从模型输出中提取 SELECT 或 WITH ... SELECT 语句。"""
     stripped = text.strip()
     block = _SQL_BLOCK_RE.search(stripped)
-    if block:
-        candidate = block.group(1).strip()
-    else:
-        candidate = stripped
-    if candidate.upper().startswith("SELECT"):
+    candidate = block.group(1).strip() if block else stripped
+    upper = candidate.upper()
+    if upper.startswith("SELECT") or upper.startswith("WITH"):
         return candidate.rstrip(";").strip()
-    match = _SELECT_RE.search(candidate)
+    match = _SQL_START_RE.search(candidate)
     if match:
         return match.group(1).rstrip(";").strip()
     return None
@@ -63,6 +61,7 @@ async def generate_sql_from_llm(
         "你是企业问数系统的 SQL 生成助手，只为智慧体育业务库生成只读查询。"
         "严格遵守上下文中的表白名单与 MySQL 5.7 语法。"
         "只能使用上下文中【候选表字段清单】列出的真实列名，禁止编造任何字段。"
+        "时间/日期筛选请用 create_time、activity_start_time 等真实列，禁止把中文「日期」当作列名。"
         "SELECT 列别名优先使用中文（如 AS 学生名、AS 入学年份）；"
         "仅当用户明确要求英文表头时才使用英文别名。"
         f"{LLM_JOIN_ALIAS_SYSTEM_HINT}"
@@ -94,3 +93,61 @@ async def generate_sql_from_llm(
         token_out = usage.get("completion_tokens") or usage.get("output_tokens")
 
     return sql, token_in, token_out
+
+
+async def generate_sql_step_from_llm(
+    *,
+    settings: Settings,
+    question: str,
+    context_text: str,
+    plan_steps: list[dict],
+) -> tuple[str | None, list[dict], int | None, int | None]:
+    """
+    按 plan 步骤生成分步 CTE SQL（§11.7.4 · 第 8 周）。
+
+    Returns:
+        (完整 SQL, sql_steps 元数据, token_in, token_out)
+    """
+    llm = build_llm(settings)
+    steps_text = "\n".join(
+        f"  步骤 {s.get('id')}: {s.get('goal')}"
+        + (f"（{s.get('aggregation')}）" if s.get("aggregation") else "")
+        + (f" pivot={s.get('pivot_hint')}" if s.get("pivot_hint") else "")
+        for s in plan_steps
+    )
+    system = (
+        "你是企业问数 SQL 生成助手。根据规划步骤与用户问题生成一条可执行的 MySQL 只读 SELECT。"
+        "优先写简单 SQL：单条 SELECT + WHERE/GROUP BY 即可；仅在步骤明确需要时才使用 WITH CTE。"
+        "禁止无关 CROSS JOIN、笛卡尔积或过度嵌套；对比多个项目用 GROUP BY 或条件聚合。"
+        "趋势类问题按日期 GROUP BY；人数/人次用 COUNT(DISTINCT user_id) 或 COUNT(*) 视上下文而定。"
+        "严格遵守上下文表白名单与真实列名，禁止编造字段。"
+        f"{LLM_JOIN_ALIAS_SYSTEM_HINT}"
+    )
+    user = (
+        f"{context_text}\n\n"
+        f"规划步骤：\n{steps_text}\n\n"
+        f"用户问题：{question}\n\n"
+        "请直接输出一条完整 SQL（可用 WITH 或单条 SELECT），列别名优先中文。"
+    )
+    response = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+    content = response.content if isinstance(response.content, str) else str(response.content)
+    sql = _extract_sql(content)
+
+    sql_steps_meta = [
+        {
+            "step_id": s.get("id"),
+            "goal": s.get("goal"),
+            "aggregation": s.get("aggregation"),
+            "pivot_hint": s.get("pivot_hint"),
+        }
+        for s in plan_steps
+    ]
+
+    token_in = token_out = None
+    meta = getattr(response, "response_metadata", None) or {}
+    usage = meta.get("token_usage") or meta.get("usage") or {}
+    if usage:
+        token_in = usage.get("prompt_tokens") or usage.get("input_tokens")
+        token_out = usage.get("completion_tokens") or usage.get("output_tokens")
+
+    return sql, sql_steps_meta, token_in, token_out

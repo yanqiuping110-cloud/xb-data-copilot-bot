@@ -52,3 +52,20 @@ class AskGraphState(TypedDict, total=False):
     token_out: int | None
     value_column: str
     answer_template: str
+    # 第 7 周 Agent Plan（§11.7.5）
+    plan: dict | None
+    plan_skipped: bool
+    agent_steps: list[dict]
+    tool_observations: list[dict]
+    schema_cache: dict[str, dict]
+    # 第 8 周 Agent Loop + 分步 SQL
+    agent_step_count: int
+    agent_loop_done: bool
+    sql_steps: list[dict]
+    use_agent_path: bool
+    # 第 9 周语义验证
+    verify_passed: bool
+    verify_result: dict | None
+    verify_attempts: int
+    # 第 11～12 周代码召回
+    recall_code_artifacts: list

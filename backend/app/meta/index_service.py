@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.code.index_text import build_indexable_search_text
+from app.code.repository import CodeKnowledgeRepository
 from app.meta.index_text import (
     build_column_search_text,
     build_field_value_search_text,
@@ -29,6 +31,7 @@ class RebuildIndexResult:
     metrics: int
     field_values: int
     embedding_dims: int
+    code_artifacts: int = 0
 
 
 class MetaKnowledgeService:
@@ -143,6 +146,47 @@ class MetaKnowledgeService:
             metrics=metric_count,
             field_values=value_count,
             embedding_dims=dims,
+        )
+
+    async def rebuild_code_index(self) -> int:
+        """
+        代码 artifact → ES copilot_ask_code_artifact 向量索引（§11.8 · 第 11 周）。
+        """
+        code_repo = CodeKnowledgeRepository(self._session)
+        artifacts = await code_repo.list_indexable_artifacts()
+        if not artifacts:
+            return 0
+
+        texts = [build_indexable_search_text(a) for a in artifacts]
+        vectors = await self._embedding.embed_texts(texts)
+        dims = self._embedding.dims or len(vectors[0])
+        index = await self._es.recreate_vector_index("code_artifact", dims)
+        docs = [
+            {
+                "artifact_id": a.artifact_id,
+                "repo_id": a.repo_id,
+                "artifact_type": a.artifact_type,
+                "title": a.title,
+                "summary_text": a.summary_text,
+                "tables_json": a.tables_json,
+                "search_text": text,
+                "embedding": vec,
+            }
+            for a, text, vec in zip(artifacts, texts, vectors, strict=True)
+        ]
+        return await self._es.bulk_index(index, docs)
+
+    async def rebuild_all_with_code(self) -> RebuildIndexResult:
+        """元数据 + 代码 artifact 全量重建。"""
+        base = await self.rebuild_all()
+        code_count = await self.rebuild_code_index()
+        return RebuildIndexResult(
+            tables=base.tables,
+            columns=base.columns,
+            metrics=base.metrics,
+            field_values=base.field_values,
+            embedding_dims=base.embedding_dims,
+            code_artifacts=code_count,
         )
 
     async def close(self) -> None:

@@ -1,0 +1,156 @@
+{
+  "subset": "agent",
+  "description": "复杂报表 Agent 评测子集（第 9 周 · 15 条）",
+  "cases": [
+    {
+      "id": "agent-01",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "对比本月跳绳与跑步参与人数",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true, "degrade_level_lte": 3 }
+        }
+      ]
+    },
+    {
+      "id": "agent-02",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "本校各年级各项目参与人数交叉统计",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-03",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "按项目分别统计最近7天每日参与趋势",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-04",
+      "role": "ADMIN",
+      "turns": [
+        {
+          "question": "昨日全平台各项目参与人次汇总",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-05",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "本校跳绳和跑步项目参与人数占比",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-06",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "各年级活动参与人数排名",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-07",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "关联项目维度统计本校本月参与人数",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-08",
+      "role": "OPERATOR",
+      "turns": [
+        {
+          "question": "本月全平台活动参与按项目动态列报表",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-09",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "本校活动参与人数按年级分组汇总",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-10",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "对比上周与本周跳绳参与人数变化",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-11",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "本校各项目参与人次及人均参与次数",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-12",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "按活动项目透视各年级参与人数",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-13",
+      "role": "ADMIN",
+      "turns": [
+        {
+          "question": "全平台活动报表各维度参与汇总",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-14",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "本校跑步项目按日参与人数趋势",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    },
+    {
+      "id": "agent-15",
+      "role": "SCHOOL",
+      "turns": [
+        {
+          "question": "多维统计本校活动参与：年级、项目、人数",
+          "expect": { "status_in": ["success", "fail"], "no_server_error": true }
+        }
+      ]
+    }
+  ]
+}
