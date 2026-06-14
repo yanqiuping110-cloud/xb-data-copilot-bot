@@ -117,6 +117,8 @@ async def get_session_messages(
             error_message=r.get("error_message"),
             latency_ms=r.get("latency_ms"),
             created_at=r.get("created_at"),
+            assembly_mode=r.get("assembly_mode"),
+            intermediate_results=r.get("intermediate_results"),
         )
         for r in rows
     ]

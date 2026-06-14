@@ -65,10 +65,47 @@ def _question_dimension_terms(question: str) -> list[str]:
     return terms
 
 
+def _expected_metrics_from_plan(plan: dict[str, Any] | None) -> list[str]:
+    """从 Plan LLM 产出的 metrics 字段收集期望出现在结果列中的指标。"""
+    if not plan:
+        return []
+    labels: list[str] = list(plan.get("metrics") or [])
+    for step in plan.get("steps") or []:
+        for m in step.get("metrics") or []:
+            if m not in labels:
+                labels.append(m)
+    return labels
+
+
+def _metric_reflected_in_columns(metric: str, columns: list[str]) -> bool:
+    """指标是否在列名中有体现（列名须包含指标的关键子串，避免「运动个数」误判覆盖分项指标）。"""
+    m = metric.strip()
+    if not m:
+        return True
+    m_lower = m.lower()
+    for col in columns:
+        c = str(col)
+        c_lower = c.lower()
+        if m_lower == c_lower or m_lower in c_lower:
+            return True
+        # 去掉通用后缀后，关键片段须出现在列名中（长度≥2）
+        core = (
+            m_lower.replace("项目", "")
+            .replace("个数", "")
+            .replace("人数", "")
+            .replace("运动", "")
+            .strip()
+        )
+        if len(core) >= 2 and core in c_lower:
+            return True
+    return False
+
+
 def verify_answer_heuristic(
     question: str,
     columns: list[str] | None,
     rows: list[list] | None,
+    plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     规则验证：空结果 / 列名未覆盖问句维度词。
@@ -88,6 +125,18 @@ def verify_answer_heuristic(
             "missing_terms": [],
             "row_count": 0,
         }
+
+    plan_metrics = _expected_metrics_from_plan(plan)
+    if plan_metrics:
+        missing_plan = [m for m in plan_metrics if not _metric_reflected_in_columns(m, cols)]
+        if missing_plan:
+            return {
+                "passed": False,
+                "reason": "missing_plan_metrics",
+                "message": f"结果列未覆盖 plan 要求的指标：{', '.join(missing_plan[:6])}",
+                "missing_terms": missing_plan,
+                "row_count": row_count,
+            }
 
     terms = _question_dimension_terms(question)
     if not terms:
@@ -171,7 +220,12 @@ async def verify_answer(state: AskGraphState, config: RunnableConfig) -> dict:
     rows = state.get("rows") or []
     attempts = (state.get("verify_attempts") or 0) + 1
 
-    heuristic = verify_answer_heuristic(question, columns, rows)
+    heuristic = verify_answer_heuristic(
+        question,
+        columns,
+        rows,
+        plan=state.get("plan"),
+    )
     result = heuristic
     if settings.verify_answer_llm_enabled and not heuristic.get("passed"):
         result = await _verify_with_llm(settings, question, columns, rows, heuristic)

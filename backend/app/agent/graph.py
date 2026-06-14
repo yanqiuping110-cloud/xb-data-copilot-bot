@@ -31,6 +31,13 @@ from app.agent.agent_nodes import (
     generate_sql_step,
     route_after_agent_loop,
 )
+from app.agent.sql_step_nodes import (
+    assemble_result,
+    execute_plan_sql_step,
+    route_after_assemble_result,
+    route_after_build_agent_context,
+    route_after_execute_plan_sql_step,
+)
 from app.agent.verify_nodes import route_after_verify, verify_answer
 from app.agent.recall_nodes import (
     build_llm_context,
@@ -76,6 +83,8 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
     graph.add_node("build_agent_context", build_agent_context)
     graph.add_node("generate_sql", generate_sql)
     graph.add_node("generate_sql_step", generate_sql_step)
+    graph.add_node("execute_plan_sql_step", execute_plan_sql_step)
+    graph.add_node("assemble_result", assemble_result)
     graph.add_node("validate_sql", validate_sql_node)
     graph.add_node("correct_sql", correct_sql)
     graph.add_node("apply_policy", apply_policy)
@@ -118,7 +127,32 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
             "build_agent_context": "build_agent_context",
         },
     )
-    graph.add_edge("build_agent_context", "generate_sql_step")
+    graph.add_conditional_edges(
+        "build_agent_context",
+        route_after_build_agent_context,
+        {
+            "execute_plan_sql_step": "execute_plan_sql_step",
+            "generate_sql_step": "generate_sql_step",
+            "format_answer": "format_answer",
+        },
+    )
+    graph.add_conditional_edges(
+        "execute_plan_sql_step",
+        route_after_execute_plan_sql_step,
+        {
+            "execute_plan_sql_step": "execute_plan_sql_step",
+            "assemble_result": "assemble_result",
+            "format_answer": "format_answer",
+        },
+    )
+    graph.add_conditional_edges(
+        "assemble_result",
+        route_after_assemble_result,
+        {
+            "verify_answer": "verify_answer",
+            "format_answer": "format_answer",
+        },
+    )
     graph.add_edge("generate_sql", "validate_sql")
     graph.add_edge("generate_sql_step", "validate_sql")
     graph.add_conditional_edges(

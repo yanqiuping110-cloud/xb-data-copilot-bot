@@ -20,5 +20,12 @@ def test_graph_includes_week8_agent_nodes():
     clear_ask_graph_cache()
     graph = build_ask_graph()
     nodes = graph.get_graph().nodes
-    for name in ("agent_loop", "build_agent_context", "generate_sql_step", "verify_answer"):
+    for name in (
+        "agent_loop",
+        "build_agent_context",
+        "generate_sql_step",
+        "execute_plan_sql_step",
+        "assemble_result",
+        "verify_answer",
+    ):
         assert name in nodes

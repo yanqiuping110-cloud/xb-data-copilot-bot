@@ -30,7 +30,7 @@ from app.observability.trace_log import (
 )
 from app.ask.chat_client import sanitize_chat_sql
 from app.policy.role_policy import PolicyError, require_school_scope
-from app.schemas.ask import AskRequest, AskResponse
+from app.schemas.ask import AskRequest, AskResponse, IntermediateSqlResult
 from app.sql.whitelist import refresh_allowed_tables
 from config.settings import Settings
 
@@ -379,6 +379,10 @@ async def _finalize_ask_run(
         columns=display_columns,
         rows=final_state.get("rows"),
         error_message=final_state.get("error_message") if status != "success" else None,
+        intermediate_results=_serialize_intermediate_for_storage(
+            final_state.get("intermediate_results")
+        ),
+        assembly_mode=final_state.get("assembly_mode"),
     )
 
     trace_log = collector.to_json(
@@ -444,6 +448,11 @@ async def _finalize_ask_run(
         error_message=final_state.get("error_message")
         if status != "success"
         else None,
+        assembly_mode=final_state.get("assembly_mode"),
+        intermediate_results=_serialize_intermediate_for_response(
+            final_state.get("intermediate_results"),
+            include_sql=ctx.role == UserRole.ADMIN,
+        ),
     )
 
 
@@ -571,6 +580,22 @@ def _progress_detail(node_name: str, update: dict) -> dict | None:
             "hasSql": bool(update.get("raw_sql")),
             "sqlStepCount": len(update.get("sql_steps") or []),
         }
+    if node_name == "execute_plan_sql_step":
+        steps = update.get("sql_steps") or []
+        last = steps[-1] if steps else {}
+        return {
+            "stepId": last.get("step_id"),
+            "goal": last.get("goal"),
+            "rowCount": last.get("row_count"),
+            "stepIndex": update.get("sql_exec_step_index"),
+            "intermediatePreview": _intermediate_preview(update.get("intermediate_results")),
+        }
+    if node_name == "assemble_result":
+        return {
+            "assemblyMode": update.get("assembly_mode"),
+            "rowCount": len(update.get("rows") or []),
+            "columnCount": len(update.get("columns") or []),
+        }
     if node_name == "verify_answer":
         vr = update.get("verify_result") or {}
         return {
@@ -583,3 +608,61 @@ def _progress_detail(node_name: str, update: dict) -> dict | None:
 
 def _elapsed_ms(t0: float) -> int:
     return int((time.perf_counter() - t0) * 1000)
+
+
+_INTERMEDIATE_RESPONSE_MAX_ROWS = 10
+
+
+def _intermediate_preview(intermediate: list | None) -> list[dict] | None:
+    if not intermediate:
+        return None
+    return [
+        {
+            "stepId": ir.get("step_id"),
+            "goal": ir.get("goal"),
+            "rowCount": ir.get("row_count"),
+            "columns": (ir.get("columns") or [])[:6],
+        }
+        for ir in intermediate[-3:]
+    ]
+
+
+def _serialize_intermediate_for_response(
+    intermediate: list | None,
+    *,
+    include_sql: bool,
+) -> list[IntermediateSqlResult] | None:
+    if not intermediate:
+        return None
+    out: list[IntermediateSqlResult] = []
+    for ir in intermediate:
+        rows = ir.get("rows") or []
+        out.append(
+            IntermediateSqlResult(
+                step_id=ir.get("step_id"),
+                goal=ir.get("goal"),
+                sql=ir.get("sql") if include_sql else None,
+                columns=ir.get("columns"),
+                rows=[list(r) for r in rows[:_INTERMEDIATE_RESPONSE_MAX_ROWS]],
+                row_count=ir.get("row_count") or len(rows),
+            )
+        )
+    return out
+
+
+def _serialize_intermediate_for_storage(intermediate: list | None) -> list[dict] | None:
+    if not intermediate:
+        return None
+    stored: list[dict] = []
+    for ir in intermediate:
+        rows = ir.get("rows") or []
+        stored.append(
+            {
+                "step_id": ir.get("step_id"),
+                "goal": ir.get("goal"),
+                "columns": ir.get("columns"),
+                "rows": [list(r) for r in rows[:_INTERMEDIATE_RESPONSE_MAX_ROWS]],
+                "row_count": ir.get("row_count") or len(rows),
+            }
+        )
+    return stored

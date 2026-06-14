@@ -111,6 +111,44 @@
                   </li>
                 </ul>
 
+                <template v-if="msg.intermediateSteps?.length">
+                  <div class="section-label">分步查询</div>
+                  <div
+                    v-for="(step, sti) in msg.intermediateSteps"
+                    :key="sti"
+                    class="intermediate-step"
+                  >
+                    <div class="intermediate-title">
+                      步骤 {{ step.stepId }}：{{ step.goal }}
+                      <span v-if="step.rowCount != null" class="intermediate-meta">
+                        （{{ step.rowCount }} 行）
+                      </span>
+                    </div>
+                    <pre v-if="canShowSqlInChat && step.sql" class="sql-block sql-block-sm">{{ step.sql }}</pre>
+                    <div
+                      v-if="step.columns?.length && step.rows?.length"
+                      class="table-wrap table-wrap-sm"
+                    >
+                      <el-table
+                        :data="intermediateTableRows(step)"
+                        border
+                        stripe
+                        size="small"
+                        max-height="200"
+                      >
+                        <el-table-column
+                          v-for="col in step.columns"
+                          :key="col"
+                          :prop="col"
+                          :label="col"
+                          min-width="80"
+                          show-overflow-tooltip
+                        />
+                      </el-table>
+                    </div>
+                  </div>
+                </template>
+
                 <template v-if="canShowSqlInChat && msg.result?.sql">
                   <div class="section-label">SQL</div>
                   <pre class="sql-block">{{ msg.result.sql }}</pre>
@@ -272,6 +310,45 @@ const needSelectSchool = computed(
 /** 仅系统管理员在聊天对话框内可见 SQL */
 const canShowSqlInChat = computed(() => user.value?.role === 'ADMIN')
 
+function intermediateTableRows(step) {
+  if (!step?.columns?.length || !step?.rows?.length) return []
+  return step.rows.map((row) =>
+    Object.fromEntries(step.columns.map((col, i) => [col, row[i]])),
+  )
+}
+
+function upsertIntermediateStep(msg, detail) {
+  if (!detail?.goal) return
+  if (!msg.intermediateSteps) msg.intermediateSteps = []
+  const stepId = detail.stepId
+  const existing = msg.intermediateSteps.find((s) => s.stepId === stepId)
+  const preview = detail.intermediatePreview
+  const lastPreview = preview?.length ? preview[preview.length - 1] : null
+  const payload = {
+    stepId,
+    goal: detail.goal,
+    rowCount: detail.rowCount ?? lastPreview?.rowCount,
+    columns: lastPreview?.columns,
+  }
+  if (existing) {
+    Object.assign(existing, payload)
+  } else {
+    msg.intermediateSteps.push(payload)
+  }
+}
+
+function mapIntermediateResults(items) {
+  if (!items?.length) return undefined
+  return items.map((ir) => ({
+    stepId: ir.stepId,
+    goal: ir.goal,
+    sql: ir.sql,
+    columns: ir.columns,
+    rows: ir.rows,
+    rowCount: ir.rowCount,
+  }))
+}
+
 function resultTableRows(result) {
   if (!result?.columns?.length || !result?.rows?.length) return []
   return result.rows.map((row) =>
@@ -306,6 +383,7 @@ function buildAssistantHistoryMessage(m) {
       columns: m.columns || undefined,
       rows: m.rows || undefined,
     },
+    intermediateSteps: mapIntermediateResults(m.intermediateResults),
   }
 }
 
@@ -498,6 +576,7 @@ async function onAsk() {
     role: 'assistant',
     text: '正在分析您的问题…',
     progress: [],
+    intermediateSteps: [],
   })
 
   try {
@@ -506,7 +585,7 @@ async function onAsk() {
       sessionId: sessionId.value,
       traceId,
       signal: abortController.value.signal,
-      onProgress: ({ label }) => {
+      onProgress: ({ label, node, detail }) => {
         const msg = messages.value[assistantIdx]
         if (!msg?.progress) return
         msg.progress.forEach((step) => {
@@ -519,6 +598,9 @@ async function onAsk() {
           existing.done = false
         } else {
           msg.progress.push({ label, active: true, done: false })
+        }
+        if (node === 'execute_plan_sql_step' && detail) {
+          upsertIntermediateStep(msg, detail)
         }
       },
       onDone: (res) => {
@@ -547,6 +629,7 @@ async function onAsk() {
           columns: res.columns || undefined,
           rows: res.rows || undefined,
         }
+        msg.intermediateSteps = mapIntermediateResults(res.intermediateResults) || msg.intermediateSteps
         msg.progress?.forEach((step) => {
           step.active = false
           step.done = true
@@ -810,6 +893,30 @@ async function onMarkBadcase(msg) {
   line-height: 1.65;
   color: #303133;
   white-space: pre-wrap;
+}
+
+.sql-block-sm {
+  font-size: 11px;
+  padding: 8px 10px;
+}
+
+.intermediate-step {
+  margin-bottom: 12px;
+}
+
+.intermediate-title {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 6px;
+}
+
+.intermediate-meta {
+  font-size: 12px;
+  color: #909399;
+}
+
+.table-wrap-sm {
+  margin-top: 4px;
 }
 
 .section-label {

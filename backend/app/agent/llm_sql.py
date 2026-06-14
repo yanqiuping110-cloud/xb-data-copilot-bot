@@ -151,3 +151,97 @@ async def generate_sql_step_from_llm(
         token_out = usage.get("completion_tokens") or usage.get("output_tokens")
 
     return sql, sql_steps_meta, token_in, token_out
+
+
+async def generate_sql_for_plan_step(
+    *,
+    settings: Settings,
+    question: str,
+    context_text: str,
+    step: dict,
+    prior_results_summary: str,
+) -> tuple[str | None, int | None, int | None]:
+    """
+    为 plan 中单一步骤生成独立 SELECT（分步执行路径）。
+
+    Returns:
+        (sql, token_in, token_out)
+    """
+    llm = build_llm(settings)
+    step_id = step.get("id")
+    goal = step.get("goal") or ""
+    agg = step.get("aggregation") or ""
+    pivot = step.get("pivot_hint") or ""
+    step_line = f"步骤 {step_id}: {goal}"
+    if agg:
+        step_line += f"（{agg}）"
+    if pivot:
+        step_line += f" pivot={pivot}"
+
+    filter_hint = step.get("filter_hint") or {}
+    step_metrics = step.get("metrics") or []
+    constraints: list[str] = []
+    if filter_hint.get("activity_id") is not None:
+        constraints.append(
+            f"必须且只能查询 activity_id = {filter_hint['activity_id']} 的活动数据；"
+            "禁止 WHERE activity_id IN (...) 同时查多个活动。"
+        )
+    if filter_hint.get("activity_name"):
+        name = str(filter_hint["activity_name"])
+        short = name[:60] + ("…" if len(name) > 60 else "")
+        constraints.append(
+            f"必须且只能查询活动名称与「{short}」匹配的那一个活动；禁止一次查多个活动。"
+        )
+    project_names = filter_hint.get("project_names") or []
+    if project_names:
+        projects = "、".join(project_names[:8])
+        constraints.append(
+            f"问句要求按运动项目分项：{projects}。"
+            "须通过 project_id JOIN sport_project（或上下文中的项目表）按项目过滤/分组，"
+            "为每个项目在结果中提供独立指标列（如跳绳运动个数、跑步运动个数）；"
+            "禁止仅用 SUM(sport_value) 一个总数列代替多个项目分项。"
+        )
+    if step_metrics:
+        metrics_line = "、".join(step_metrics[:12])
+        constraints.append(
+            f"本步结果列须覆盖以下指标（中文列名）：{metrics_line}。"
+            "打卡人数用 COUNT(DISTINCT 人员标识列)；各项目运动个数分别聚合。"
+        )
+    constraint_text = "\n".join(constraints)
+
+    system = (
+        "你是企业问数 SQL 生成助手。根据用户问句、规划步骤与上下文，生成一条可独立执行的 MySQL 只读 SELECT。"
+        "本步骤 SQL 将单独执行；多活动对比时每一步只查一个活动，由程序按日期合并结果。"
+        "须完整实现问句与本步 goal/metrics 中的全部指标，不得省略项目维度或合并为单一运动总数。"
+        "事实表常见 sport_activity_qzs_time（含 activity_id、project_id、sport_value、record_date）；"
+        "项目维度常见 sport_project，通过 project_id 关联。"
+        "结果须含日期列（别名「日期」）及各指标列；优先 JOIN + GROUP BY 或条件聚合。"
+        "严格遵守上下文表白名单与真实列名，禁止编造字段。"
+        f"{LLM_JOIN_ALIAS_SYSTEM_HINT}"
+    )
+    user_parts = [
+        context_text,
+        "",
+        prior_results_summary,
+        "",
+        f"用户问题：{question}",
+        "",
+        f"当前仅需完成：{step_line}",
+    ]
+    if step_metrics:
+        user_parts.append(f"本步 metrics：{'、'.join(step_metrics)}")
+    if constraint_text:
+        user_parts.extend(["", "【本步硬性约束】", constraint_text])
+    user_parts.extend(["", "请输出本步骤的一条 SELECT（列别名优先中文，须含日期列）。"])
+    user = "\n".join(user_parts)
+    response = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+    content = response.content if isinstance(response.content, str) else str(response.content)
+    sql = _extract_sql(content)
+
+    token_in = token_out = None
+    meta = getattr(response, "response_metadata", None) or {}
+    usage = meta.get("token_usage") or meta.get("usage") or {}
+    if usage:
+        token_in = usage.get("prompt_tokens") or usage.get("input_tokens")
+        token_out = usage.get("completion_tokens") or usage.get("output_tokens")
+    return sql, token_in, token_out

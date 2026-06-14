@@ -33,6 +33,17 @@ class AskCancelResponse(CamelModel):
     trace_id: str
 
 
+class IntermediateSqlResult(CamelModel):
+    """分步 SQL 单步执行结果（响应用，行数已截断）。"""
+
+    step_id: int | None = None
+    goal: str | None = None
+    sql: str | None = None
+    columns: list[str] | None = None
+    rows: list[list] | None = None
+    row_count: int | None = None
+
+
 class AskResponse(CamelModel):
     """问数成功或降级响应。"""
 
@@ -47,3 +58,5 @@ class AskResponse(CamelModel):
     latency_ms: int | None = None
     error_code: str | None = None
     error_message: str | None = None
+    assembly_mode: str | None = None
+    intermediate_results: list[IntermediateSqlResult] | None = None

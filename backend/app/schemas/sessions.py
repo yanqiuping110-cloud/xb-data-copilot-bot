@@ -2,6 +2,7 @@
 对话 Session API 模型。
 """
 
+from app.schemas.ask import IntermediateSqlResult
 from app.schemas.base import CamelModel
 
 
@@ -42,6 +43,8 @@ class SessionMessageItem(CamelModel):
     error_message: str | None = None
     latency_ms: int | None = None
     created_at: str | None = None
+    assembly_mode: str | None = None
+    intermediate_results: list[IntermediateSqlResult] | None = None
 
 
 class SessionMessagesResponse(CamelModel):

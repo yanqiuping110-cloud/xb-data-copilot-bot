@@ -155,6 +155,11 @@ class Settings(BaseSettings):
         alias="AGENT_LOOP_ENABLED",
         description="复杂问句是否在 plan_question 后进入 ReAct agent_loop",
     )
+    agent_multi_sql_enabled: bool = Field(
+        default=True,
+        alias="AGENT_MULTI_SQL_ENABLED",
+        description="复杂问句 Agent 路径是否按 plan 分步生成并执行多条 SQL，再 assemble_result 拼表",
+    )
     agent_max_steps: int = Field(
         default=6,
         alias="AGENT_MAX_STEPS",

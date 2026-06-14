@@ -26,6 +26,8 @@ NODE_LABELS: dict[str, str] = {
     "agent_loop": "Agent 工具循环",
     "build_agent_context": "构建 Agent 上下文",
     "generate_sql_step": "分步生成 SQL",
+    "execute_plan_sql_step": "分步执行 SQL",
+    "assemble_result": "组装查询结果",
     "tool_run_probe_sql": "工具·探查 SQL",
     "tool_describe_table": "工具·表结构",
     "tool_list_relations": "工具·表关系",
@@ -136,6 +138,15 @@ def summarize_state_update(update: dict[str, Any] | None) -> dict[str, Any]:
             summary[key] = value[:8]
         elif key == "sql_steps" and isinstance(value, list):
             summary[key] = [{"step_id": s.get("step_id"), "goal": s.get("goal")} for s in value[:6]]
+        elif key == "intermediate_results" and isinstance(value, list):
+            summary[key] = [
+                {
+                    "step_id": ir.get("step_id"),
+                    "goal": ir.get("goal"),
+                    "row_count": ir.get("row_count"),
+                }
+                for ir in value[:6]
+            ]
         elif key == "agent_step_count":
             summary[key] = value
         elif key == "matched" and value is not None:

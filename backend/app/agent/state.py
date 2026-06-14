@@ -63,6 +63,10 @@ class AskGraphState(TypedDict, total=False):
     agent_loop_done: bool
     sql_steps: list[dict]
     use_agent_path: bool
+    # 分步 SQL 执行（多 SQL 路径）
+    intermediate_results: list[dict]
+    sql_exec_step_index: int
+    assembly_mode: str | None
     # 第 9 周语义验证
     verify_passed: bool
     verify_result: dict | None

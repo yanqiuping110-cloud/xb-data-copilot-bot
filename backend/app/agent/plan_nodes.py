@@ -1,32 +1,28 @@
 """
 问句规划节点 plan_question（§11.7.3 · 第 7 周雏形）。
 
-流程：
-1. L1 高分 → 跳过 Plan，走原 generate_sql
-2. 启发式 + LLM 判定 complexity
-3. 按 plan.steps 的 needs_tool 执行 MySQL 只读工具并写 span
+由 Plan LLM 判定 complexity / multi_sql；不再用问句关键词强制分步。
 """
 
 from __future__ import annotations
 
-import re
 import time
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
 from app.agent.context_builder import MergedRecallContext
+from app.agent.plan_compare import (
+    enrich_sql_steps_from_reference_sql,
+    get_sql_execution_steps,
+    plan_requires_multi_sql,
+)
 from app.agent.nodes import _cfg, _span
 from app.agent.plan_llm import generate_plan_from_llm
 from app.agent.state import AskGraphState
 from app.ask.example_ranker import rank_curated_examples_for_prompt
 from app.ask.semantic_repository import SemanticRepository
 from config.settings import Settings
-
-# 复杂问句特征词（启发式，与 LLM 判定互补）
-_COMPLEX_HINTS = re.compile(
-    r"对比|分别|各项目|各年级|动态|多维|交叉|pivot|按.+统计|按.+汇总|JOIN|关联"
-)
 
 
 def _seed_recall_summary(merged: MergedRecallContext | None) -> str:
@@ -54,85 +50,32 @@ def _seed_recall_summary(merged: MergedRecallContext | None) -> str:
     return "\n".join(lines)
 
 
-def assess_complexity_heuristic(
-    question: str,
-    merged: MergedRecallContext | None,
-) -> str:
-    """
-    启发式判定问句复杂度（low / high）。
-
-    规则：多表召回、复杂特征词、多指标/取值 → high；否则 low。
-    """
-    q = question.strip()
-    table_count = len(merged.table_names) if merged else 0
-    metric_count = len(merged.metrics) if merged else 0
-    value_count = len(merged.field_values) if merged else 0
-
-    if table_count >= 2 or metric_count >= 2 or value_count >= 2:
-        return "high"
-    if _COMPLEX_HINTS.search(q):
-        return "high"
-    if any(kw in q for kw in ("趋势", "对比", "排名", "占比", "人均")):
-        return "high"
-    return "low"
-
-
-def _fallback_plan(question: str, merged: MergedRecallContext | None) -> dict[str, Any]:
-    """LLM 不可用时的规则 plan（保证复杂问句 ≥2 步）。"""
-    complexity = assess_complexity_heuristic(question, merged)
-    tables = (merged.table_names if merged else [])[:3]
-    if complexity == "low":
-        return {
-            "complexity": "low",
-            "intent": "simple_aggregate",
-            "steps": [
-                {
-                    "id": 1,
-                    "goal": "确认事实表与过滤条件",
-                    "tables": tables,
-                    "needs_tool": ["describe_table", "search_field_values"],
-                }
-            ],
-            "sources": ["meta:recall", "heuristic"],
-        }
-    steps: list[dict[str, Any]] = [
-        {
-            "id": 1,
-            "goal": "确定事实表与过滤条件",
-            "tables": tables,
-            "needs_tool": ["describe_table", "search_field_values"],
-        },
-        {
-            "id": 2,
-            "goal": "关联维度表并确认 JOIN 路径",
-            "tables": tables,
-            "needs_tool": ["list_relations", "get_join_path"],
-        },
-    ]
-    if merged and merged.metrics:
-        steps.append(
-            {
-                "id": 3,
-                "goal": "确认指标口径",
-                "tables": tables,
-                "needs_tool": ["search_metrics"],
-            }
-        )
+def _fallback_plan() -> dict[str, Any]:
+    """LLM 不可用时的最小 plan（单步、不分步 SQL）。"""
     return {
-        "complexity": "high",
-        "intent": "multi_dim_report",
-        "steps": steps,
-        "sources": ["meta:recall", "heuristic"],
+        "complexity": "low",
+        "intent": "open_query",
+        "multi_sql": False,
+        "steps": [
+            {
+                "id": 1,
+                "goal": "生成单条查询 SQL",
+                "tables": [],
+                "needs_tool": ["describe_table"],
+                "sql_step": False,
+            }
+        ],
+        "sources": ["heuristic:fallback"],
     }
 
 
-async def _best_l1_score(
+async def _best_l1_match(
     question: str,
     ctx,
     session,
     settings: Settings,
-) -> int:
-    """当前问句最高 L1 软参考得分。"""
+) -> tuple[int, str | None]:
+    """当前问句最高 L1 软参考得分及样例 SQL。"""
     sem_repo = SemanticRepository(session)
     examples = await sem_repo.list_sql_examples()
     ranked = rank_curated_examples_for_prompt(
@@ -142,14 +85,18 @@ async def _best_l1_score(
         top_k=1,
         min_score=0,
     )
-    return ranked[0][1] if ranked else 0
+    if not ranked:
+        return 0, None
+    ex, score = ranked[0]
+    sql = getattr(ex, "sql_text", None) or getattr(ex, "sql", None)
+    return score, sql
 
 
 async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
     """
-    问句规划：判定复杂度、生成 plan、执行 needs_tool 工具。
+    问句规划：LLM 判定复杂度、multi_sql、步骤分解。
 
-    L1 高分或 complexity=low 时设置 plan_skipped，后续仍走 generate_sql。
+    complexity=low 且 multi_sql=false 时 plan_skipped，走 generate_sql。
     """
     t0 = time.perf_counter()
     c = _cfg(config)
@@ -161,8 +108,25 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         await _span(config, "plan_question", t0, "degraded", {"skipped": True, "reason": "disabled"})
         return {"plan_skipped": True, "plan": None}
 
-    l1_score = await _best_l1_score(question, c["ctx"], c["copilot_session"], settings)
-    if l1_score >= settings.plan_l1_fast_path_score:
+    l1_score, l1_sql = await _best_l1_match(question, c["ctx"], c["copilot_session"], settings)
+    recall_summary = _seed_recall_summary(merged)
+
+    plan = await generate_plan_from_llm(
+        settings=settings,
+        question=question,
+        recall_summary=recall_summary,
+        l1_score=l1_score,
+        l1_sql_preview=l1_sql,
+    )
+    if plan is None:
+        plan = _fallback_plan()
+
+    plan = enrich_sql_steps_from_reference_sql(plan, l1_sql)
+
+    sql_exec_count = len(get_sql_execution_steps(plan))
+    multi_sql = plan_requires_multi_sql(plan)
+
+    if plan.get("complexity") == "low" and not multi_sql and sql_exec_count <= 1:
         await _span(
             config,
             "plan_question",
@@ -170,44 +134,11 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
             "success",
             {
                 "skipped": True,
-                "reason": "l1_fast_path",
+                "reason": "llm_low_single_sql",
                 "l1_score": l1_score,
-                "complexity": "low",
+                "multi_sql": False,
+                "plan": plan,
             },
-        )
-        return {
-            "plan_skipped": True,
-            "plan": {
-                "complexity": "low",
-                "intent": "l1_fast_path",
-                "steps": [],
-                "sources": ["l1:soft_match"],
-                "l1_score": l1_score,
-            },
-            "degrade_level": max(state.get("degrade_level") or 0, 1),
-        }
-
-    recall_summary = _seed_recall_summary(merged)
-    heuristic = assess_complexity_heuristic(question, merged)
-    plan = await generate_plan_from_llm(
-        settings=settings,
-        question=question,
-        recall_summary=recall_summary,
-    )
-    if plan is None:
-        plan = _fallback_plan(question, merged)
-    elif heuristic == "high" and plan.get("complexity") == "low":
-        plan["complexity"] = "high"
-        if len(plan.get("steps") or []) < 2:
-            plan = _fallback_plan(question, merged)
-
-    if plan.get("complexity") == "low" and len(plan.get("steps") or []) <= 1:
-        await _span(
-            config,
-            "plan_question",
-            t0,
-            "success",
-            {"skipped": True, "reason": "low_complexity", "plan": plan},
         )
         return {"plan_skipped": True, "plan": plan}
 
@@ -220,7 +151,10 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
             "skipped": False,
             "complexity": plan.get("complexity"),
             "intent": plan.get("intent"),
+            "multi_sql": multi_sql,
+            "l1_score": l1_score,
             "step_count": len(plan.get("steps") or []),
+            "sql_exec_step_count": sql_exec_count,
             "plan": plan,
         },
     )
@@ -233,6 +167,9 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         "agent_step_count": 0,
         "agent_loop_done": False,
         "use_agent_path": True,
+        "intermediate_results": [],
+        "sql_exec_step_index": 0,
+        "sql_steps": [],
     }
 
 
