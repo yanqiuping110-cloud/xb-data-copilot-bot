@@ -25,6 +25,16 @@ def _build_alias_map(parsed: exp.Expression) -> dict[str, str]:
     return alias_map
 
 
+def _collect_output_aliases(parsed: exp.Expression) -> set[str]:
+    """SELECT 输出列别名（含中文），供 ORDER BY / GROUP BY 引用校验豁免。"""
+    aliases: set[str] = set()
+    for node in parsed.find_all(exp.Alias):
+        alias = node.alias
+        if alias:
+            aliases.add(str(alias).lower())
+    return aliases
+
+
 def validate_sql_columns(
     sql: str,
     table_columns: dict[str, set[str]],
@@ -48,6 +58,7 @@ def validate_sql_columns(
         raise SqlGuardError("PARSE_ERROR", f"SQL 解析失败: {exc}") from exc
 
     alias_map = _build_alias_map(parsed)
+    output_aliases = _collect_output_aliases(parsed)
     queried_tables = set(alias_map.values()) & set(table_columns.keys())
     if not queried_tables:
         return
@@ -56,6 +67,8 @@ def validate_sql_columns(
     for col in parsed.find_all(exp.Column):
         col_name = col.name
         if not col_name or col_name == "*":
+            continue
+        if col_name.lower() in output_aliases:
             continue
 
         table_ref = col.table

@@ -49,6 +49,21 @@ def test_copilot_rejects_delete():
     assert exc.value.code == "COPILOT_DELETE_FORBIDDEN"
 
 
+def test_copilot_allows_metric_column_soft_replace():
+    from app.db.sql_policy import assert_copilot_runtime_sql
+
+    assert_copilot_runtime_sql(
+        "UPDATE copilot_metric_column SET deleted = 1 WHERE metric_id = 1 AND deleted = 0"
+    )
+    assert_copilot_runtime_sql(
+        """
+        INSERT INTO copilot_metric_column (metric_id, column_id, usage_type, deleted)
+        VALUES (1, 2, 'measure', 0)
+        ON DUPLICATE KEY UPDATE deleted = 0, usage_type = VALUES(usage_type)
+        """
+    )
+
+
 def test_is_dml_and_ddl():
     assert is_dml_statement("UPDATE t SET a=1")
     assert is_ddl_statement("DROP TABLE t")

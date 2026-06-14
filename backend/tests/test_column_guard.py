@@ -65,3 +65,40 @@ def test_accept_real_columns():
         "sport_activity_qzs_record": {"id", "people_id", "project_id", "sport_count", "create_time"},
     }
     validate_sql_columns(sql, column_map)
+
+
+def test_accept_select_alias_in_order_by():
+    sql = (
+        "SELECT DATE(create_time) AS 日期, COUNT(DISTINCT people_id) AS 参与人数 "
+        "FROM sport_activity_qzs_record "
+        "WHERE create_time >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) "
+        "GROUP BY DATE(create_time) "
+        "ORDER BY 日期"
+    )
+    column_map = {
+        "sport_activity_qzs_record": {"id", "people_id", "project_id", "create_time"},
+    }
+    validate_sql_columns(sql, column_map)
+
+
+def test_reject_recall_disabled_column():
+    """不参与召回的字段不应出现在 SQL 中（column_map 不含该列时拒绝）。"""
+    sql = (
+        "SELECT DATE(r.create_time) AS stat_day, SUM(r.sport_value) AS total "
+        "FROM sport_activity_qzs_time AS r "
+        "WHERE r.record_date >= DATE_SUB(CURRENT_DATE, INTERVAL 1 MONTH) "
+        "GROUP BY DATE(r.create_time)"
+    )
+    column_map = {
+        "sport_activity_qzs_time": {
+            "id",
+            "project_id",
+            "sport_value",
+            "record_date",
+            "done_time",
+        },
+    }
+    with pytest.raises(SqlGuardError) as exc:
+        validate_sql_columns(sql, column_map)
+    assert exc.value.code == "COLUMN_NOT_FOUND"
+    assert "create_time" in exc.value.message

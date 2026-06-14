@@ -73,7 +73,7 @@ class CodeKnowledgeRepository:
             """
         )
         result = await self._session.execute(sql)
-        return [_row_git_repo(dict(r._mapping)) for r in result.mappings()]
+        return [_row_git_repo(dict(r)) for r in result.mappings()]
 
     async def find_repo(self, repo_id: int) -> GitRepoRow | None:
         sql = text("SELECT * FROM copilot_git_repo WHERE id = :id AND deleted = 0")
@@ -177,17 +177,34 @@ class CodeKnowledgeRepository:
         await self._session.commit()
 
     async def clear_repo_graph(self, repo_id: int) -> None:
-        """同步前清空该仓库 symbol/edge/artifact/link（逻辑删除）。"""
-        for table in (
-            "copilot_code_edge",
-            "copilot_code_table_link",
-            "copilot_code_artifact",
-            "copilot_code_symbol",
-        ):
+        """同步前清空该仓库 symbol/edge/artifact/link（逻辑删除；symbol 重命名以释放 uk）。"""
+        await self._session.execute(
+            text(
+                """
+                UPDATE copilot_code_table_link tl
+                INNER JOIN copilot_code_artifact a ON a.id = tl.artifact_id
+                SET tl.deleted = 1
+                WHERE a.repo_id = :repo_id AND tl.deleted = 0
+                """
+            ),
+            {"repo_id": repo_id},
+        )
+        for table in ("copilot_code_edge", "copilot_code_artifact"):
             await self._session.execute(
-                text(f"UPDATE {table} SET deleted = 1 WHERE repo_id = :repo_id"),
+                text(f"UPDATE {table} SET deleted = 1 WHERE repo_id = :repo_id AND deleted = 0"),
                 {"repo_id": repo_id},
             )
+        await self._session.execute(
+            text(
+                """
+                UPDATE copilot_code_symbol
+                SET deleted = 1,
+                    qualified_name = CONCAT(qualified_name, '#del#', id)
+                WHERE repo_id = :repo_id AND deleted = 0
+                """
+            ),
+            {"repo_id": repo_id},
+        )
         await self._session.commit()
 
     async def insert_symbol(
@@ -203,6 +220,7 @@ class CodeKnowledgeRepository:
         doc_comment: str | None = None,
         http_method: str | None = None,
         http_path: str | None = None,
+        commit: bool = True,
     ) -> int:
         sql = text(
             """
@@ -229,7 +247,8 @@ class CodeKnowledgeRepository:
                 "http_path": http_path,
             },
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return int(result.lastrowid)
 
     async def insert_edge(
@@ -240,6 +259,7 @@ class CodeKnowledgeRepository:
         edge_type: str,
         to_symbol_id: int | None = None,
         target_name: str | None = None,
+        commit: bool = True,
     ) -> None:
         sql = text(
             """
@@ -258,7 +278,8 @@ class CodeKnowledgeRepository:
                 "target_name": target_name,
             },
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
 
     async def insert_artifact(
         self,
@@ -275,6 +296,7 @@ class CodeKnowledgeRepository:
         metrics_json: str | None = None,
         raw_snippet: str | None = None,
         search_text: str | None = None,
+        commit: bool = True,
     ) -> int:
         sql = text(
             """
@@ -305,7 +327,8 @@ class CodeKnowledgeRepository:
                 "search_text": search_text,
             },
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return int(result.lastrowid)
 
     async def insert_table_link(
@@ -315,6 +338,7 @@ class CodeKnowledgeRepository:
         table_name: str,
         link_type: str = "primary_fact",
         confidence: float = 1.0,
+        commit: bool = True,
     ) -> None:
         sql = text(
             """
@@ -332,6 +356,11 @@ class CodeKnowledgeRepository:
                 "confidence": confidence,
             },
         )
+        if commit:
+            await self._session.commit()
+
+    async def flush(self) -> None:
+        """提交当前事务中 pending 的写入。"""
         await self._session.commit()
 
     async def list_registered_table_names(self) -> set[str]:

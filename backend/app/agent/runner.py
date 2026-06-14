@@ -305,7 +305,10 @@ async def _prepare_ask_run(
     if not session_id:
         session_id = await session_svc.create_session(ctx)
     elif not await session_svc.verify_owner(session_id, ctx.user_id):
-        session_id = await session_svc.create_session(ctx)
+        # 客户端指定的新 session（如评测 eval-*）：保留 id，首轮 upsert 会创建；
+        # 仅当 session 已属于他人时才另起新对话。
+        if await session_svc.session_belongs_to_other_user(session_id, ctx.user_id):
+            session_id = await session_svc.create_session(ctx)
 
     t0 = time.perf_counter()
     await tracer.insert_turn_start(

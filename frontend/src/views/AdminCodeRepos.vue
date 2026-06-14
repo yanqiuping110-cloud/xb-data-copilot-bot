@@ -1,7 +1,7 @@
 <template>
   <div class="layout">
     <header class="header">
-      <span class="title">代码知识 · Git 仓库</span>
+      <span class="title">元数据 · Git 仓库</span>
       <div class="actions">
         <el-button link type="primary" @click="router.push('/ask')">返回问数</el-button>
         <el-button link type="primary" @click="logout">退出</el-button>
@@ -9,6 +9,7 @@
     </header>
 
     <main class="main">
+      <MetaAdminNav />
       <el-card>
         <div class="toolbar">
           <el-button type="primary" @click="openCreate">新增仓库</el-button>
@@ -17,14 +18,26 @@
 
         <el-table v-loading="loading" :data="repos" border style="margin-top: 16px">
           <el-table-column prop="name" label="名称" min-width="140" />
-          <el-table-column prop="repoUrl" label="仓库地址" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="branch" label="分支" width="100" />
+          <el-table-column label="来源" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ formatSource(row) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="branch" label="分支" width="100">
+            <template #default="{ row }">
+              {{ isLocalRow(row) ? '—' : row.branch }}
+            </template>
+          </el-table-column>
           <el-table-column label="同步状态" width="100">
             <template #default="{ row }">
               <el-tag :type="syncTagType(row.syncStatus)" size="small">{{ row.syncStatus }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="syncMessage" label="同步消息" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="syncMessage" label="同步消息" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.syncMessage || (row.syncStatus === 'pending' ? '尚未同步，请点击「同步」' : '—') }}
+            </template>
+          </el-table-column>
           <el-table-column label="最近同步" width="160">
             <template #default="{ row }">{{ formatTime(row.lastSyncAt) }}</template>
           </el-table-column>
@@ -41,19 +54,46 @@
       </el-card>
     </main>
 
-    <el-dialog v-model="dialogVisible" :title="editId ? '编辑仓库' : '新增仓库'" width="560px" destroy-on-close>
-      <el-form :model="form" label-width="110px">
-        <el-form-item label="展示名"><el-input v-model="form.name" /></el-form-item>
-        <el-form-item label="Git 地址"><el-input v-model="form.repoUrl" placeholder="https:// 或 file:// 本地路径" /></el-form-item>
-        <el-form-item label="分支"><el-input v-model="form.branch" /></el-form-item>
-        <el-form-item label="凭证 env"><el-input v-model="form.authSecretRef" placeholder="如 GIT_TOKEN" /></el-form-item>
+    <el-dialog v-model="dialogVisible" :title="editId ? '编辑仓库' : '新增仓库'" width="600px" destroy-on-close>
+      <el-form :model="form" label-width="120px">
+        <el-form-item label="导入方式">
+          <el-radio-group v-model="form.sourceMode">
+            <el-radio value="local">本地目录（网页下载后导入）</el-radio>
+            <el-radio value="git">Git 远程拉取</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="展示名"><el-input v-model="form.name" placeholder="如 xiaoben-mini-mobile" /></el-form-item>
+
+        <template v-if="form.sourceMode === 'local'">
+          <el-form-item label="项目目录" required>
+            <el-input
+              v-model="form.localPath"
+              placeholder="如 D:\downloads\xiaoben-mini-mobile 或 C:\Users\...\project"
+            />
+          </el-form-item>
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            title="先在 GitLab 网页下载 ZIP 并解压，再把解压后的文件夹绝对路径填到上面。无需 Git Token。"
+            style="margin-bottom: 16px"
+          />
+        </template>
+
+        <template v-else>
+          <el-form-item label="Git 地址"><el-input v-model="form.repoUrl" placeholder="https:// 或 http://" /></el-form-item>
+          <el-form-item label="分支"><el-input v-model="form.branch" /></el-form-item>
+          <el-form-item label="凭证 env 变量名">
+            <el-input v-model="form.authSecretRef" placeholder="GIT_TOKEN（填 .env 变量名，不是 token 本身）" />
+          </el-form-item>
+        </template>
+
         <el-form-item label="包含路径 JSON">
-          <el-input v-model="form.includePathsJson" type="textarea" :rows="2" placeholder='["**/*ReportController.java","**/*Mapper.xml"]' />
+          <el-input v-model="form.includePathsJson" type="textarea" :rows="2" placeholder='["**/*.java","**/*Mapper.xml"]' />
         </el-form-item>
         <el-form-item label="排除路径 JSON">
           <el-input v-model="form.excludePathsJson" type="textarea" :rows="2" placeholder='["**/test/**"]' />
         </el-form-item>
-        <el-form-item label="本地路径"><el-input v-model="form.localPath" placeholder="可选，sync 工作目录" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -69,6 +109,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchMe } from '../api/auth'
+import MetaAdminNav from '../components/MetaAdminNav.vue'
 import {
   createCodeRepo,
   deleteCodeRepo,
@@ -77,6 +118,8 @@ import {
   syncCodeRepo,
   updateCodeRepo,
 } from '../api/codeRepos'
+
+const LOCAL_REPO_URL = 'local://import'
 
 const router = useRouter()
 const loading = ref(false)
@@ -87,14 +130,26 @@ const repos = ref([])
 const dialogVisible = ref(false)
 const editId = ref(null)
 const form = reactive({
+  sourceMode: 'local',
   name: '',
   repoUrl: '',
   branch: 'main',
   authSecretRef: '',
-  includePathsJson: '["**/*ReportController.java","**/*Mapper.xml"]',
+  includePathsJson: '["**/*.java","**/*Mapper.xml"]',
   excludePathsJson: '["**/test/**","**/target/**"]',
   localPath: '',
 })
+
+function isLocalRow(row) {
+  return row.repoUrl?.startsWith('local://') || (!!row.localPath && !row.repoUrl?.startsWith('http'))
+}
+
+function formatSource(row) {
+  if (isLocalRow(row)) {
+    return row.localPath ? `本地: ${row.localPath}` : '本地目录导入'
+  }
+  return row.repoUrl || '—'
+}
 
 function formatTime(iso) {
   return iso ? iso.replace('T', ' ').slice(0, 19) : '—'
@@ -105,6 +160,32 @@ function syncTagType(status) {
   if (status === 'fail') return 'danger'
   if (status === 'syncing') return 'warning'
   return 'info'
+}
+
+function buildPayload() {
+  if (form.sourceMode === 'local') {
+    if (!form.localPath?.trim()) {
+      throw new Error('请填写项目目录绝对路径')
+    }
+    return {
+      name: form.name,
+      repoUrl: LOCAL_REPO_URL,
+      branch: 'main',
+      authSecretRef: '',
+      includePathsJson: form.includePathsJson,
+      excludePathsJson: form.excludePathsJson,
+      localPath: form.localPath.trim(),
+    }
+  }
+  return {
+    name: form.name,
+    repoUrl: form.repoUrl,
+    branch: form.branch,
+    authSecretRef: form.authSecretRef,
+    includePathsJson: form.includePathsJson,
+    excludePathsJson: form.excludePathsJson,
+    localPath: form.localPath || '',
+  }
 }
 
 async function logout() {
@@ -128,11 +209,12 @@ async function loadRepos() {
 function openCreate() {
   editId.value = null
   Object.assign(form, {
+    sourceMode: 'local',
     name: '',
     repoUrl: '',
     branch: 'main',
     authSecretRef: '',
-    includePathsJson: '["**/*ReportController.java","**/*Mapper.xml"]',
+    includePathsJson: '["**/*.java","**/*Mapper.xml"]',
     excludePathsJson: '["**/test/**","**/target/**"]',
     localPath: '',
   })
@@ -141,10 +223,12 @@ function openCreate() {
 
 function openEdit(row) {
   editId.value = row.id
+  const local = isLocalRow(row)
   Object.assign(form, {
+    sourceMode: local ? 'local' : 'git',
     name: row.name,
-    repoUrl: row.repoUrl,
-    branch: row.branch,
+    repoUrl: local ? '' : row.repoUrl,
+    branch: row.branch || 'main',
     authSecretRef: row.authSecretRef || '',
     includePathsJson: row.includePathsJson || '',
     excludePathsJson: row.excludePathsJson || '',
@@ -156,18 +240,21 @@ function openEdit(row) {
 async function submitForm() {
   saving.value = true
   try {
-    const payload = { ...form }
+    const payload = buildPayload()
     if (editId.value) {
       await updateCodeRepo(editId.value, payload)
       ElMessage.success('已更新')
+      dialogVisible.value = false
+      await loadRepos()
     } else {
-      await createCodeRepo(payload)
-      ElMessage.success('已创建')
+      const created = await createCodeRepo(payload)
+      ElMessage.success('已创建，正在扫描导入…')
+      dialogVisible.value = false
+      await loadRepos()
+      await onSync(created)
     }
-    dialogVisible.value = false
-    await loadRepos()
   } catch (e) {
-    ElMessage.error(e?.response?.data?.error?.message || '保存失败')
+    ElMessage.error(e?.message || e?.response?.data?.error?.message || e?.error || '保存失败')
   } finally {
     saving.value = false
   }
@@ -215,11 +302,13 @@ async function onRebuildIndex() {
 
 onMounted(async () => {
   try {
-    const me = await fetchMe()
-    if (me.role !== 'ADMIN') {
-      router.push('/ask')
+    const res = await fetchMe()
+    if (res.user.role !== 'ADMIN') {
+      ElMessage.warning('仅超管可访问 Git 仓库管理')
+      router.replace('/admin/meta/tables')
       return
     }
+    localStorage.setItem('userRole', res.user.role)
   } catch {
     router.push('/login')
     return

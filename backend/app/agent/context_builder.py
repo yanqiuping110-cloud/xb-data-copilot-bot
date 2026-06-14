@@ -106,16 +106,39 @@ def merge_retrieved_info(recall: HybridRecallResult) -> MergedRecallContext:
     )
 
 
+def _allowed_table_set() -> frozenset[str]:
+    """当前问数白名单（status=1 的 table_meta）。"""
+    return get_allowed_tables()
+
+
+def _is_allowed_table(table_name: str) -> bool:
+    return table_name.lower() in _allowed_table_set()
+
+
+def _filter_relevant_tables_text(relevant_tables: str | None) -> str | None:
+    """指标 relevant_tables 中剔除已停用/不在白名单的表。"""
+    if not relevant_tables:
+        return None
+    kept = [
+        name.strip()
+        for name in relevant_tables.replace(" ", "").split(",")
+        if name.strip() and _is_allowed_table(name.strip())
+    ]
+    return ",".join(kept) if kept else None
+
+
 def expand_table_names_by_relations(
     table_names: list[str],
     relations: list[RelationRow],
     *,
     max_tables: int,
+    allowed: frozenset[str] | None = None,
 ) -> list[str]:
     """候选表关系扩展：召回主表时自动纳入关联表。"""
     if not table_names or not relations:
         return table_names[:max_tables]
 
+    allowed_set = allowed if allowed is not None else _allowed_table_set()
     seen = set(table_names)
     expanded = list(table_names)
     for name in list(table_names):
@@ -128,6 +151,8 @@ def expand_table_names_by_relations(
             elif rel.to_table_name == name:
                 other = rel.from_table_name
             if other and other not in seen:
+                if other.lower() not in allowed_set:
+                    continue
                 seen.add(other)
                 expanded.append(other)
                 if len(expanded) >= max_tables:
@@ -143,11 +168,15 @@ def filter_tables(
 ) -> MergedRecallContext:
     """
     表级召回为主筛选候选表，指标/字段/取值作辅助加权，再关系扩展并截断。
+    仅保留问数白名单（status=1）内的表。
     """
+    allowed = _allowed_table_set()
     table_scores: dict[str, float] = {}
     es_table_recall = any(t.recall_mode == "es_vector" for t in merged.recalled_tables)
 
     for t in merged.recalled_tables:
+        if not _is_allowed_table(t.table_name):
+            continue
         if es_table_recall and t.score < settings.table_recall_score_min:
             continue
         table_scores[t.table_name] = max(table_scores.get(t.table_name, 0.0), t.score)
@@ -155,18 +184,24 @@ def filter_tables(
     for metric in merged.metrics:
         if metric.relevant_tables:
             for name in metric.relevant_tables.replace(" ", "").split(","):
-                if name:
+                name = name.strip()
+                if name and _is_allowed_table(name):
                     table_scores[name] = table_scores.get(name, 0.0) + metric.score * 0.5
 
     for col in merged.columns:
+        if not _is_allowed_table(col.table_name):
+            continue
         table_scores[col.table_name] = table_scores.get(col.table_name, 0.0) + col.score * 0.2
 
     for fv in merged.field_values:
+        if not _is_allowed_table(fv.table_name):
+            continue
         table_scores[fv.table_name] = table_scores.get(fv.table_name, 0.0) + fv.score * 0.1
 
     if not table_scores and merged.recalled_tables:
         for t in merged.recalled_tables[: settings.max_tables_in_prompt]:
-            table_scores[t.table_name] = t.score
+            if _is_allowed_table(t.table_name):
+                table_scores[t.table_name] = t.score
 
     ranked = sorted(table_scores.items(), key=lambda x: x[1], reverse=True)
     merged.table_names = [name for name, _ in ranked[: settings.recall_top_k_table]]
@@ -176,9 +211,12 @@ def filter_tables(
             merged.table_names,
             relations,
             max_tables=settings.max_tables_in_prompt,
+            allowed=allowed,
         )
     else:
         merged.table_names = merged.table_names[: settings.max_tables_in_prompt]
+
+    merged.table_names = [n for n in merged.table_names if _is_allowed_table(n)]
 
     if merged.code_artifacts:
         merged.recalled_tables = boost_tables_by_code_artifacts(
@@ -224,7 +262,7 @@ async def filter_columns_for_prompt(
     prompt_columns: dict[str, list[str]] = {}
     for table_name in merged.table_names:
         table = await repo.find_table_by_name(table_name)
-        if not table:
+        if not table or table.status != 1:
             continue
         cols = await repo.list_columns(table.id)
         scored: list[tuple[float, str, ColumnMetaRow]] = []
@@ -417,8 +455,9 @@ async def build_llm_context_text(
             line = f"- {m.metric_name}（{m.metric_code}）"
             if m.formula_text:
                 line += f"；公式：{m.formula_text}"
-            if m.relevant_tables:
-                line += f"；相关表：{m.relevant_tables}"
+            relevant = _filter_relevant_tables_text(m.relevant_tables)
+            if relevant:
+                line += f"；相关表：{relevant}"
             parts.append(line)
         parts.append("")
 

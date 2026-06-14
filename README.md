@@ -45,7 +45,7 @@ mysql -u root -p < scripts/ddl_copilot.sql   # 表名均为 copilot_* 前缀，�
 python scripts/seed_admin.py
 # 若曾用旧表名，可执行 scripts/migrate_tables_to_copilot_prefix.sql
 
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 - API 文档：<http://127.0.0.1:8000/docs>

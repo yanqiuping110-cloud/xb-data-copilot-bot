@@ -1,94 +1,85 @@
 [
   {
     "id": "mem-01",
-    "passed": false,
-    "errors": [
-      "轮次 2: status 期望 success 实际 fail"
-    ],
+    "passed": true,
+    "errors": [],
     "turns": [
       {
         "turn": 1,
         "question": "本校本月跳绳参与人数是多少？",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "990b7e1f-9043-4fad-a9b5-3b8b6510079d"
+        "trace_id": "cd724819-3f1f-48b0-9785-c8362cf6d834"
       },
       {
         "turn": 2,
         "question": "按刚才的维度查上周",
-        "status": "fail",
-        "degrade_level": 3,
-        "trace_id": "54cbf132-ce5f-47bb-acba-124d3fa073d8"
+        "status": "success",
+        "degrade_level": 0,
+        "trace_id": "5c205d13-447d-48f9-84f8-0b3578a27c9f"
       }
     ]
   },
   {
     "id": "mem-02",
-    "passed": false,
-    "errors": [
-      "轮次 1: status 期望 success 实际 fail",
-      "轮次 2: status 期望 success 实际 fail"
-    ],
+    "passed": true,
+    "errors": [],
     "turns": [
       {
         "turn": 1,
         "question": "最近7天每日参与人数趋势",
-        "status": "fail",
-        "degrade_level": 3,
-        "trace_id": "ad8b1c56-daa6-4c30-a8b8-9ff36d701e61"
+        "status": "success",
+        "degrade_level": 0,
+        "trace_id": "cc46dc7e-4e24-4e43-a626-74573ad6613e"
       },
       {
         "turn": 2,
         "question": "同上，但只要跳绳",
-        "status": "fail",
-        "degrade_level": 3,
-        "trace_id": "936f8538-d4df-4539-ae36-e812c4cd16aa"
+        "status": "success",
+        "degrade_level": 0,
+        "trace_id": "f9fe5625-23b1-4ac6-897b-d69d3521e20d"
       }
     ]
   },
   {
     "id": "mem-03",
-    "passed": false,
-    "errors": [
-      "轮次 2: status 期望 success 实际 fail"
-    ],
+    "passed": true,
+    "errors": [],
     "turns": [
       {
         "turn": 1,
         "question": "本校活动参与人数",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "9cc9fd2f-f26e-47b5-a3e4-59714e77e3d7"
+        "trace_id": "990093fe-fb83-47d3-873f-8f8f51944262"
       },
       {
         "turn": 2,
         "question": "再查一次",
-        "status": "fail",
-        "degrade_level": 3,
-        "trace_id": "4764c2ef-9553-445f-b198-41ead042defb"
+        "status": "success",
+        "degrade_level": 0,
+        "trace_id": "b6bf4f4f-d61a-4965-b290-80db4c1e696a"
       }
     ]
   },
   {
     "id": "mem-04",
-    "passed": false,
-    "errors": [
-      "轮次 2: status 期望 success 实际 fail"
-    ],
+    "passed": true,
+    "errors": [],
     "turns": [
       {
         "turn": 1,
         "question": "昨日全平台活动参与人次",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "659fd026-dcf8-4473-8ee8-92a643887c66"
+        "trace_id": "bf4b43d8-b4b9-4756-89ea-5885c0ddf8b1"
       },
       {
         "turn": 2,
         "question": "同样维度看本月",
-        "status": "fail",
-        "degrade_level": 3,
-        "trace_id": "fdb9cc8a-476c-47a4-afbe-3f8909e54dd6"
+        "status": "success",
+        "degrade_level": 0,
+        "trace_id": "33697d41-2771-4d2f-8ae5-b21c997eee40"
       }
     ]
   },
@@ -102,14 +93,14 @@
         "question": "本校本月跳绳参与人数",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "beb73271-c3fb-49ae-953f-059c70ff6016"
+        "trace_id": "1131e7a4-1bf1-48ea-a907-e912abadeacf"
       },
       {
         "turn": 2,
         "question": "参与人数呢",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "da49e839-b839-43a2-bba6-37aab82864a7"
+        "trace_id": "52ea0f6e-9e9f-422a-bd06-96dac54cd209"
       }
     ]
   },
@@ -123,14 +114,14 @@
         "question": "本校跳绳参与人数",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "c89e7188-2833-41a4-9358-bec87b2a5363"
+        "trace_id": "4937d636-b278-4367-a36c-a447a009d89c"
       },
       {
         "turn": 2,
         "question": "参与人数呢",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "c9151188-f4fa-458d-b00d-c0b8e534dca2"
+        "trace_id": "739912a9-37f9-41e0-a4e3-e7b7bf44a404"
       }
     ]
   },
@@ -144,14 +135,14 @@
         "question": "查询不存在的虚构指标 xyzabc",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "bf64bc49-e8de-4691-8f07-3462295fca6b"
+        "trace_id": "ab9d359e-3e7e-41e9-99ec-2836ad413d60"
       },
       {
         "turn": 2,
         "question": "刚才那个再查",
-        "status": "fail",
-        "degrade_level": 3,
-        "trace_id": "d1a8d831-b8d1-4de5-80c6-e60a19ed46f6"
+        "status": "success",
+        "degrade_level": 0,
+        "trace_id": "a7b043fd-4ca5-4965-94c9-2a709fa9380a"
       }
     ]
   },
@@ -165,14 +156,14 @@
         "question": "本校本月跳绳参与人数是多少？",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "23b8fce5-35d2-477d-b37c-231da31c6680"
+        "trace_id": "5c5e94cc-c33f-434d-ad8c-cd5957361522"
       },
       {
         "turn": 2,
         "question": "本校本月跳绳参与人数是多少？",
         "status": "success",
         "degrade_level": 0,
-        "trace_id": "dd13a81b-9203-4eba-b232-9587b6a1b234"
+        "trace_id": "afe15746-cb38-43ca-9e9b-cea3694f20f7"
       }
     ]
   }

@@ -1,12 +1,14 @@
 """表级召回与过滤单测。"""
 
+import pytest
+
 from app.agent.context_builder import (
     expand_table_names_by_relations,
     filter_tables,
     merge_retrieved_info,
 )
 from app.meta.repository import RelationRow
-from app.retrieval.hybrid import HybridRecallResult, RecalledColumn, RecalledTable
+from app.retrieval.hybrid import HybridRecallResult, RecalledColumn, RecalledMetric, RecalledTable
 from config.settings import Settings
 
 
@@ -21,7 +23,17 @@ def _settings(**overrides) -> Settings:
     return Settings(**base)
 
 
-def test_filter_tables_prefers_table_recall():
+def test_filter_tables_prefers_table_recall(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.context_builder.get_allowed_tables",
+        lambda: frozenset(
+            {
+                "sport_activity_qzs_record",
+                "base_student",
+                "noise_table",
+            }
+        ),
+    )
     recall = HybridRecallResult(
         keywords=["学生"],
         tables=[
@@ -66,7 +78,11 @@ def test_filter_tables_prefers_table_recall():
     assert "noise_table" not in merged.table_names
 
 
-def test_expand_table_names_by_relations():
+def test_expand_table_names_by_relations(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.context_builder.get_allowed_tables",
+        lambda: frozenset({"sport_activity_qzs_record", "base_student"}),
+    )
     rel = RelationRow(
         id=1,
         from_table_id=1,
@@ -86,3 +102,54 @@ def test_expand_table_names_by_relations():
         max_tables=10,
     )
     assert expanded == ["sport_activity_qzs_record", "base_student"]
+
+
+def test_filter_tables_excludes_disabled_tables_from_metrics(monkeypatch):
+    """指标 relevant_tables 引用已停用表时，不得进入候选表。"""
+    monkeypatch.setattr(
+        "app.agent.context_builder.get_allowed_tables",
+        lambda: frozenset(
+            {
+                "base_school",
+                "base_student",
+                "sport_activity_qzs_time",
+                "sport_activity_new",
+                "sport_project",
+            }
+        ),
+    )
+    recall = HybridRecallResult(
+        keywords=["跳绳"],
+        tables=[
+            RecalledTable(
+                table_id=1,
+                table_name="sport_activity_qzs_time",
+                search_text="打卡时间",
+                score=0.68,
+                recall_mode="es_vector",
+            ),
+            RecalledTable(
+                table_id=2,
+                table_name="base_student",
+                search_text="学生",
+                score=0.69,
+                recall_mode="es_vector",
+            ),
+        ],
+        metrics=[
+            RecalledMetric(
+                metric_id=1,
+                metric_code="qzs_month_participants",
+                metric_name="当月参与人数",
+                search_text="",
+                score=0.85,
+                recall_mode="es_vector",
+                relevant_tables="sport_activity_qzs_record",
+            ),
+        ],
+    )
+    merged = merge_retrieved_info(recall)
+    merged = filter_tables(merged, _settings(), relations=[])
+    assert "sport_activity_qzs_record" not in merged.table_names
+    assert "sport_activity_qzs_time" in merged.table_names
+    assert "base_student" in merged.table_names

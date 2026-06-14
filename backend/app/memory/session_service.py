@@ -124,6 +124,23 @@ class SessionService:
         )
         return result.first() is not None
 
+    async def session_belongs_to_other_user(self, session_id: str, user_id: int) -> bool:
+        """session 已存在且不属于当前用户。"""
+        result = await self._session.execute(
+            text(
+                """
+                SELECT user_id FROM copilot_ask_session
+                WHERE session_id = :session_id AND deleted = 0
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        )
+        row = result.mappings().first()
+        if row is None:
+            return False
+        return int(row["user_id"]) != user_id
+
     async def upsert_on_ask(
         self,
         session_id: str,

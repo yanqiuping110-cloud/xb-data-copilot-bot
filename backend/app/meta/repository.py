@@ -370,14 +370,36 @@ class MetaRepository:
         return {c.column_name: c for c in cols}
 
     async def load_active_column_names(self, table_names: list[str]) -> dict[str, set[str]]:
-        """批量加载表的启用字段名，供 SQL 列名校验使用。"""
-        result: dict[str, set[str]] = {}
+        """批量加载表可用于 SQL 的字段名（参与召回 + JOIN 键 + filter 角色）。"""
+        resolved: dict[str, tuple[str, int]] = {}
         for name in table_names:
             table = await self.find_table_by_name(name)
-            if not table:
-                continue
-            cols = await self.list_columns(table.id)
-            result[name.lower()] = {c.column_name for c in cols if c.status == 1}
+            if table:
+                resolved[name.lower()] = (table.table_name, table.id)
+
+        table_name_set = {t[0] for t in resolved.values()}
+        join_keys: set[tuple[str, str]] = set()
+        if table_name_set:
+            relations = await self.list_relations()
+            for rel in relations:
+                if rel.status != 1:
+                    continue
+                if rel.from_table_name in table_name_set:
+                    join_keys.add((rel.from_table_name, rel.from_column))
+                if rel.to_table_name in table_name_set:
+                    join_keys.add((rel.to_table_name, rel.to_column))
+
+        result: dict[str, set[str]] = {}
+        for key, (table_name, table_id) in resolved.items():
+            cols = await self.list_columns(table_id)
+            allowed: set[str] = set()
+            for col in cols:
+                if col.status != 1:
+                    continue
+                is_join_key = (table_name, col.column_name) in join_keys
+                if col.recall_enabled == 1 or is_join_key or col.column_role == "filter":
+                    allowed.add(col.column_name)
+            result[key] = allowed
         return result
 
     async def insert_column(
@@ -996,7 +1018,10 @@ class MetaRepository:
             {"id": metric_id},
         )
         await self._session.execute(
-            text("DELETE FROM copilot_metric_column WHERE metric_id = :id"),
+            text(
+                "UPDATE copilot_metric_column SET deleted = 1 "
+                "WHERE metric_id = :id AND deleted = 0"
+            ),
             {"id": metric_id},
         )
 
@@ -1008,7 +1033,8 @@ class MetaRepository:
                 FROM copilot_metric_column mc
                 INNER JOIN copilot_column_meta c ON c.id = mc.column_id
                 INNER JOIN copilot_table_meta t ON t.id = c.table_id
-                WHERE mc.metric_id = :metric_id AND c.deleted = 0 AND t.deleted = 0
+                WHERE mc.metric_id = :metric_id AND mc.deleted = 0
+                  AND c.deleted = 0 AND t.deleted = 0
                 ORDER BY t.table_name, c.column_name
                 """
             ),
@@ -1031,15 +1057,19 @@ class MetaRepository:
     ) -> None:
         """全量替换指标字段关联。links: [(column_id, usage_type), ...]"""
         await self._session.execute(
-            text("DELETE FROM copilot_metric_column WHERE metric_id = :id"),
+            text(
+                "UPDATE copilot_metric_column SET deleted = 1 "
+                "WHERE metric_id = :id AND deleted = 0"
+            ),
             {"id": metric_id},
         )
         for column_id, usage_type in links:
             await self._session.execute(
                 text(
                     """
-                    INSERT INTO copilot_metric_column (metric_id, column_id, usage_type)
-                    VALUES (:metric_id, :column_id, :usage_type)
+                    INSERT INTO copilot_metric_column (metric_id, column_id, usage_type, deleted)
+                    VALUES (:metric_id, :column_id, :usage_type, 0)
+                    ON DUPLICATE KEY UPDATE deleted = 0, usage_type = VALUES(usage_type)
                     """
                 ),
                 {"metric_id": metric_id, "column_id": column_id, "usage_type": usage_type},
