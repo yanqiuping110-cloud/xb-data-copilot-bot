@@ -17,7 +17,7 @@ class Base(DeclarativeBase):
 
 
 class SysUser(Base):
-    """问数系统登录账户（与体育后台 user 表无关）。"""
+    """问数系统登录账户（与后台 user 表无关）。"""
 
     __tablename__ = "copilot_sys_user"
 

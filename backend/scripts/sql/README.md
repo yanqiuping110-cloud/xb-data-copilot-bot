@@ -7,7 +7,7 @@
 | 目录 | 库 | 说明 |
 |------|-----|------|
 | `copilot/` | `MYSQL_COPILOT_DATABASE` | 问数库表结构；**应用运行时禁止 DDL** |
-| `business/` | `MYSQL_BUSINESS_DATABASE` | 业务库结构（一般不改，由体育业务团队维护） |
+| `business/` | `MYSQL_BUSINESS_DATABASE` | 业务库结构（一般不改，由业务团队维护） |
 
 ## 命名规范
 

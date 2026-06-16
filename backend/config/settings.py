@@ -70,7 +70,7 @@ class Settings(BaseSettings):
         description="向量维度（无数据 embed 时建索引占位；qwen3-embedding:4b 多为 2560）",
     )
 
-    # ---------- MySQL：智慧体育业务库（只读账号）----------
+    # ---------- MySQL：智慧业务库（只读账号）----------
     mysql_business_host: str = Field(default="127.0.0.1", alias="MYSQL_BUSINESS_HOST")
     mysql_business_port: int = Field(default=3306, alias="MYSQL_BUSINESS_PORT")
     mysql_business_user: str = Field(default="ask_readonly", alias="MYSQL_BUSINESS_USER")

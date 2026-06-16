@@ -4,7 +4,7 @@
 -- ---------- Git 仓库配置（超管维护）----------
 CREATE TABLE IF NOT EXISTS copilot_git_repo (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
-    name VARCHAR(128) NOT NULL COMMENT '展示名，如体育报表后端',
+    name VARCHAR(128) NOT NULL COMMENT '展示名，如报表后端',
     repo_url VARCHAR(512) NOT NULL COMMENT 'Git 远程地址',
     branch VARCHAR(128) NOT NULL DEFAULT 'main' COMMENT '同步分支',
     auth_secret_ref VARCHAR(128) NULL COMMENT '凭证环境变量名，不入库明文',

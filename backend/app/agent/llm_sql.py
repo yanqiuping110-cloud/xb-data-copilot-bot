@@ -60,7 +60,7 @@ async def generate_sql_from_llm(
     llm = build_llm(settings)
     system = (
         build_sql_system_preamble()
-        + "你是企业问数系统的 SQL 生成助手，只为智慧体育业务库生成只读查询。"
+        + "你是企业问数系统的 SQL 生成助手，只为业务库生成只读查询。"
         "严格遵守上下文中的表白名单与 MySQL 5.7 语法。"
         "只能使用上下文中【候选表字段清单】列出的真实列名，禁止编造任何字段。"
         "时间/日期筛选请用 create_time、activity_start_time 等真实列，禁止把中文「日期」当作列名。"

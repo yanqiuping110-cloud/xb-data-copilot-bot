@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 
 class UserRole(str, Enum):
-    """问数系统三类角色（与体育后台 PeopleRoleType 命名独立）。"""
+    """问数系统三类角色（与后台 PeopleRoleType 命名独立）。"""
 
     ADMIN = "ADMIN"  # 超管：用户管理 + 全平台数据
     OPERATOR = "OPERATOR"  # 运营：全平台业务数据，无用户管理

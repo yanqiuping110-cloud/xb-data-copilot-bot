@@ -1,5 +1,5 @@
 """
-智慧体育业务库：只读连接（问数执行 SQL 时使用）。
+业务库：只读连接（问数执行 SQL 时使用）。
 
 策略（见 app/db/sql_policy.py）：
   MYSQL_BUSINESS_DATABASE 禁止一切 DML 与 DDL，应用层仅允许 SELECT。
