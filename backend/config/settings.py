@@ -221,6 +221,28 @@ class Settings(BaseSettings):
     session_evict_policy: str = Field(default="oldest", alias="SESSION_EVICT_POLICY")
     session_ui_turn_limit: int = Field(default=30, alias="SESSION_UI_TURN_LIMIT")
 
+    # ---------- 动态数据权限（第 13 周 · §11.6）----------
+    policy_data_scope_enabled: bool = Field(
+        default=False,
+        alias="POLICY_DATA_SCOPE_ENABLED",
+        description="是否启用配置驱动 DataScope；关闭时沿用全局表白名单",
+    )
+    policy_default_deny: bool = Field(
+        default=True,
+        alias="POLICY_DEFAULT_DENY",
+        description="DataScope 开启时无 grant 是否默认拒绝问数",
+    )
+    policy_cache_ttl_sec: int = Field(default=60, alias="POLICY_CACHE_TTL_SEC")
+
+    # ---------- Prompt Injection 防护（第 13 周 · §11.9）----------
+    prompt_boundary_enabled: bool = Field(default=True, alias="PROMPT_BOUNDARY_ENABLED")
+    prompt_sanitize_recall_enabled: bool = Field(
+        default=True, alias="PROMPT_SANITIZE_RECALL_ENABLED"
+    )
+    prompt_injection_log_enabled: bool = Field(
+        default=True, alias="PROMPT_INJECTION_LOG_ENABLED"
+    )
+
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     minio_endpoint: str = Field(default="http://127.0.0.1:9000", alias="MINIO_ENDPOINT")
 

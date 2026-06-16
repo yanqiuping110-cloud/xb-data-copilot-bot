@@ -5,7 +5,7 @@
 """
 
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -37,5 +37,13 @@ class UserContext(BaseModel):
     bound_sch_ids: list[int] = Field(
         default_factory=list,
         description="学校账户绑定的全部 sch_id",
+    )
+    active_scopes: dict[str, Any] = Field(
+        default_factory=dict,
+        description="JWT 当前数据范围上下文，键为 dimension_code",
+    )
+    effective_policy: Any = Field(
+        default=None,
+        description="问数入口加载的 EffectivePolicy（运行时注入，非 JWT 字段）",
     )
     client_ip: Optional[str] = Field(default=None, description="客户端 IP，审计用")

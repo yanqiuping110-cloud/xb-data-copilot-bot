@@ -14,6 +14,8 @@ from app.core.context import UserContext
 from app.meta.effective import effective_description
 from app.meta.repository import ColumnMetaRow, MetaRepository, RelationRow, TableMetaRow, parse_alias_json
 from app.policy.role_policy import build_llm_sql_generation_constraints, build_role_context_header
+from app.policy.effective_policy import build_scope_prompt_sections
+from app.security.prompt_boundary import sanitize_recall_text
 from app.retrieval.hybrid import (
     HybridRecallResult,
     RecalledColumn,
@@ -347,14 +349,22 @@ async def build_llm_context_text(
     cfg = settings or get_settings()
     example_top_k = cfg.curated_example_top_k
     example_min_score = cfg.curated_example_min_score
+    policy = getattr(ctx, "effective_policy", None)
 
     parts: list[str] = [
         build_role_context_header(ctx, settings=cfg),
         "",
     ]
+    scope_block = build_scope_prompt_sections(policy)
+    if scope_block:
+        parts.extend([scope_block, ""])
     if memory_prompt_text:
         parts.append(memory_prompt_text)
         parts.append("")
+
+    allowed = sorted(get_allowed_tables())
+    if policy is not None:
+        allowed = sorted(policy.allowed_tables) if policy.allowed_tables else allowed
 
     parts.extend(
         [
@@ -371,6 +381,8 @@ async def build_llm_context_text(
         parts.append("【候选表说明（表级召回）】")
         for table in merged.tables:
             desc = effective_description(table.description_manual, table.table_comment_auto)
+            if desc and cfg.prompt_sanitize_recall_enabled:
+                desc, _ = sanitize_recall_text(desc, enabled=True)
             line = f"- {table.table_name}"
             if desc:
                 line += f"：{desc}"

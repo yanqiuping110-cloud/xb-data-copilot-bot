@@ -33,8 +33,9 @@
 | 评测集 | ✅ Agent 子集 | `docs/eval/agent_complex_report.json` 15 条 + `replay_eval.py --subset agent` |
 | **Agent Plan + Tool Loop（第 7～9 周）** | ✅ 完成 | agent_loop + verify_answer + 复杂报表评测 |
 | **Git 代码知识图谱（第 10～12 周）** | ✅ 完成 | V009 + sync/解析 + ES + 代码 Agent 工具 + `AdminCodeRepos.vue` |
-| **动态 DataScope（第 13 周）** | ⬜ 顺延 | §11.6；`V010__data_scope.sql` |
-| **MVP 评测（第 14 周）** | ⬜ 顺延 | meta + code + Scope 全量评测 |
+| **动态 DataScope（第 13 周）** | ✅ 完成 | `V010` + `EffectivePolicy` + `ScopeInjector` + admin API |
+| **Prompt Injection（第 13～14 周）** | ✅ 完成 | `prompt_boundary` + LLM/Memory 触点 + `inj-*` 评测 |
+| **MVP 评测（第 14 周）** | ✅ 文档/脚本 | `replay_eval --subset injection` + `PROMPT_SECURITY.md` |
 
 ---
 
@@ -203,6 +204,32 @@
 
 ---
 
+## 第 13 周（DataScope + Prompt Injection · 已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `V010__data_scope.sql` | ✅ | 维度/绑定/grant/deny |
+| `EffectivePolicy` + `ScopeInjector` | ✅ | `app/policy/effective_policy.py` |
+| `sql_guard` 集成 policy | ✅ | allowed_tables + COLUMN_DENIED |
+| `apply_policy` scope 注入 | ✅ | `nodes.py` |
+| `app/security/prompt_boundary.py` | ✅ | 定界/清洗/拒令 |
+| LLM / Memory / context 触点 | ✅ | `llm_sql` / `memory_service` / `context_builder` |
+| `/admin/meta/scope-*` + user grants | ✅ | `app/api/admin_scope.py` |
+| 单测 | ✅ | `test_data_scope` / `test_prompt_boundary` / `test_prompt_injection` |
+
+---
+
+## 第 14 周（评测 + 文档 · 已完成）
+
+| 任务 | 状态 | 备注 |
+|------|------|------|
+| `docs/eval/prompt_injection.json` | ✅ | inj-01～08 机器可读 |
+| `replay_eval.py --subset injection` | ✅ | `injection_blocked_rate` / `leaked_sql_count` |
+| `docs/PROMPT_SECURITY.md` | ✅ | 威胁模型与运营规范 |
+| `EVAL_QUESTIONS.md` §七 | ✅ | 注入子集说明 |
+
+---
+
 ### 已落地（基线）
 
 | 节点 | 实现位置 |
@@ -318,7 +345,7 @@ python scripts/build_search_index.py
 4. ~~**第 10 周**：`V009` Git repo + sync + Java/MyBatis 解析入库~~ ✅  
 5. ~~**第 11 周**：代码 ES 索引 + `UnifiedRetriever` + `AdminCodeRepos.vue`~~ ✅  
 6. ~~**第 12 周**：代码 Agent 工具 + meta 融合 Plan~~ ✅  
-7. **第 13 周**：DataScope（`V010`）  
-8. **第 14 周**：全量 MVP 评测与文档  
+7. ~~**第 13 周**：DataScope（`V010`）~~ ✅  
+8. ~~**第 14 周**：全量 MVP 评测与文档~~ ✅  
 
 **不做**：Codegraph、SQLite；代码权威存 **MySQL copilot**，检索用 **ES**。

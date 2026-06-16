@@ -30,6 +30,8 @@ from app.observability.trace_log import (
 )
 from app.ask.chat_client import sanitize_chat_sql
 from app.policy.role_policy import PolicyError, require_school_scope
+from app.policy.effective_policy import EffectivePolicy, load_effective_policy
+from app.policy.scope_injector import apply_scope_to_sql, validate_scope_literals
 from app.schemas.ask import AskRequest, AskResponse, IntermediateSqlResult
 from app.sql.whitelist import refresh_allowed_tables
 from config.settings import Settings
@@ -322,6 +324,13 @@ async def _prepare_ask_run(
     await copilot_session.commit()
 
     await refresh_allowed_tables(copilot_session)
+
+    policy: EffectivePolicy | None = None
+    if settings.policy_data_scope_enabled:
+        policy = await load_effective_policy(
+            copilot_session, ctx, settings=settings
+        )
+        ctx = ctx.model_copy(update={"effective_policy": policy})
 
     initial: AskGraphState = {
         "trace_id": trace_id,

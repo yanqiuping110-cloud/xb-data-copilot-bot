@@ -11,18 +11,12 @@ from sqlglot import exp
 
 from app.core.context import UserContext
 from app.db.sql_policy import BusinessWriteForbiddenError, assert_business_readonly_sql
+from app.policy.effective_policy import EffectivePolicy
 from app.policy.role_policy import applies_sch_id_filter
+from app.sql.column_guard import validate_denied_columns_sql
+from app.sql.errors import SqlGuardError
 from app.sql.whitelist import SCH_ID_COLUMN, get_allowed_tables
 from config.settings import Settings, get_settings
-
-
-class SqlGuardError(Exception):
-    """SQL 校验或策略拒绝。"""
-
-    def __init__(self, code: str, message: str):
-        self.code = code
-        self.message = message
-        super().__init__(message)
 
 
 def _policy_to_guard(exc: BusinessWriteForbiddenError) -> SqlGuardError:
@@ -45,6 +39,7 @@ def validate_sql(
     *,
     max_rows: int,
     settings: Settings | None = None,
+    policy: EffectivePolicy | None = None,
 ) -> str:
     """
     校验 SQL 并返回带 LIMIT 的最终语句（MySQL 方言）。
@@ -70,12 +65,24 @@ def validate_sql(
     tables = _extract_tables(parsed)
     if not tables:
         raise SqlGuardError("NO_TABLE", "未识别到查询表")
-    unknown = tables - get_allowed_tables()
+
+    allowed = (
+        policy.allowed_tables
+        if policy is not None and not policy.is_admin_bypass
+        else get_allowed_tables()
+    )
+    if policy is not None and policy.is_admin_bypass:
+        allowed = policy.allowed_tables or get_allowed_tables()
+
+    unknown = tables - allowed
     if unknown:
         raise SqlGuardError(
             "TABLE_NOT_ALLOWED",
             f"表不在白名单: {', '.join(sorted(unknown))}",
         )
+
+    if policy is not None and policy.denied_columns:
+        validate_denied_columns_sql(stripped, policy.denied_columns)
 
     s = settings or get_settings()
     if applies_sch_id_filter(ctx, settings=s):
@@ -106,6 +113,7 @@ def validate_probe_sql(
     *,
     max_rows: int = 10,
     settings: Settings | None = None,
+    policy: EffectivePolicy | None = None,
 ) -> str:
     """
     探查 SQL 校验：仅 SELECT、表白名单、强制 LIMIT≤max_rows（默认 10）。
@@ -113,4 +121,4 @@ def validate_probe_sql(
     供 run_probe_sql 工具使用。
     """
     capped = min(max_rows, 10)
-    return validate_sql(sql, ctx, max_rows=capped, settings=settings)
+    return validate_sql(sql, ctx, max_rows=capped, settings=settings, policy=policy)

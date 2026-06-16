@@ -39,6 +39,7 @@ async def run_probe_sql(
             ctx,
             max_rows=_PROBE_MAX_ROWS,
             settings=settings,
+            policy=getattr(ctx, "effective_policy", None),
         )
     except SqlGuardError as exc:
         return {"error": exc.code, "message": exc.message, "tool": "run_probe_sql"}

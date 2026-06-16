@@ -7,7 +7,7 @@ from __future__ import annotations
 import sqlglot
 from sqlglot import exp
 
-from app.sql.guard import SqlGuardError
+from app.sql.errors import SqlGuardError
 
 
 def _build_alias_map(parsed: exp.Expression) -> dict[str, str]:
@@ -87,4 +87,42 @@ def validate_sql_columns(
 
     if errors:
         raise SqlGuardError("COLUMN_NOT_FOUND", "；".join(errors[:3]))
+
+
+def validate_denied_columns_sql(
+    sql: str,
+    denied_columns: dict[str, frozenset[str]],
+) -> None:
+    """AST 遍历 SELECT 引用，命中 deny 列则拒绝（DataScope · §11.6）。"""
+    if not denied_columns:
+        return
+
+    try:
+        parsed = sqlglot.parse_one(sql.strip().rstrip(";"), read="mysql")
+    except Exception as exc:
+        raise SqlGuardError("PARSE_ERROR", f"SQL 解析失败: {exc}") from exc
+
+    alias_map = _build_alias_map(parsed)
+    output_aliases = _collect_output_aliases(parsed)
+
+    for col in parsed.find_all(exp.Column):
+        name = col.name
+        if not name or name == "*" or name.lower() in output_aliases:
+            continue
+        ref = col.table
+        if ref:
+            physical = alias_map.get(str(ref).lower(), str(ref).lower())
+            denied = denied_columns.get(physical, frozenset())
+            if name in denied:
+                raise SqlGuardError(
+                    "COLUMN_DENIED",
+                    f"禁止查询字段 {physical}.{name}",
+                )
+        else:
+            for physical, denied in denied_columns.items():
+                if name in denied and physical in alias_map.values():
+                    raise SqlGuardError(
+                        "COLUMN_DENIED",
+                        f"禁止查询字段 {physical}.{name}",
+                    )
 

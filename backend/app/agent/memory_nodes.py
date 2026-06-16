@@ -78,6 +78,7 @@ async def resolve_references_node(state: AskGraphState, config: RunnableConfig) 
         state.get("user_preferences") or [],
         max_chars=settings.memory_prompt_max_chars,
         inject_session=settings.session_memory_enabled,
+        boundary_enabled=settings.prompt_boundary_enabled,
     )
     if hint:
         memory_text = (memory_text + "\n【指代消解提示】\n" + hint).strip()

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.models import SessionMemory, SessionTurnSlot, UserPreferenceItem
 from app.memory.preference_keys import PREFERENCE_KEY_WHITELIST
+from app.security.prompt_boundary import wrap_untrusted
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -292,6 +293,7 @@ def build_memory_prompt_sections(
     *,
     max_chars: int,
     inject_session: bool = True,
+    boundary_enabled: bool = True,
 ) -> tuple[str, dict]:
     """
     拼装【会话上下文】【用户偏好】Prompt 小节。
@@ -311,10 +313,13 @@ def build_memory_prompt_sections(
         parts.append("【会话上下文（多轮指代参考，勿直接复制 SQL 绕过校验）】")
         last = memory.last_turn
         if last:
-            parts.append(f"- 上一轮问句：{last.question[:200]}")
+            q = wrap_untrusted("session_question", last.question[:200], enabled=boundary_enabled)
+            parts.append(f"- 上一轮问句：{q}")
             if last.final_sql:
                 sql_preview = " ".join(last.final_sql.split())[:400]
-                parts.append(f"- 上一轮 SQL：{sql_preview}")
+                parts.append(
+                    f"- 上一轮 SQL：{wrap_untrusted('session_sql', sql_preview, enabled=boundary_enabled)}"
+                )
             if last.tables_used:
                 parts.append(f"- 涉及表：{last.tables_used}")
             if last.row_count is not None:

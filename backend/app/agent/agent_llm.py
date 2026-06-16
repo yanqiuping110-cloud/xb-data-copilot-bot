@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.llm_sql import build_llm
 from app.agent.plan_llm import _extract_json
+from app.security.prompt_boundary import build_agent_system_preamble, wrap_untrusted
 from config.settings import Settings
 
 _AGENT_TOOLS = (
@@ -97,14 +98,21 @@ async def decide_agent_action(
     plan_text = json.dumps(plan or {}, ensure_ascii=False)[:2000]
     obs_text = _format_observations(observations)
     system = (
-        "你是企业问数 Agent，根据问句、规划与已有观察，选择下一步只读工具。"
+        build_agent_system_preamble()
+        + "你是企业问数 Agent，根据问句、规划与已有观察，选择下一步只读工具。"
         f"可用工具：{', '.join(_AGENT_TOOLS)}。"
         "输出 JSON：{\"action\":\"tool\",\"tool\":\"describe_table\",\"args\":{\"table\":\"表名\"}}"
         "或 {\"action\":\"finish\"} 表示信息足够可生成 SQL。"
         "禁止写库；run_probe_sql 仅用于 DISTINCT/COUNT 探查，须带 LIMIT。"
     )
+    bounded_q = wrap_untrusted(
+        "user_question",
+        question,
+        max_chars=2000,
+        enabled=settings.prompt_boundary_enabled,
+    )
     user = (
-        f"问句：{question}\n\n"
+        f"问句：{bounded_q}\n\n"
         f"规划 plan：{plan_text}\n\n"
         f"已有观察：\n{obs_text}\n\n"
         "请输出下一步 JSON。"

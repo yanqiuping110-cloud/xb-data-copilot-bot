@@ -222,7 +222,10 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
         }
 
     try:
-        final_sql = validate_sql(raw, ctx, max_rows=settings.sql_max_rows, settings=settings)
+        policy = getattr(ctx, "effective_policy", None)
+        final_sql = validate_sql(
+            raw, ctx, max_rows=settings.sql_max_rows, settings=settings, policy=policy
+        )
         final_sql = strip_sch_id_for_broad_roles(final_sql, ctx, settings=settings)
 
         meta_repo = MetaRepository(c["copilot_session"])
@@ -260,10 +263,10 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
 
 async def apply_policy(state: AskGraphState, config: RunnableConfig) -> dict:
     """
-    学校账户补 sch_id 参数；与 matched 路径共用 params。
+    学校账户补 sch_id 参数；DataScope 注入动态 scope IN 条件。
 
     第 7～12 周 `POLICY_SCH_ID_ENABLED=false` 时跳过 sch 注入（§11.7.1）。
-    第 13 周由 EffectivePolicy 替代（§11.6）。
+    第 13 周 `POLICY_DATA_SCOPE_ENABLED=true` 时由 ScopeInjector 处理（§11.6）。
     """
     if state.get("error_code"):
         return {}
@@ -271,8 +274,27 @@ async def apply_policy(state: AskGraphState, config: RunnableConfig) -> dict:
     t0 = time.perf_counter()
     c = _cfg(config)
     ctx: UserContext = c["ctx"]
+    settings: Settings = c["settings"]
     final_sql = state.get("final_sql") or ""
     params = dict(state.get("sql_params") or {})
+    policy = getattr(ctx, "effective_policy", None)
+
+    if policy is not None and settings.policy_data_scope_enabled and not policy.is_admin_bypass:
+        try:
+            validate_scope_literals(final_sql, policy)
+            scoped_sql, scope_params = apply_scope_to_sql(final_sql, policy)
+            params.update(scope_params)
+            detail = {"scope_injected": scoped_sql != final_sql, "grants_hash": policy.grants_hash}
+            await _span(config, "apply_policy", t0, "success", detail)
+            return {"sql_params": params, "final_sql": scoped_sql}
+        except SqlGuardError as exc:
+            await _span(config, "apply_policy", t0, "fail", {"error": exc.code})
+            return {
+                "status": "fail",
+                "error_code": exc.code,
+                "error_message": exc.message,
+                "degrade_level": 3,
+            }
 
     matched = state.get("matched")
     if matched is not None:

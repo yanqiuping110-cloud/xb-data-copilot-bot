@@ -10,6 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from app.policy.role_policy import LLM_JOIN_ALIAS_SYSTEM_HINT
+from app.security.prompt_boundary import build_sql_system_preamble, wrap_untrusted
 from config.settings import Settings
 
 _SQL_BLOCK_RE = re.compile(r"```(?:sql)?\s*([\s\S]*?)```", re.IGNORECASE)
@@ -58,7 +59,8 @@ async def generate_sql_from_llm(
     """
     llm = build_llm(settings)
     system = (
-        "你是企业问数系统的 SQL 生成助手，只为智慧体育业务库生成只读查询。"
+        build_sql_system_preamble()
+        + "你是企业问数系统的 SQL 生成助手，只为智慧体育业务库生成只读查询。"
         "严格遵守上下文中的表白名单与 MySQL 5.7 语法。"
         "只能使用上下文中【候选表字段清单】列出的真实列名，禁止编造任何字段。"
         "时间/日期筛选请用 create_time、activity_start_time 等真实列，禁止把中文「日期」当作列名。"
@@ -66,7 +68,13 @@ async def generate_sql_from_llm(
         "仅当用户明确要求英文表头时才使用英文别名。"
         f"{LLM_JOIN_ALIAS_SYSTEM_HINT}"
     )
-    user_parts = [context_text, "", f"用户问题：{question}"]
+    bounded_q = wrap_untrusted(
+        "user_question",
+        question,
+        max_chars=2000,
+        enabled=settings.prompt_boundary_enabled,
+    )
+    user_parts = [context_text, "", f"用户问题：{bounded_q}"]
     if correction_hint and previous_sql:
         user_parts.extend(
             [
