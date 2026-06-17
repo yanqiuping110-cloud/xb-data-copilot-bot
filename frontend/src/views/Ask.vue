@@ -1,7 +1,7 @@
 <template>
   <div class="layout">
     <header class="header">
-      <span class="title">小奔问数</span>
+      <span class="title">智能问数</span>
       <div class="user-area">
         <template v-if="user?.role === 'SCHOOL' && boundSchools.length">
           <el-select

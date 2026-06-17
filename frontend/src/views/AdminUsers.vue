@@ -13,7 +13,7 @@
         <div class="toolbar">
           <el-select v-model="roleFilter" placeholder="全部角色" clearable style="width: 140px" @change="loadList">
             <el-option label="运营" value="OPERATOR" />
-            <el-option label="学校" value="SCHOOL" />
+            <el-option label="渠道" value="SCHOOL" />
           </el-select>
           <el-button type="primary" @click="openCreate">新建用户</el-button>
         </div>
@@ -31,30 +31,17 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="绑定学校" min-width="200">
+          <el-table-column label="数据授权" min-width="200" show-overflow-tooltip>
             <template #default="{ row }">
-              <span v-if="row.role !== 'SCHOOL'">—</span>
-              <span v-else>
-                {{
-                  (row.boundSchools || [])
-                    .map((s) => (s.schName ? `${s.schName}(${s.schId})` : s.schId))
-                    .join('、') || '—'
-                }}
-              </span>
+              <span v-if="row.role === 'ADMIN'">—</span>
+              <span v-else>{{ grantSummaryMap[row.id] || '未配置' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="220" fixed="right">
+          <el-table-column label="操作" width="260" fixed="right">
             <template #default="{ row }">
               <template v-if="row.role !== 'ADMIN'">
                 <el-button link type="primary" @click="openPatch(row)">编辑</el-button>
-                <el-button
-                  v-if="row.role === 'SCHOOL'"
-                  link
-                  type="primary"
-                  @click="openSchools(row)"
-                >
-                  学校绑定
-                </el-button>
+                <el-button link type="primary" @click="openGrants(row)">数据授权</el-button>
                 <el-button
                   link
                   :type="row.status === 1 ? 'danger' : 'success'"
@@ -81,7 +68,7 @@
     </main>
 
     <!-- 新建用户 -->
-    <el-dialog v-model="createVisible" title="新建用户" width="480px" destroy-on-close>
+    <el-dialog v-model="createVisible" title="新建用户" width="560px" destroy-on-close>
       <el-form :model="createForm" label-width="88px">
         <el-form-item label="用户名" required>
           <el-input v-model="createForm.username" autocomplete="off" />
@@ -90,20 +77,48 @@
           <el-input v-model="createForm.password" type="password" show-password autocomplete="new-password" />
         </el-form-item>
         <el-form-item label="角色" required>
-          <el-select v-model="createForm.role" style="width: 100%">
+          <el-select v-model="createForm.role" style="width: 100%" @change="onCreateRoleChange">
             <el-option label="运营" value="OPERATOR" />
-            <el-option label="学校" value="SCHOOL" />
+            <el-option label="渠道" value="SCHOOL" />
           </el-select>
         </el-form-item>
         <el-form-item label="显示名">
           <el-input v-model="createForm.displayName" />
         </el-form-item>
-        <el-form-item v-if="createForm.role === 'SCHOOL'" label="学校 ID" required>
-          <el-input
-            v-model="createForm.schIdsText"
-            placeholder="多个用英文逗号分隔，如 1140,1220"
-          />
-        </el-form-item>
+        <template v-if="createForm.role !== 'ADMIN'">
+          <el-divider content-position="left">数据授权</el-divider>
+          <p class="hint">启用 DataScope 后，运营/渠道账户须配置行级维度与可见表方可问数。</p>
+          <div v-for="(row, idx) in createForm.grantRows" :key="idx" class="grant-row">
+            <el-select v-model="row.dimensionCode" placeholder="维度" style="width: 150px" filterable>
+              <el-option
+                v-for="d in scopeDimensions"
+                :key="d.code"
+                :label="`${d.display_name} (${d.code})`"
+                :value="d.code"
+              />
+            </el-select>
+            <el-input
+              v-model="row.valuesText"
+              placeholder="允许多值，逗号分隔"
+              style="flex: 1"
+            />
+            <el-button link type="danger" @click="createForm.grantRows.splice(idx, 1)">删除</el-button>
+          </div>
+          <el-button link type="primary" @click="addGrantRow(createForm.grantRows)">添加维度授权</el-button>
+          <el-form-item label="可见表" style="margin-top: 12px">
+            <el-select
+              v-model="createForm.tableNames"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              placeholder="选择可查询的表"
+              style="width: 100%"
+            >
+              <el-option v-for="t in metaTables" :key="t.id" :label="t.tableName" :value="t.tableName" />
+            </el-select>
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
@@ -136,32 +151,66 @@
       </template>
     </el-dialog>
 
-    <!-- 学校绑定 -->
-    <el-dialog v-model="schoolsVisible" title="学校绑定" width="480px" destroy-on-close>
-      <p class="hint">全量覆盖绑定，至少保留一所学校。</p>
+    <!-- 数据授权 -->
+    <el-dialog v-model="grantsVisible" title="数据授权" width="600px" destroy-on-close>
+      <p class="hint">
+        行级授权：每个维度配置多值 IN；多维度同时生效时 SQL 条件 AND 组合。表级授权：限制可查询的表白名单。
+      </p>
       <el-form label-width="88px">
-        <el-form-item label="学校 ID">
-          <el-input
-            v-model="schoolsForm.schIdsText"
-            placeholder="多个用英文逗号分隔，如 1140,1220"
-          />
+        <el-form-item label="行级维度">
+          <div class="grant-block">
+            <div v-for="(row, idx) in grantsForm.grantRows" :key="idx" class="grant-row">
+              <el-select v-model="row.dimensionCode" placeholder="维度" style="width: 150px" filterable>
+                <el-option
+                  v-for="d in scopeDimensions"
+                  :key="d.code"
+                  :label="`${d.display_name} (${d.code})`"
+                  :value="d.code"
+                />
+              </el-select>
+              <el-input v-model="row.valuesText" placeholder="多值逗号分隔，如 1140,1220" style="flex: 1" />
+              <el-button link type="danger" @click="grantsForm.grantRows.splice(idx, 1)">删除</el-button>
+            </div>
+            <el-button link type="primary" @click="addGrantRow(grantsForm.grantRows)">添加维度</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item label="可见表">
+          <el-select
+            v-model="grantsForm.tableNames"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="选择可查询的表"
+            style="width: 100%"
+          >
+            <el-option v-for="t in metaTables" :key="t.id" :label="t.tableName" :value="t.tableName" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="schoolsVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitSchools">保存</el-button>
+        <el-button @click="grantsVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitGrants">保存</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-/** 超管用户管理页：列表、创建、禁用/启用、学校绑定 */
+/** 超管用户管理：列表、创建、数据授权（DataScope） */
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchMe } from '../api/auth'
 import { createUser, listUsers, patchUser, replaceSchools } from '../api/admin'
+import { listMetaTables } from '../api/meta'
+import {
+  getUserGrants,
+  listScopeDimensions,
+  putUserDataGrants,
+  putUserTableGrants,
+} from '../api/scope'
+import { formatGrantsSummary, parseGrantValues } from '../utils/scopeGrants'
 
 const router = useRouter()
 const loading = ref(false)
@@ -171,6 +220,9 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const roleFilter = ref(null)
+const scopeDimensions = ref([])
+const metaTables = ref([])
+const grantSummaryMap = ref({})
 
 const createVisible = ref(false)
 const createForm = reactive({
@@ -178,7 +230,8 @@ const createForm = reactive({
   password: '',
   role: 'OPERATOR',
   displayName: '',
-  schIdsText: '',
+  grantRows: [],
+  tableNames: [],
 })
 
 const patchVisible = ref(false)
@@ -189,23 +242,71 @@ const patchForm = reactive({
   password: '',
 })
 
-const schoolsVisible = ref(false)
-const schoolsForm = reactive({
+const grantsVisible = ref(false)
+const grantsForm = reactive({
   userId: null,
-  schIdsText: '',
+  role: '',
+  grantRows: [],
+  tableNames: [],
 })
 
 function roleLabel(role) {
-  return { ADMIN: '超管', OPERATOR: '运营', SCHOOL: '学校' }[role] || role
+  return { ADMIN: '超管', OPERATOR: '运营', SCHOOL: '渠道' }[role] || role
 }
 
-function parseSchIds(text) {
-  return text
-    .split(/[,，\s]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => Number(s))
-    .filter((n) => !Number.isNaN(n) && n > 0)
+function dimValueType(code) {
+  return scopeDimensions.value.find((d) => d.code === code)?.value_type || 'int'
+}
+
+function addGrantRow(rows) {
+  rows.push({ dimensionCode: '', valuesText: '' })
+}
+
+function buildGrantsPayload(grantRows) {
+  const grants = {}
+  for (const row of grantRows) {
+    if (!row.dimensionCode) continue
+    const values = parseGrantValues(row.valuesText, dimValueType(row.dimensionCode))
+    if (values.length) grants[row.dimensionCode] = values
+  }
+  return grants
+}
+
+function grantRowsFromData(dataGrants) {
+  if (!dataGrants || !Object.keys(dataGrants).length) {
+    return [{ dimensionCode: 'school', valuesText: '' }]
+  }
+  return Object.entries(dataGrants).map(([code, vals]) => ({
+    dimensionCode: code,
+    valuesText: (vals || []).join(', '),
+  }))
+}
+
+async function syncSchoolLegacy(userId, grants, role) {
+  if (role !== 'SCHOOL' || !grants.school?.length) return
+  await replaceSchools(userId, { schIds: grants.school })
+}
+
+async function loadGrantSummaries(items) {
+  const map = {}
+  const targets = items.filter((u) => u.role !== 'ADMIN')
+  await Promise.all(
+    targets.map(async (u) => {
+      try {
+        const res = await getUserGrants(u.id)
+        const parts = []
+        const dg = res.dataGrants || {}
+        const summary = formatGrantsSummary(dg, scopeDimensions.value)
+        if (summary !== '—') parts.push(summary)
+        const tables = res.tableGrants || []
+        if (tables.length) parts.push(`表×${tables.length}`)
+        map[u.id] = parts.length ? parts.join('；') : '未配置'
+      } catch {
+        map[u.id] = '—'
+      }
+    }),
+  )
+  grantSummaryMap.value = map
 }
 
 onMounted(async () => {
@@ -217,11 +318,30 @@ onMounted(async () => {
       return
     }
     localStorage.setItem('userRole', res.user.role)
+    await Promise.all([loadScopeDimensions(), loadMetaTables()])
     await loadList()
   } catch {
     router.push('/login')
   }
 })
+
+async function loadScopeDimensions() {
+  try {
+    const res = await listScopeDimensions()
+    scopeDimensions.value = res.items || []
+  } catch {
+    scopeDimensions.value = []
+  }
+}
+
+async function loadMetaTables() {
+  try {
+    const res = await listMetaTables({ offset: 0, limit: 200 })
+    metaTables.value = res.items || []
+  } catch {
+    metaTables.value = []
+  }
+}
 
 async function loadList() {
   loading.value = true
@@ -231,8 +351,15 @@ async function loadList() {
     const res = await listUsers(params)
     users.value = res.items
     total.value = res.total
+    await loadGrantSummaries(res.items)
   } finally {
     loading.value = false
+  }
+}
+
+function onCreateRoleChange() {
+  if (createForm.role === 'SCHOOL' && !createForm.grantRows.length) {
+    createForm.grantRows = [{ dimensionCode: 'school', valuesText: '' }]
   }
 }
 
@@ -242,7 +369,8 @@ function openCreate() {
     password: '',
     role: 'OPERATOR',
     displayName: '',
-    schIdsText: '',
+    grantRows: [],
+    tableNames: [],
   })
   createVisible.value = true
 }
@@ -252,23 +380,33 @@ async function submitCreate() {
     ElMessage.warning('请填写用户名和密码')
     return
   }
-  const body = {
-    username: createForm.username.trim(),
-    password: createForm.password,
-    role: createForm.role,
-    displayName: createForm.displayName.trim() || undefined,
-  }
-  if (createForm.role === 'SCHOOL') {
-    const schIds = parseSchIds(createForm.schIdsText)
-    if (!schIds.length) {
-      ElMessage.warning('学校账户至少绑定一个学校 ID')
-      return
-    }
-    body.schIds = schIds
+  const grants = buildGrantsPayload(createForm.grantRows)
+  if (createForm.role === 'SCHOOL' && !grants.school?.length) {
+    ElMessage.warning('渠道账户须配置 school 维度授权（或兼容的渠道 ID）')
+    return
   }
   saving.value = true
   try {
-    await createUser(body)
+    const body = {
+      username: createForm.username.trim(),
+      password: createForm.password,
+      role: createForm.role,
+      displayName: createForm.displayName.trim() || undefined,
+    }
+    if (createForm.role === 'SCHOOL' && grants.school?.length) {
+      body.schIds = grants.school
+    }
+    const created = await createUser(body)
+    const userId = created.id
+    if (Object.keys(grants).length) {
+      await putUserDataGrants(userId, grants)
+    }
+    if (createForm.tableNames.length) {
+      await putUserTableGrants(userId, createForm.tableNames)
+    }
+    if (createForm.role === 'SCHOOL' && grants.school?.length) {
+      await syncSchoolLegacy(userId, grants, createForm.role)
+    }
     ElMessage.success('创建成功')
     createVisible.value = false
     await loadList()
@@ -301,23 +439,41 @@ async function submitPatch() {
   }
 }
 
-function openSchools(row) {
-  schoolsForm.userId = row.id
-  schoolsForm.schIdsText = (row.boundSchools || []).map((s) => s.schId).join(',')
-  schoolsVisible.value = true
+async function openGrants(row) {
+  grantsForm.userId = row.id
+  grantsForm.role = row.role
+  grantsForm.grantRows = []
+  grantsForm.tableNames = []
+  try {
+    const res = await getUserGrants(row.id)
+    grantsForm.grantRows = grantRowsFromData(res.dataGrants)
+    grantsForm.tableNames = [...(res.tableGrants || [])]
+  } catch {
+    if (row.role === 'SCHOOL' && row.boundSchools?.length) {
+      grantsForm.grantRows = [{
+        dimensionCode: 'school',
+        valuesText: row.boundSchools.map((s) => s.schId).join(', '),
+      }]
+    } else {
+      grantsForm.grantRows = [{ dimensionCode: '', valuesText: '' }]
+    }
+  }
+  grantsVisible.value = true
 }
 
-async function submitSchools() {
-  const schIds = parseSchIds(schoolsForm.schIdsText)
-  if (!schIds.length) {
-    ElMessage.warning('至少绑定一所学校')
+async function submitGrants() {
+  const grants = buildGrantsPayload(grantsForm.grantRows)
+  if (grantsForm.role === 'SCHOOL' && !grants.school?.length) {
+    ElMessage.warning('渠道账户至少配置 school 维度的一个值')
     return
   }
   saving.value = true
   try {
-    await replaceSchools(schoolsForm.userId, { schIds })
-    ElMessage.success('学校绑定已更新')
-    schoolsVisible.value = false
+    await putUserDataGrants(grantsForm.userId, grants)
+    await putUserTableGrants(grantsForm.userId, grantsForm.tableNames)
+    await syncSchoolLegacy(grantsForm.userId, grants, grantsForm.role)
+    ElMessage.success('数据授权已更新')
+    grantsVisible.value = false
     await loadList()
   } finally {
     saving.value = false
@@ -375,5 +531,15 @@ function logout() {
   margin: 0 0 12px;
   color: #909399;
   font-size: 13px;
+  line-height: 1.5;
+}
+.grant-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.grant-block {
+  width: 100%;
 }
 </style>

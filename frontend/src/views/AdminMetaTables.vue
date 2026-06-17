@@ -80,8 +80,42 @@
         <el-form-item label="粒度">
           <el-input v-model="editForm.grain" placeholder="如 一人一项目一次打卡一条记录" />
         </el-form-item>
-        <el-form-item label="学校字段">
-          <el-input v-model="editForm.schIdColumn" placeholder="默认 sch_id" />
+        <el-form-item label="维度绑定">
+          <div class="bindings">
+            <div v-for="(b, idx) in editForm.scopeBindings" :key="idx" class="binding-row">
+              <el-select
+                v-model="b.dimensionCode"
+                placeholder="维度"
+                style="width: 140px"
+                filterable
+              >
+                <el-option
+                  v-for="d in scopeDimensions"
+                  :key="d.code"
+                  :label="`${d.display_name} (${d.code})`"
+                  :value="d.code"
+                />
+              </el-select>
+              <el-select
+                v-model="b.columnName"
+                placeholder="物理列"
+                style="flex: 1"
+                filterable
+                allow-create
+                default-first-option
+              >
+                <el-option
+                  v-for="c in tableColumns"
+                  :key="c.columnName"
+                  :label="c.columnName"
+                  :value="c.columnName"
+                />
+              </el-select>
+              <el-button link type="danger" @click="editForm.scopeBindings.splice(idx, 1)">删除</el-button>
+            </div>
+            <el-button link type="primary" @click="addBindingRow">添加绑定</el-button>
+          </div>
+          <p class="field-hint">多维度绑列后，问数时按 grant 对各列 IN 过滤并 AND 组合。</p>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -100,11 +134,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchMe } from '../api/auth'
 import MetaAdminNav from '../components/MetaAdminNav.vue'
 import {
+  listMetaColumns,
   listMetaTables,
   rebuildMetaIndex,
   refreshMetaTable,
   updateMetaTable,
 } from '../api/meta'
+import { getTableScopeBindings, listScopeDimensions, putTableScopeBindings } from '../api/scope'
 
 const router = useRouter()
 const loading = ref(false)
@@ -112,6 +148,8 @@ const saving = ref(false)
 const rebuilding = ref(false)
 const refreshingId = ref(null)
 const tables = ref([])
+const scopeDimensions = ref([])
+const tableColumns = ref([])
 
 const editVisible = ref(false)
 const editForm = reactive({
@@ -122,8 +160,8 @@ const editForm = reactive({
   tableRole: '',
   bizDomain: '',
   grain: '',
-  schIdColumn: 'sch_id',
   status: 1,
+  scopeBindings: [],
 })
 
 function formatTime(iso) {
@@ -145,11 +183,24 @@ async function ensureMetaManager() {
 onMounted(async () => {
   try {
     if (!(await ensureMetaManager())) return
-    await loadList()
+    await Promise.all([loadList(), loadScopeDimensions()])
   } catch {
     router.push('/login')
   }
 })
+
+async function loadScopeDimensions() {
+  try {
+    const res = await listScopeDimensions()
+    scopeDimensions.value = res.items || []
+  } catch {
+    scopeDimensions.value = []
+  }
+}
+
+function addBindingRow() {
+  editForm.scopeBindings.push({ dimensionCode: '', columnName: '' })
+}
 
 async function loadList() {
   loading.value = true
@@ -161,7 +212,7 @@ async function loadList() {
   }
 }
 
-function openEdit(row) {
+async function openEdit(row) {
   Object.assign(editForm, {
     id: row.id,
     tableName: row.tableName,
@@ -170,22 +221,48 @@ function openEdit(row) {
     tableRole: row.tableRole || '',
     bizDomain: row.bizDomain || '',
     grain: row.grain || '',
-    schIdColumn: row.schIdColumn || 'sch_id',
     status: row.status,
+    scopeBindings: [],
   })
+  try {
+    const [colsRes, bindRes] = await Promise.all([
+      listMetaColumns(row.id),
+      getTableScopeBindings(row.id),
+    ])
+    tableColumns.value = colsRes.items || []
+    const bindings = bindRes.items || []
+    if (bindings.length) {
+      editForm.scopeBindings = bindings.map((b) => ({
+        dimensionCode: b.dimensionCode,
+        columnName: b.columnName,
+      }))
+    } else if (row.schIdColumn) {
+      editForm.scopeBindings = [{ dimensionCode: 'school', columnName: row.schIdColumn }]
+    }
+  } catch {
+    tableColumns.value = []
+    if (row.schIdColumn) {
+      editForm.scopeBindings = [{ dimensionCode: 'school', columnName: row.schIdColumn }]
+    }
+  }
   editVisible.value = true
 }
 
 async function submitEdit() {
+  const bindings = editForm.scopeBindings
+    .filter((b) => b.dimensionCode && b.columnName)
+    .map((b) => ({ dimensionCode: b.dimensionCode, columnName: b.columnName.trim() }))
   saving.value = true
   try {
+    const schoolBinding = bindings.find((b) => b.dimensionCode === 'school')
     await updateMetaTable(editForm.id, {
       tableRole: editForm.tableRole || null,
       bizDomain: editForm.bizDomain.trim() || null,
       descriptionManual: editForm.descriptionManual.trim() || null,
       grain: editForm.grain.trim() || null,
-      schIdColumn: editForm.schIdColumn.trim() || 'sch_id',
+      schIdColumn: schoolBinding?.columnName || null,
     })
+    await putTableScopeBindings(editForm.id, bindings)
     ElMessage.success('已保存')
     editVisible.value = false
     await loadList()
@@ -282,5 +359,20 @@ function logout() {
   max-width: 1200px;
   margin: 24px auto;
   padding: 0 16px;
+}
+.bindings {
+  width: 100%;
+}
+.binding-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.field-hint {
+  margin: 8px 0 0;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
 }
 </style>

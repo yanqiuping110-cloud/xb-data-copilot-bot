@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <h2>小奔问数</h2>
+      <h2>智能问数</h2>
       <el-form :model="form" @submit.prevent="onSubmit">
         <el-form-item label="用户名">
           <el-input v-model="form.username" autocomplete="username" />

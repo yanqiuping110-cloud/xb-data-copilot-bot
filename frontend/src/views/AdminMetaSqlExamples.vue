@@ -45,7 +45,7 @@
             <el-form-item label="角色范围">
               <el-select v-model="form.roleScope" clearable placeholder="全部" style="width: 100%">
                 <el-option label="全部" :value="null" />
-                <el-option label="学校" value="SCHOOL" />
+                <el-option label="渠道" value="SCHOOL" />
                 <el-option label="运营" value="OPERATOR" />
                 <el-option label="超管" value="ADMIN" />
               </el-select>

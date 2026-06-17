@@ -1,7 +1,7 @@
 <template>
   <div class="layout">
     <header class="header">
-      <span class="title">小奔问数</span>
+      <span class="title">智能问数</span>
       <div class="user-area">
         <span v-if="user">{{ user.username }}（{{ user.role }}）</span>
         <el-button link type="primary" @click="logout">退出</el-button>

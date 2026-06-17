@@ -80,6 +80,12 @@ const routes = [
     component: () => import('../views/AdminBadcases.vue'),
     meta: { requiresMetaManager: true },
   },
+  {
+    path: '/admin/meta/scope',
+    name: 'AdminMetaScope',
+    component: () => import('../views/AdminMetaScope.vue'),
+    meta: { requiresAdmin: true },
+  },
 ]
 
 const router = createRouter({

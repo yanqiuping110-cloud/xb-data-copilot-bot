@@ -38,7 +38,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging(debug=settings.app_debug)
     app = FastAPI(
-        title="小奔问数 Data Copilot",
+        title="Data Copilot",
         version="0.1.0",
         lifespan=lifespan,
     )

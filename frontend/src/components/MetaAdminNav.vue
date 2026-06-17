@@ -5,6 +5,7 @@
     <el-menu-item index="/admin/meta/field-values">字段取值</el-menu-item>
     <el-menu-item index="/admin/meta/metrics">指标</el-menu-item>
     <el-menu-item index="/admin/meta/sql-examples">L1 样例</el-menu-item>
+    <el-menu-item v-if="showScope" index="/admin/meta/scope">数据范围</el-menu-item>
     <el-menu-item index="/admin/meta/badcases">Badcase</el-menu-item>
     <el-menu-item v-if="showGitRepos" index="/admin/code/repos">Git 仓库</el-menu-item>
   </el-menu>
@@ -19,6 +20,7 @@ import { fetchMe } from '../api/auth'
 const route = useRoute()
 const userRole = ref(localStorage.getItem('userRole') || '')
 const showGitRepos = computed(() => userRole.value === 'ADMIN')
+const showScope = computed(() => userRole.value === 'ADMIN')
 
 const active = computed(() => {
   const p = route.path

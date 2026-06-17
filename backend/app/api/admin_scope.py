@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import UserContext
-from app.core.security import require_admin
+from app.core.security import require_admin, require_meta_manager
 from app.db.copilot import get_copilot_session
 
 router = APIRouter(tags=["admin-scope"])
@@ -53,7 +53,7 @@ class ScopeBindingBody(BaseModel):
 
 @router.get("/api/v1/admin/meta/scope-dimensions")
 async def list_scope_dimensions(
-    _: Annotated[UserContext, Depends(require_admin)],
+    _: Annotated[UserContext, Depends(require_meta_manager)],
     session: Annotated[AsyncSession, Depends(get_copilot_session)],
 ):
     """列出已注册范围维度。"""
@@ -170,6 +170,36 @@ async def get_user_grants(
     }
 
 
+@router.get("/api/v1/admin/meta/column-deny")
+async def list_column_deny(
+    _: Annotated[UserContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_copilot_session)],
+):
+    """列出全局与用户级列 deny 规则。"""
+    result = await session.execute(
+        text(
+            """
+            SELECT id, user_id, table_name, column_name, reason
+            FROM copilot_column_deny
+            WHERE deleted = 0
+            ORDER BY table_name, column_name
+            """
+        ),
+    )
+    return {
+        "items": [
+            {
+                "id": row["id"],
+                "userId": row["user_id"],
+                "tableName": row["table_name"],
+                "columnName": row["column_name"],
+                "reason": row["reason"],
+            }
+            for row in result.mappings()
+        ]
+    }
+
+
 @router.post("/api/v1/admin/meta/column-deny")
 async def add_column_deny(
     body: ColumnDenyBody,
@@ -190,11 +220,37 @@ async def add_column_deny(
     return {"ok": True}
 
 
+@router.get("/api/v1/admin/meta/tables/{table_id}/scope-bindings")
+async def get_table_scope_bindings(
+    table_id: int,
+    _: Annotated[UserContext, Depends(require_meta_manager)],
+    session: Annotated[AsyncSession, Depends(get_copilot_session)],
+):
+    """查询表的维度列绑定。"""
+    result = await session.execute(
+        text(
+            """
+            SELECT dimension_code, column_name
+            FROM copilot_table_scope_binding
+            WHERE table_id = :tid AND deleted = 0
+            ORDER BY dimension_code
+            """
+        ),
+        {"tid": table_id},
+    )
+    return {
+        "items": [
+            {"dimensionCode": row["dimension_code"], "columnName": row["column_name"]}
+            for row in result.mappings()
+        ]
+    }
+
+
 @router.put("/api/v1/admin/meta/tables/{table_id}/scope-bindings")
 async def put_table_scope_bindings(
     table_id: int,
     bindings: list[ScopeBindingBody],
-    _: Annotated[UserContext, Depends(require_admin)],
+    _: Annotated[UserContext, Depends(require_meta_manager)],
     session: Annotated[AsyncSession, Depends(get_copilot_session)],
 ):
     """覆盖表的维度列绑定。"""
