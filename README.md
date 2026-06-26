@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/showcase.png" alt="Data Copilot 智能问数平台 — 自然语言查数、自动图表与数据分析报告" width="920"/>
+</p>
+
 # Data Copilot · 企业级智能问数平台
 
 > **让业务人员用自然语言查数据，把固定报表开发周期从「周」缩短到「分钟」。**
