@@ -246,6 +246,8 @@ class SessionService:
                     "latency_ms": row.get("latency_ms_total"),
                     "assembly_mode": snapshot.get("assembly_mode"),
                     "intermediate_results": snapshot.get("intermediate_results"),
+                    "chart_spec": snapshot.get("chart_spec"),
+                    "visualization_intent": snapshot.get("visualization_intent"),
                 }
             )
         return messages

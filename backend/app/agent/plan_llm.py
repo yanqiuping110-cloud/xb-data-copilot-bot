@@ -10,6 +10,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.agent.chart_builder import normalize_visualization_intent
 from app.agent.llm_sql import build_llm
 from config.settings import Settings
 
@@ -126,6 +127,9 @@ def _normalize_plan(raw: dict[str, Any]) -> dict[str, Any]:
         plan["assembly_mode"] = assembly_mode
     if join_key:
         plan["join_key"] = join_key
+    vis_raw = raw.get("visualization")
+    if vis_raw is not None:
+        plan["visualization"] = normalize_visualization_intent(vis_raw)
     return plan
 
 
@@ -171,6 +175,16 @@ async def generate_plan_from_llm(
         "· 问句含多个指标（如打卡人数 + 多个项目运动个数）→ metrics 与每步 goal 须全部列出，"
         "SQL 阶段需 JOIN/过滤项目维度，禁止仅用 SUM(sport_value) 一个总数代替分项\n"
         "· 复杂多维但一条 SQL 可完成 → multi_sql=false, complexity=high, needs_tool 探索\n"
+        "- visualization: 图表展示意图（必填）\n"
+        "  · enabled: boolean，是否尝试生成图表（明细/列表/单值汇总 → false）\n"
+        "  · user_explicit: boolean，用户是否明确要求图表/趋势/占比\n"
+        "  · preferred_types: 数组，从 line|bar|column|pie|area|scatter|combo|none 选，按优先级\n"
+        "  · reason: 中文简述判定依据\n"
+        "  · fallback_to_table: true（不可图表时仍返回表格）\n"
+        "  · 趋势/每日/按月 → enabled=true, preferred_types=[line,area]\n"
+        "  · 对比/排名/各项目 → preferred_types=[bar,column]\n"
+        "  · 占比/构成 → preferred_types=[pie,bar]\n"
+        "  · 明细/列表 → enabled=false\n"
     )
     user_parts = [
         f"用户问句：{question}",
@@ -196,6 +210,9 @@ async def generate_plan_from_llm(
             '"metrics":["打卡人数","跳绳运动个数","跑步运动个数"],'
             '"filter_hint":{"activity_id":5780,"project_names":["跳绳","跑步"]},'
             '"needs_tool":["describe_table","list_relations"]}],'
+            '"visualization":{"enabled":true,"user_explicit":false,'
+            '"preferred_types":["line","bar"],"reason":"多实体按日对比",'
+            '"fallback_to_table":true},'
             '"sources":["meta:recall"]}',
         ]
     )

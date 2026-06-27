@@ -41,6 +41,7 @@ NODE_LABELS: dict[str, str] = {
     "apply_policy": "应用权限策略",
     "execute_sql": "执行查询",
     "verify_answer": "语义验证",
+    "build_chart": "生成图表",
     "format_answer": "生成回答",
     "tool_search_code_artifacts": "工具·代码检索",
     "tool_get_code_artifact": "工具·代码片段",
@@ -131,6 +132,12 @@ def summarize_state_update(update: dict[str, Any] | None) -> dict[str, Any]:
                 "complexity": value.get("complexity"),
                 "intent": value.get("intent"),
                 "step_count": len(value.get("steps") or []),
+                "visualization": value.get("visualization"),
+            }
+        elif key == "chart_spec" and isinstance(value, dict):
+            summary[key] = {
+                "chart_type": value.get("chart_type"),
+                "status": value.get("status"),
             }
         elif key == "tool_observations" and isinstance(value, list):
             summary[key] = [{"tool": o.get("tool")} for o in value[:8]]

@@ -18,6 +18,7 @@ from app.agent.plan_compare import (
     plan_requires_multi_sql,
 )
 from app.agent.nodes import _cfg, _span
+from app.agent.chart_builder import infer_visualization_from_question, normalize_visualization_intent
 from app.agent.plan_llm import generate_plan_from_llm
 from app.agent.state import AskGraphState
 from app.ask.example_ranker import rank_curated_examples_for_prompt
@@ -92,6 +93,15 @@ async def _best_l1_match(
     return score, sql
 
 
+def _ensure_plan_visualization(plan: dict[str, Any], question: str) -> dict[str, Any]:
+    """补齐 plan.visualization；无 LLM 输出时用问句规则推断。"""
+    if not plan.get("visualization"):
+        plan["visualization"] = infer_visualization_from_question(question)
+    else:
+        plan["visualization"] = normalize_visualization_intent(plan["visualization"])
+    return plan
+
+
 async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
     """
     问句规划：LLM 判定复杂度、multi_sql、步骤分解。
@@ -105,8 +115,9 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
     merged: MergedRecallContext | None = state.get("merged_recall")
 
     if not settings.agent_plan_enabled:
+        intent = infer_visualization_from_question(question)
         await _span(config, "plan_question", t0, "degraded", {"skipped": True, "reason": "disabled"})
-        return {"plan_skipped": True, "plan": None}
+        return {"plan_skipped": True, "plan": None, "visualization_intent": intent}
 
     l1_score, l1_sql = await _best_l1_match(question, c["ctx"], c["copilot_session"], settings)
     recall_summary = _seed_recall_summary(merged)
@@ -122,6 +133,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         plan = _fallback_plan()
 
     plan = enrich_sql_steps_from_reference_sql(plan, l1_sql)
+    plan = _ensure_plan_visualization(plan, question)
 
     sql_exec_count = len(get_sql_execution_steps(plan))
     multi_sql = plan_requires_multi_sql(plan)
@@ -140,7 +152,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
                 "plan": plan,
             },
         )
-        return {"plan_skipped": True, "plan": plan}
+        return {"plan_skipped": True, "plan": plan, "visualization_intent": plan.get("visualization")}
 
     await _span(
         config,
@@ -162,6 +174,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
     return {
         "plan_skipped": False,
         "plan": plan,
+        "visualization_intent": plan.get("visualization"),
         "tool_observations": [],
         "agent_steps": [],
         "agent_step_count": 0,

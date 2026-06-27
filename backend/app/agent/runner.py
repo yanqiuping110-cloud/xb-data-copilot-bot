@@ -33,6 +33,7 @@ from app.policy.role_policy import PolicyError, require_school_scope
 from app.policy.effective_policy import EffectivePolicy, load_effective_policy
 from app.policy.scope_injector import apply_scope_to_sql, validate_scope_literals
 from app.schemas.ask import AskRequest, AskResponse, IntermediateSqlResult
+from app.schemas.chart import ChartSpec
 from app.sql.whitelist import refresh_allowed_tables
 from config.settings import Settings
 
@@ -392,6 +393,8 @@ async def _finalize_ask_run(
             final_state.get("intermediate_results")
         ),
         assembly_mode=final_state.get("assembly_mode"),
+        chart_spec=final_state.get("chart_spec"),
+        visualization_intent=final_state.get("visualization_intent"),
     )
 
     trace_log = collector.to_json(
@@ -462,6 +465,8 @@ async def _finalize_ask_run(
             final_state.get("intermediate_results"),
             include_sql=ctx.role == UserRole.ADMIN,
         ),
+        chart_spec=_chart_spec_from_state(final_state),
+        visualization_intent=final_state.get("visualization_intent"),
     )
 
 
@@ -634,6 +639,16 @@ def _intermediate_preview(intermediate: list | None) -> list[dict] | None:
         }
         for ir in intermediate[-3:]
     ]
+
+
+def _chart_spec_from_state(state: AskGraphState) -> ChartSpec | None:
+    raw = state.get("chart_spec")
+    if not raw:
+        return None
+    try:
+        return ChartSpec.model_validate(raw)
+    except Exception:
+        return None
 
 
 def _serialize_intermediate_for_response(

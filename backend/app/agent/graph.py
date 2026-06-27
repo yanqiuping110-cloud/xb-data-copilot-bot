@@ -38,7 +38,7 @@ from app.agent.sql_step_nodes import (
     route_after_build_agent_context,
     route_after_execute_plan_sql_step,
 )
-from app.agent.verify_nodes import route_after_verify, verify_answer
+from app.agent.chart_nodes import build_chart
 from app.agent.recall_nodes import (
     build_llm_context,
     extract_keywords_node,
@@ -50,6 +50,7 @@ from app.agent.recall_nodes import (
     recall_metrics,
     recall_tables,
 )
+from app.agent.verify_nodes import route_after_verify, verify_answer
 from config.settings import get_settings
 from app.agent.state import AskGraphState
 
@@ -61,36 +62,42 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
 
     graph = StateGraph(AskGraphState)
 
-    graph.add_node("normalize_question", normalize_question)
-    graph.add_node("load_session_memory", load_session_memory)
-    graph.add_node("load_user_preference", load_user_preference)
-    graph.add_node("resolve_references", resolve_references_node)
-    graph.add_node("extract_keywords", extract_keywords_node)
-    graph.add_node("do_recall_tables", recall_tables)
+    # --- 预处理与记忆 ---
+    graph.add_node("normalize_question", normalize_question)  # 清洗问句、截断长度
+    graph.add_node("load_session_memory", load_session_memory)  # 加载 L1 会话短期记忆
+    graph.add_node("load_user_preference", load_user_preference)  # 加载 L2 用户显式偏好
+    graph.add_node("resolve_references", resolve_references_node)  # 指代消解（"它/上次"等），拼装 memory prompt
+    # --- 多阶段召回 ---
+    graph.add_node("extract_keywords", extract_keywords_node)  # 从问句抽取关键词，供混合召回
+    graph.add_node("do_recall_tables", recall_tables)  # 表级向量/关键词召回
     if recall_columns_enabled:
         from app.agent.recall_nodes import recall_columns
 
-        graph.add_node("do_recall_columns", recall_columns)
-    graph.add_node("do_recall_metrics", recall_metrics)
-    graph.add_node("do_recall_field_values", recall_field_values)
-    graph.add_node("merge_retrieved_info", merge_retrieved_info_node)
-    graph.add_node("filter_tables", filter_tables_node)
-    graph.add_node("filter_columns", filter_columns_node)
-    graph.add_node("filter_metrics", filter_metrics_node)
-    graph.add_node("build_llm_context", build_llm_context)
-    graph.add_node("plan_question", plan_question)
-    graph.add_node("agent_loop", agent_loop)
-    graph.add_node("build_agent_context", build_agent_context)
-    graph.add_node("generate_sql", generate_sql)
-    graph.add_node("generate_sql_step", generate_sql_step)
-    graph.add_node("execute_plan_sql_step", execute_plan_sql_step)
-    graph.add_node("assemble_result", assemble_result)
-    graph.add_node("validate_sql", validate_sql_node)
-    graph.add_node("correct_sql", correct_sql)
-    graph.add_node("apply_policy", apply_policy)
-    graph.add_node("execute_sql", execute_sql)
-    graph.add_node("verify_answer", verify_answer)
-    graph.add_node("format_answer", format_answer)
+        graph.add_node("do_recall_columns", recall_columns)  # 字段召回（限定在表级候选内）
+    graph.add_node("do_recall_metrics", recall_metrics)  # 指标向量/关键词召回
+    graph.add_node("do_recall_field_values", recall_field_values)  # 字段取值全文/关键词召回
+    graph.add_node("merge_retrieved_info", merge_retrieved_info_node)  # 合并多路召回（含代码 artifact）
+    graph.add_node("filter_tables", filter_tables_node)  # 筛选候选表并做关系扩展
+    graph.add_node("filter_columns", filter_columns_node)  # 在候选表内筛选 Prompt 字段
+    graph.add_node("filter_metrics", filter_metrics_node)  # 保留 Top 指标
+    graph.add_node("build_llm_context", build_llm_context)  # 拼装结构化 Prompt 上下文
+    # --- 规划与 Agent ---
+    graph.add_node("plan_question", plan_question)  # LLM 判定复杂度并分解步骤，决定快/慢路径
+    graph.add_node("agent_loop", agent_loop)  # ReAct 工具循环（查表/列/指标等）
+    graph.add_node("build_agent_context", build_agent_context)  # 召回 + plan + 工具观察拼装 Agent Prompt
+    # --- SQL 生成与分步执行 ---
+    graph.add_node("generate_sql", generate_sql)  # 快路径：LLM 一次性生成 SQL
+    graph.add_node("generate_sql_step", generate_sql_step)  # 按 plan 生成分步 CTE SQL
+    graph.add_node("execute_plan_sql_step", execute_plan_sql_step)  # 按 plan 单步生成、校验并执行 SQL
+    graph.add_node("assemble_result", assemble_result)  # 将分步 intermediate_results 组装为最终结果
+    # --- 校验、执行与答复 ---
+    graph.add_node("validate_sql", validate_sql_node)  # SELECT/表白名单/LIMIT/列名校验
+    graph.add_node("correct_sql", correct_sql)  # 校验或执行失败时带错误信息重生成 SQL
+    graph.add_node("apply_policy", apply_policy)  # 注入 sch_id 与 DataScope 权限条件
+    graph.add_node("execute_sql", execute_sql)  # 在业务只读库执行 SQL
+    graph.add_node("verify_answer", verify_answer)  # 执行后语义验证（问句与结果是否匹配）
+    graph.add_node("build_chart", build_chart)  # 根据结果生成图表规格
+    graph.add_node("format_answer", format_answer)  # 生成一句话回答或拒答文案
 
     graph.add_edge(START, "normalize_question")
     graph.add_edge("normalize_question", "load_session_memory")
@@ -178,10 +185,12 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
         "verify_answer",
         route_after_verify,
         {
-            "format_answer": "format_answer",
+            "build_chart": "build_chart",
             "correct_sql": "correct_sql",
+            "format_answer": "format_answer",
         },
     )
+    graph.add_edge("build_chart", "format_answer")
     graph.add_edge("format_answer", END)
 
     return graph.compile()

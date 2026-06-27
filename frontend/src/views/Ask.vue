@@ -93,7 +93,7 @@
       <div class="chat-area">
         <div class="chat-shell">
           <div ref="messagesEl" class="messages" @scroll="onMessagesScroll">
-            <div v-for="(msg, idx) in messages" :key="idx" :class="['msg', msg.role]">
+            <div v-for="(msg, idx) in messages" :key="messageKey(msg, idx)" :class="['msg', msg.role]">
               <!-- 用户消息 -->
               <div v-if="msg.role === 'user'" class="bubble user-bubble">{{ msg.text }}</div>
 
@@ -154,27 +154,13 @@
                   <pre class="sql-block">{{ msg.result.sql }}</pre>
                 </template>
 
-                <template v-if="msg.result?.columns?.length && msg.result?.rows?.length">
-                  <div class="section-label">查询结果</div>
-                  <div class="table-wrap">
-                    <el-table
-                      :data="resultTableRows(msg.result)"
-                      border
-                      stripe
-                      size="small"
-                      max-height="320"
-                    >
-                      <el-table-column
-                        v-for="col in msg.result.columns"
-                        :key="col"
-                        :prop="col"
-                        :label="col"
-                        min-width="100"
-                        show-overflow-tooltip
-                      />
-                    </el-table>
-                  </div>
-                </template>
+                <ResultPanel
+                  v-if="msg.result?.columns?.length && msg.result?.rows?.length"
+                  :key="resultPanelKey(msg)"
+                  :columns="msg.result.columns"
+                  :rows="msg.result.rows"
+                  :chart-spec="msg.chartSpec"
+                />
 
                 <div v-if="msg.meta" class="meta">{{ msg.meta }}</div>
 
@@ -276,6 +262,7 @@ import {
   fetchSessions,
   updatePreferences,
 } from '../api/sessions'
+import ResultPanel from '../components/ResultPanel.vue'
 
 const router = useRouter()
 const user = ref(null)
@@ -363,6 +350,23 @@ function buildMeta(m) {
   return parts.length ? parts.join(' · ') : undefined
 }
 
+function messageKey(msg, idx) {
+  if (msg.traceId) return `${sessionId.value}-${msg.traceId}`
+  return `${sessionId.value}-${idx}-${msg.role}`
+}
+
+function resultPanelKey(msg) {
+  return `${sessionId.value}-${msg.traceId || 'no-trace'}`
+}
+
+function notifyChartsResize() {
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+  })
+}
+
 function buildAssistantHistoryMessage(m) {
   const isSuccess = m.status === 'success'
   const isCancelled = m.status === 'cancelled'
@@ -383,6 +387,7 @@ function buildAssistantHistoryMessage(m) {
       columns: m.columns || undefined,
       rows: m.rows || undefined,
     },
+    chartSpec: m.chartSpec || undefined,
     intermediateSteps: mapIntermediateResults(m.intermediateResults),
   }
 }
@@ -431,6 +436,7 @@ async function activateSession(id) {
   }
   await nextTick()
   scrollMessagesToBottom()
+  notifyChartsResize()
 }
 
 async function onNewChat() {
@@ -629,6 +635,7 @@ async function onAsk() {
           columns: res.columns || undefined,
           rows: res.rows || undefined,
         }
+        msg.chartSpec = res.chartSpec || undefined
         msg.intermediateSteps = mapIntermediateResults(res.intermediateResults) || msg.intermediateSteps
         msg.progress?.forEach((step) => {
           step.active = false

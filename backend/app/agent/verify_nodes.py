@@ -265,11 +265,11 @@ async def verify_answer(state: AskGraphState, config: RunnableConfig) -> dict:
 
 def route_after_verify(state: AskGraphState) -> str:
     """
-    验证通过 → format_answer；
+    验证通过 → build_chart → format_answer；
     失败且仍有修正预算 → correct_sql（最多 VERIFY_MAX_CORRECT 次，避免图步数耗尽）。
     """
     if state.get("verify_passed", True):
-        return "format_answer"
+        return "build_chart"
     correct_count = state.get("correct_sql_count") or 0
     verify_attempts = state.get("verify_attempts") or 0
     settings = get_settings()

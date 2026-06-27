@@ -32,6 +32,13 @@ def test_route_after_verify_failed_goes_correct_sql():
     assert route_after_verify(state) == "correct_sql"
 
 
+def test_route_after_verify_passed_goes_build_chart():
+    from app.agent.state import AskGraphState
+
+    state: AskGraphState = {"verify_passed": True}
+    assert route_after_verify(state) == "build_chart"
+
+
 def test_boost_tables_by_code_artifacts():
     tables = [
         RecalledTable(

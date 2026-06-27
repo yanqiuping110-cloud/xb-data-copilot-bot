@@ -3,6 +3,7 @@ POST /api/v1/ask 请求与响应模型。
 """
 
 from app.schemas.base import CamelModel
+from app.schemas.chart import ChartSpec
 
 
 class AskOptions(CamelModel):
@@ -60,3 +61,5 @@ class AskResponse(CamelModel):
     error_message: str | None = None
     assembly_mode: str | None = None
     intermediate_results: list[IntermediateSqlResult] | None = None
+    chart_spec: ChartSpec | None = None
+    visualization_intent: dict | None = None

@@ -2002,7 +2002,7 @@ app/policy/effective_policy.py
 - **Git 业务仓库同步 + 代码知识图谱深化**（更多语言/parser、自动 suggestion 写 relation/metric）  
 - **SSE 流式**问数进度（对标 shopkeeper `/api/query`）  
 - Langfuse / OpenTelemetry  
-- 图表（AntV）  
+- **图表展示**（AntV / ECharts；详见 [CHART_VISUALIZATION_PLAN.md](./CHART_VISUALIZATION_PLAN.md)）  
 - 可选 Qdrant 替代 ES 向量（大规模字段时）  
 - **P4 向量 episodic Memory**（全量对话 embedding 召回；须独立评测、合规与 **Prompt Injection** 评审）  
 - RAGFlow 文档问答与问数并列（仍与 meta 库解耦）  

@@ -487,6 +487,17 @@ async def format_answer(state: AskGraphState, config: RunnableConfig) -> dict:
         if llm_answer:
             answer = llm_answer
 
+    chart_spec = state.get("chart_spec") or {}
+    vis_intent = state.get("visualization_intent") or {}
+    if (
+        chart_spec.get("status") == "rejected"
+        and vis_intent.get("user_explicit")
+        and chart_spec.get("reject_reason")
+    ):
+        note = f"（{chart_spec['reject_reason']}）"
+        if note not in answer:
+            answer = f"{answer}\n\n{note}"
+
     await _span(
         config,
         "format_answer",

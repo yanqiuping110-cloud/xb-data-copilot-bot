@@ -73,3 +73,6 @@ class AskGraphState(TypedDict, total=False):
     verify_attempts: int
     # 第 11～12 周代码召回
     recall_code_artifacts: list
+    # 图表展示
+    visualization_intent: dict | None
+    chart_spec: dict | None

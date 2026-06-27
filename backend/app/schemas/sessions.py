@@ -4,6 +4,7 @@
 
 from app.schemas.ask import IntermediateSqlResult
 from app.schemas.base import CamelModel
+from app.schemas.chart import ChartSpec
 
 
 class SessionItem(CamelModel):
@@ -45,6 +46,8 @@ class SessionMessageItem(CamelModel):
     created_at: str | None = None
     assembly_mode: str | None = None
     intermediate_results: list[IntermediateSqlResult] | None = None
+    chart_spec: ChartSpec | None = None
+    visualization_intent: dict | None = None
 
 
 class SessionMessagesResponse(CamelModel):

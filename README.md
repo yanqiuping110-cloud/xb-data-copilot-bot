@@ -343,6 +343,7 @@ data-copilot-bot/
 │       └── api/            # 后端 API 封装
 └── docs/
     ├── DEVELOPMENT_PLAN.md # 14 周设计与 API 契约
+    ├── CHART_VISUALIZATION_PLAN.md  # 图表展示功能详细开发计划
     ├── PROGRESS.md         # 模块完成度
     ├── EVAL_QUESTIONS.md   # 评测问句（含 inj-* 注入子集）
     └── PROMPT_SECURITY.md  # Prompt Injection 威胁模型与运营规范
@@ -512,6 +513,7 @@ erDiagram
 | 文档 | 内容 |
 |------|------|
 | [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) | 完整架构、14 周里程碑、§11.6 DataScope、§11.9 Prompt Injection |
+| [docs/CHART_VISUALIZATION_PLAN.md](docs/CHART_VISUALIZATION_PLAN.md) | 图表展示：Plan 意图识别、chartSpec、历史回放、分 Sprint 交付 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 模块完成度与联调清单 |
 | [docs/EVAL_QUESTIONS.md](docs/EVAL_QUESTIONS.md) | 评测问句（含 inj-* 注入子集） |
 | [docs/PROMPT_SECURITY.md](docs/PROMPT_SECURITY.md) | 威胁模型、定界符约定、运营规范 |

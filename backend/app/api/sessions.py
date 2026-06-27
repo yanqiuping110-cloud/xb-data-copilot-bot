@@ -12,6 +12,7 @@ from app.core.security import get_current_user
 from app.db.copilot import get_copilot_session
 from app.ask.chat_client import sanitize_chat_sql
 from app.memory.session_service import SessionError, SessionService
+from app.schemas.chart import ChartSpec
 from app.schemas.sessions import (
     SessionCreateResponse,
     SessionItem,
@@ -119,6 +120,8 @@ async def get_session_messages(
             created_at=r.get("created_at"),
             assembly_mode=r.get("assembly_mode"),
             intermediate_results=r.get("intermediate_results"),
+            chart_spec=ChartSpec.model_validate(r["chart_spec"]) if r.get("chart_spec") else None,
+            visualization_intent=r.get("visualization_intent"),
         )
         for r in rows
     ]
