@@ -44,3 +44,5 @@ htmlcov/
 
 # 个人面试准备（不提交）
 interview/
+resume_extract.txt
+.codegraph/daemon.pid
