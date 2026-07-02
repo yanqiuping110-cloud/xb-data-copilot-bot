@@ -10,6 +10,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.agent.context_builder import _normalize_meta_table_name, _pick_candidate_tables
 from app.agent.llm_sql import build_llm
 from app.agent.plan_llm import _extract_json
 from app.security.prompt_boundary import build_agent_system_preamble, wrap_untrusted
@@ -50,6 +51,72 @@ def _format_observations(observations: list[dict]) -> str:
     return "\n".join(lines) if lines else "（尚无观察）"
 
 
+def _successful_described_tables(observations: list[dict]) -> set[str]:
+    tables: set[str] = set()
+    for obs in observations:
+        if obs.get("tool") != "describe_table":
+            continue
+        result = obs.get("result") or {}
+        if result.get("error"):
+            continue
+        table = result.get("table") or (obs.get("args") or {}).get("table")
+        if table:
+            tables.add(str(table).lower())
+        else:
+            tables.add("__any__")
+    return tables
+
+
+def _describe_table_done(default_tables: list[str], observations: list[dict]) -> bool:
+    """describe_table 完成：已成功描述候选表，或已穷尽候选。"""
+    if "__any__" in _successful_described_tables(observations):
+        return True
+    candidates = _pick_candidate_tables(default_tables, limit=5)
+    if not candidates:
+        return bool(_successful_described_tables(observations))
+    successful = _successful_described_tables(observations)
+    if successful.intersection(candidates):
+        return True
+    tried: set[str] = set()
+    for obs in observations:
+        if obs.get("tool") != "describe_table":
+            continue
+        args = obs.get("args") or {}
+        result = obs.get("result") or {}
+        table = str(args.get("table") or result.get("table") or "").lower()
+        if table:
+            tried.add(table)
+    return bool(candidates) and tried.issuperset(set(candidates))
+
+
+def _next_describe_table(default_tables: list[str], observations: list[dict]) -> str:
+    candidates = _pick_candidate_tables(default_tables, limit=5)
+    tried: set[str] = set()
+    for obs in observations:
+        if obs.get("tool") != "describe_table":
+            continue
+        args = obs.get("args") or {}
+        result = obs.get("result") or {}
+        table = _normalize_meta_table_name(str(args.get("table") or result.get("table") or ""))
+        if table:
+            tried.add(table)
+    for candidate in candidates:
+        if candidate not in tried:
+            return candidate
+    return candidates[0] if candidates else ""
+
+
+def _tool_done(
+    tool: str,
+    observations: list[dict],
+    *,
+    default_tables: list[str],
+) -> bool:
+    if tool == "describe_table":
+        return _describe_table_done(default_tables, observations)
+    return any(o.get("tool") == tool for o in observations)
+
+
 def _fallback_action(
     plan: dict[str, Any] | None,
     observations: list[dict],
@@ -58,25 +125,51 @@ def _fallback_action(
     question: str,
 ) -> dict[str, Any]:
     """LLM 不可用或解析失败时，按 plan.needs_tool 顺序执行未完成的工具。"""
-    done = {o.get("tool") for o in observations}
     for step in (plan or {}).get("steps") or []:
         for tool in step.get("needs_tool") or []:
-            if tool in done:
+            if _tool_done(tool, observations, default_tables=default_tables):
                 continue
-            return {"action": "tool", "tool": tool, "args": _default_tool_args(tool, default_tables, question)}
+            return {"action": "tool", "tool": tool, "args": _default_tool_args(tool, default_tables, question, observations)}
     return {"action": "finish"}
 
 
-def _default_tool_args(tool: str, tables: list[str], question: str) -> dict[str, Any]:
-    if tool == "describe_table" and tables:
-        return {"table": tables[0]}
-    if tool == "list_relations" and tables:
-        return {"table": tables[0]}
-    if tool == "get_join_path" and len(tables) >= 2:
-        return {"from_table": tables[0], "to_table": tables[1]}
+def _default_tool_args(
+    tool: str,
+    tables: list[str],
+    question: str,
+    observations: list[dict] | None = None,
+) -> dict[str, Any]:
+    observations = observations or []
+    if tool == "describe_table":
+        table = _next_describe_table(tables, observations)
+        if table:
+            return {"table": table}
+    candidates = _pick_candidate_tables(tables, limit=5)
+    if tool == "list_relations" and candidates:
+        return {"table": candidates[0]}
+    if tool == "get_join_path" and len(candidates) >= 2:
+        return {"from_table": candidates[0], "to_table": candidates[1]}
     if tool in ("search_metrics", "search_field_values", "search_sql_examples", "search_code_artifacts"):
         return {"query": question}
     return {}
+
+
+def _sanitize_tool_args(
+    tool: str,
+    args: dict[str, Any],
+    *,
+    default_tables: list[str],
+    observations: list[dict],
+    question: str,
+) -> dict[str, Any]:
+    if tool != "describe_table":
+        return args
+    table = str(args.get("table") or "")
+    norm = _normalize_meta_table_name(table)
+    candidates = _pick_candidate_tables(default_tables, limit=5)
+    if norm and norm in candidates:
+        return {"table": norm}
+    return _default_tool_args(tool, default_tables, question, observations)
 
 
 async def decide_agent_action(
@@ -133,7 +226,15 @@ async def decide_agent_action(
             return fallback
         args = parsed.get("args") if isinstance(parsed.get("args"), dict) else {}
         if not args:
-            args = _default_tool_args(tool, default_tables, question)
+            args = _default_tool_args(tool, default_tables, question, observations)
+        else:
+            args = _sanitize_tool_args(
+                tool,
+                args,
+                default_tables=default_tables,
+                observations=observations,
+                question=question,
+            )
         return {"action": "tool", "tool": tool, "args": args}
     except Exception:
         return fallback

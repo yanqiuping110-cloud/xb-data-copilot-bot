@@ -111,5 +111,6 @@ def test_sql_generation_constraints_include_join_aliases():
     joined = "\n".join(lines)
     assert "短别名" in joined
     assert "禁止裸写字段名" in joined
-    assert "p.project_name" in joined
-    assert "r.sport_value" in joined
+    assert "允许查询的业务表" in joined
+    assert "候选表字段清单" in joined
+    assert "sport_activity_qzs_record" not in joined

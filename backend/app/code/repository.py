@@ -141,6 +141,8 @@ class CodeKnowledgeRepository:
         await self._session.commit()
 
     async def delete_repo(self, repo_id: int) -> None:
+        """逻辑删除仓库并清理其 symbol/edge/artifact 图数据。"""
+        await self.clear_repo_graph(repo_id)
         sql = text("UPDATE copilot_git_repo SET deleted = 1 WHERE id = :id")
         await self._session.execute(sql, {"id": repo_id})
         await self._session.commit()
@@ -439,10 +441,11 @@ class CodeKnowledgeRepository:
     async def list_indexable_artifacts(self) -> list[IndexableCodeArtifactRow]:
         sql = text(
             """
-            SELECT id AS artifact_id, repo_id, artifact_type, title, summary_text,
-                   tables_json, search_text
-            FROM copilot_code_artifact
-            WHERE deleted = 0 AND status = 1 AND search_text IS NOT NULL
+            SELECT a.id AS artifact_id, a.repo_id, a.artifact_type, a.title, a.summary_text,
+                   a.tables_json, a.search_text
+            FROM copilot_code_artifact a
+            INNER JOIN copilot_git_repo r ON r.id = a.repo_id AND r.deleted = 0
+            WHERE a.deleted = 0 AND a.status = 1 AND a.search_text IS NOT NULL
             """
         )
         result = await self._session.execute(sql)

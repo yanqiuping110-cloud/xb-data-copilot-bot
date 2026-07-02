@@ -21,10 +21,13 @@ dependencies = [
     "langchain-core>=0.3,<0.4",
     "langchain-openai>=0.3,<0.4",
     "langgraph>=0.3,<0.4",
-    "elasticsearch[async]>=8.11,<9",
+    "zvec>=0.5.0",
 ]
 
 [project.optional-dependencies]
+legacy-es = [
+    "elasticsearch[async]>=8.11,<9",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",

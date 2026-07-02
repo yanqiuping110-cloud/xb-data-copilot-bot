@@ -12,6 +12,7 @@ from app.ask.example_ranker import rank_curated_examples_for_prompt
 from app.ask.semantic_repository import SemanticRepository
 from app.core.context import UserContext
 from app.retrieval.hybrid import HybridRetriever
+from app.sql.whitelist import get_allowed_tables
 from config.settings import Settings
 
 
@@ -50,7 +51,7 @@ async def search_field_values(
     query: str,
     keywords: list[str] | None = None,
 ) -> dict[str, Any]:
-    """按问句召回字段枚举取值（如 project_id=跳绳）。"""
+    """按问句召回字段枚举取值（依赖 copilot_field_value 索引）。"""
     retriever = HybridRetriever(session, settings)
     try:
         values = await retriever.recall_field_values_only(query, keywords or [])
@@ -88,6 +89,7 @@ async def search_sql_examples(
         examples,
         top_k=settings.curated_example_top_k,
         min_score=0,
+        allowed_tables=get_allowed_tables(),
     )
     return {
         "query": query,
@@ -97,8 +99,8 @@ async def search_sql_examples(
                 "id": ex.id,
                 "pattern": ex.question_pattern,
                 "score": score,
-                "sql_preview": (ex.sql_template or "")[:300],
+                "sql_preview": (ex.sql_text or "")[:300],
             }
-            for ex, score in ranked[:5]
+            for ex, score in ranked
         ],
     }

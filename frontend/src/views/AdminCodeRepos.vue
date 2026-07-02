@@ -13,7 +13,7 @@
       <el-card>
         <div class="toolbar">
           <el-button type="primary" @click="openCreate">新增仓库</el-button>
-          <el-button :loading="rebuilding" @click="onRebuildIndex">重建代码 ES 索引</el-button>
+          <el-button :loading="rebuilding" @click="onRebuildIndex">重建代码检索索引</el-button>
         </div>
 
         <el-table v-loading="loading" :data="repos" border style="margin-top: 16px">
@@ -104,7 +104,7 @@
 </template>
 
 <script setup>
-/** 超管：Git 仓库配置、同步、代码 ES 索引重建（第 11 周） */
+/** 超管：Git 仓库配置、同步、代码检索索引重建（第 11 周） */
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

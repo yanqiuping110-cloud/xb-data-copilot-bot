@@ -10,6 +10,25 @@ from app.ask.semantic_repository import CuratedSqlExample
 from app.core.context import UserContext, UserRole
 
 
+def example_tables_compatible(
+    example: CuratedSqlExample,
+    allowed_tables: frozenset[str] | set[str],
+) -> bool:
+    """
+    样例 meta.tables 须全部落在当前表白名单内；未声明 tables 时不做表级过滤。
+    """
+    if not allowed_tables:
+        return True
+    meta_tables = example.meta.get("tables")
+    if not meta_tables or not isinstance(meta_tables, list):
+        return True
+    names = {str(t).strip().lower() for t in meta_tables if str(t).strip()}
+    if not names:
+        return True
+    allowed = {t.lower() for t in allowed_tables}
+    return names.issubset(allowed)
+
+
 def meta_rules_fully_match(question: str, meta: dict) -> bool:
     """问句是否满足样例 meta 中的 matchAll / matchAny / matchAllGroups 全部规则。"""
     q = question
@@ -86,6 +105,7 @@ def rank_curated_examples_for_prompt(
     *,
     top_k: int,
     min_score: int = 1,
+    allowed_tables: frozenset[str] | set[str] | None = None,
 ) -> list[tuple[CuratedSqlExample, int]]:
     """
     过滤并排序样例，返回 (样例, 得分) 列表。
@@ -93,13 +113,17 @@ def rank_curated_examples_for_prompt(
     Args:
         top_k: 注入 Prompt 的最大条数。
         min_score: 低于此得分的样例丢弃；无命中时可设为 0 以兜底展示通用样例。
+        allowed_tables: 当前问数表白名单；样例 meta.tables 须为其子集才参与排序。
     """
     if top_k <= 0 or not examples:
         return []
 
+    whitelist = allowed_tables or frozenset()
     scored: list[tuple[CuratedSqlExample, int]] = []
     for ex in examples:
         if not is_example_visible_to_user(ex, ctx):
+            continue
+        if whitelist and not example_tables_compatible(ex, whitelist):
             continue
         relevance = score_curated_example(question, ex)
         if relevance < min_score:
@@ -108,3 +132,19 @@ def rank_curated_examples_for_prompt(
 
     scored.sort(key=lambda item: (-item[1], item[0].degrade_priority, item[0].id))
     return scored[:top_k]
+
+
+def format_curated_sql_example_lines(
+    ranked: list[tuple[CuratedSqlExample, int]],
+    *,
+    sql_max_chars: int = 500,
+) -> list[str]:
+    """将 L1 样例格式化为 Prompt 段落行。"""
+    if not ranked:
+        return []
+    lines = ["【相似样例 SQL（仅供参考；表/列以当前白名单与候选字段为准，勿照搬）】"]
+    for ex, relevance in ranked:
+        lines.append(f"问法示例：{ex.question_pattern}（相关度={relevance}）")
+        lines.append(f"SQL：{ex.sql_text[:sql_max_chars]}")
+        lines.append("")
+    return lines

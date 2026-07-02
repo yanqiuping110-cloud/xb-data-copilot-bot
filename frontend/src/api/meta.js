@@ -43,7 +43,7 @@ export function updateMetaColumn(columnId, data) {
   return request.put(`/api/v1/admin/meta/columns/${columnId}`, data)
 }
 
-/** 全量重建 ES 检索索引 */
+/** 全量重建检索索引 */
 export function rebuildMetaIndex() {
   return request.post('/api/v1/admin/meta/rebuild-index')
 }

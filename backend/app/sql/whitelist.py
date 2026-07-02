@@ -11,12 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ask.semantic_repository import SemanticRepository
 from app.meta.repository import MetaRepository
 
-# 无 DB 配置时的兜底（与种子指标一致）
-_FALLBACK_TABLES: frozenset[str] = frozenset(
-    {
-        "sport_activity_qzs_record",
-    }
-)
+# 无 DB 配置时的兜底：须通过 copilot_table_meta 或指标 relevant_tables 配置白名单
+_FALLBACK_TABLES: frozenset[str] = frozenset()
 
 SCH_ID_COLUMN = "sch_id"
 

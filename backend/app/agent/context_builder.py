@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ask.example_ranker import rank_curated_examples_for_prompt
+from app.ask.example_ranker import (
+    format_curated_sql_example_lines,
+    rank_curated_examples_for_prompt,
+)
 from app.ask.semantic_repository import SemanticRepository
 from app.core.context import UserContext
 from app.meta.effective import effective_description
@@ -42,6 +45,34 @@ class MergedRecallContext:
     tables: list[TableMetaRow] = field(default_factory=list)
     table_names: list[str] = field(default_factory=list)
     prompt_columns: dict[str, list[str]] = field(default_factory=dict)
+
+
+def _effective_allowed_table_set(ctx: UserContext) -> frozenset[str]:
+    """当前问数有效表白名单（含 EffectivePolicy 收窄）。"""
+    policy = getattr(ctx, "effective_policy", None)
+    if policy is not None and getattr(policy, "allowed_tables", None):
+        return frozenset(policy.allowed_tables)
+    return get_allowed_tables()
+
+
+async def load_ranked_sql_examples_for_prompt(
+    question: str,
+    ctx: UserContext,
+    copilot_session: AsyncSession,
+    settings: Settings | None = None,
+) -> list[tuple]:
+    """加载 L1 样例并按问句打分、白名单过滤。"""
+    cfg = settings or get_settings()
+    sem_repo = SemanticRepository(copilot_session)
+    examples = await sem_repo.list_sql_examples()
+    return rank_curated_examples_for_prompt(
+        question,
+        ctx,
+        examples,
+        top_k=cfg.curated_example_top_k,
+        min_score=cfg.curated_example_min_score,
+        allowed_tables=_effective_allowed_table_set(ctx),
+    )
 
 
 def _format_sql_literal(value_text: str) -> str:
@@ -174,12 +205,14 @@ def filter_tables(
     """
     allowed = _allowed_table_set()
     table_scores: dict[str, float] = {}
-    es_table_recall = any(t.recall_mode == "es_vector" for t in merged.recalled_tables)
+    vector_table_recall = any(
+        t.recall_mode in ("es_vector", "vector", "vector_hybrid") for t in merged.recalled_tables
+    )
 
     for t in merged.recalled_tables:
         if not _is_allowed_table(t.table_name):
             continue
-        if es_table_recall and t.score < settings.table_recall_score_min:
+        if vector_table_recall and t.score < settings.table_recall_score_min:
             continue
         table_scores[t.table_name] = max(table_scores.get(t.table_name, 0.0), t.score)
 
@@ -344,11 +377,7 @@ async def build_llm_context_text(
     无召回时仍输出表白名单与生成约束。
     """
     meta_repo = MetaRepository(copilot_session)
-    sem_repo = SemanticRepository(copilot_session)
-    allowed = sorted(get_allowed_tables())
     cfg = settings or get_settings()
-    example_top_k = cfg.curated_example_top_k
-    example_min_score = cfg.curated_example_min_score
     policy = getattr(ctx, "effective_policy", None)
 
     parts: list[str] = [
@@ -427,14 +456,7 @@ async def build_llm_context_text(
                     if not col:
                         col_parts.append(col_name)
                         continue
-                    desc = effective_description(col.description_manual, col.column_comment_auto)
-                    item = col.column_name
-                    if desc:
-                        item += f"({desc})"
-                    aliases = parse_alias_json(col.alias_json)
-                    if aliases:
-                        item += f"[{','.join(aliases)}]"
-                    col_parts.append(item)
+                    col_parts.append(format_column_prompt_item(col_name, col))
                 parts.append(f"- {table_name}: {', '.join(col_parts)}")
             parts.append("")
 
@@ -489,20 +511,10 @@ async def build_llm_context_text(
             parts.append(f"- {fv.table_name}.{fv.column_name}：「{label}」→ {fv.value_text}")
         parts.append("")
 
-    examples = await sem_repo.list_sql_examples()
-    ranked = rank_curated_examples_for_prompt(
-        question,
-        ctx,
-        examples,
-        top_k=example_top_k,
-        min_score=example_min_score,
+    ranked = await load_ranked_sql_examples_for_prompt(
+        question, ctx, copilot_session, settings=cfg
     )
-    if ranked:
-        parts.append("【相似样例 SQL（仅供参考，勿照搬若不符合问句）】")
-        for ex, relevance in ranked:
-            parts.append(f"问法示例：{ex.question_pattern}（相关度={relevance}）")
-            parts.append(f"SQL：{ex.sql_text[:500]}")
-            parts.append("")
+    parts.extend(format_curated_sql_example_lines(ranked))
 
     parts.append("【生成约束】")
     parts.extend(build_llm_sql_generation_constraints(ctx, settings=cfg))
@@ -510,39 +522,182 @@ async def build_llm_context_text(
     return "\n".join(parts)
 
 
-def _format_tool_observations(observations: list[dict], *, max_chars: int = 4000) -> list[str]:
+_AGENT_PROMPT_COLUMNS_MAX_CHARS_PER_TABLE = 1500
+_AGENT_TOOL_OBS_MAX_CHARS = 6000
+
+
+def format_column_prompt_item(
+    col_name: str,
+    col: ColumnMetaRow | None = None,
+) -> str:
+    """字段 Prompt 片段：列名(描述)[别名]。"""
+    if col is None:
+        return col_name
+    desc = effective_description(col.description_manual, col.column_comment_auto)
+    item = col.column_name
+    if desc:
+        item += f"({desc})"
+    aliases = parse_alias_json(col.alias_json)
+    if aliases:
+        item += f"[{','.join(aliases)}]"
+    return item
+
+
+def format_prompt_column_line(
+    table_name: str,
+    column_names: list[str],
+    by_name: dict[str, ColumnMetaRow],
+    *,
+    max_chars: int | None = None,
+) -> str:
+    """拼装单表字段清单，超出 max_chars 时截断并标注。"""
+    limit = max_chars if max_chars is not None else _AGENT_PROMPT_COLUMNS_MAX_CHARS_PER_TABLE
+    col_parts: list[str] = []
+    used = 0
+    prefix = f"- {table_name}: "
+    used += len(prefix)
+    truncated = False
+    for col_name in column_names:
+        item = format_column_prompt_item(col_name, by_name.get(col_name))
+        sep = ", " if col_parts else ""
+        if used + len(sep) + len(item) > limit:
+            truncated = True
+            break
+        col_parts.append(item)
+        used += len(sep) + len(item)
+    line = prefix + ", ".join(col_parts)
+    if truncated:
+        line += f" …（共 {len(column_names)} 列，已截断）"
+    return line
+
+
+def _normalize_meta_table_name(name: str) -> str | None:
+    """过滤 Java 类名等非库表标识，返回小写表名。"""
+    raw = (name or "").strip()
+    if not raw:
+        return None
+    if "." in raw or raw[0].isupper():
+        return None
+    return raw.lower()
+
+
+def _pick_candidate_tables(table_names: list[str], *, limit: int = 6) -> list[str]:
+    """从召回表名中保留有效候选库表（蛇形命名）。"""
+    picked: list[str] = []
+    seen: set[str] = set()
+    for raw in table_names:
+        name = _normalize_meta_table_name(raw)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        picked.append(name)
+        if len(picked) >= limit:
+            break
+    return picked
+
+
+def _sort_observations_for_prompt(
+    observations: list[dict],
+    candidate_tables: list[str] | None,
+) -> list[dict]:
+    """describe_table 观察优先展示候选表。"""
+    if not observations or not candidate_tables:
+        return observations
+    priority = {_normalize_meta_table_name(t): i for i, t in enumerate(candidate_tables)}
+    priority = {k: v for k, v in priority.items() if k}
+
+    def sort_key(obs: dict) -> tuple[int, int]:
+        if obs.get("tool") != "describe_table":
+            return (1, 0)
+        table = _normalize_meta_table_name(str((obs.get("args") or {}).get("table") or ""))
+        if table in priority:
+            return (0, priority[table])
+        return (0, 999)
+
+    return sorted(observations, key=sort_key)
+
+
+def _format_describe_table_observation(table: str, result: dict) -> list[str]:
+    """展开 describe_table 结果为多行字段定义。"""
+    lines: list[str] = []
+    desc = result.get("description")
+    header = f"- describe_table({table})"
+    if desc:
+        header += f" 表说明：{desc}"
+    lines.append(header)
+    columns = result.get("columns") or []
+    for col in columns[:30]:
+        if not isinstance(col, dict):
+            continue
+        name = col.get("name") or "?"
+        role = col.get("role")
+        ctype = col.get("data_type")
+        cdesc = col.get("description")
+        aliases = col.get("aliases")
+        if aliases is None and col.get("alias_json"):
+            aliases = parse_alias_json(col.get("alias_json"))
+        parts = [name]
+        if ctype:
+            parts.append(str(ctype))
+        if role:
+            parts.append(f"role={role}")
+        if cdesc:
+            parts.append(str(cdesc))
+        if aliases:
+            parts.append(f"别名[{','.join(str(a) for a in aliases)}]")
+        lines.append(f"    · {' | '.join(parts)}")
+    if len(columns) > 30:
+        lines.append(f"    · …（另有 {len(columns) - 30} 列）")
+    return lines
+
+
+def _format_tool_observations(
+    observations: list[dict],
+    *,
+    max_chars: int = _AGENT_TOOL_OBS_MAX_CHARS,
+    candidate_tables: list[str] | None = None,
+) -> list[str]:
     """将 Agent 工具观察格式化为 Prompt 段落。"""
     lines: list[str] = ["【Agent 工具观察】"]
     used = len(lines[0])
-    for obs in observations[:12]:
+    ordered = _sort_observations_for_prompt(observations, candidate_tables)
+    for obs in ordered[:12]:
         tool = obs.get("tool")
         result = obs.get("result") or {}
         args = obs.get("args") or {}
+        block_lines: list[str] = []
         if result.get("error"):
-            line = f"- {tool}({args}): 错误 {result.get('error')} {result.get('message', '')}"
+            block_lines = [
+                f"- {tool}({args}): 错误 {result.get('error')} {result.get('message', '')}"
+            ]
         elif tool == "run_probe_sql":
             cols = result.get("columns") or []
             rows = result.get("rows") or []
-            line = f"- run_probe_sql: 列={cols} 样例行={rows[:3]}"
-        elif "columns" in result and isinstance(result["columns"], list):
-            cols = result["columns"][:8]
-            line = f"- describe_table({args.get('table')}): {cols}"
+            block_lines = [f"- run_probe_sql: 列={cols} 样例行={rows[:3]}"]
+        elif tool == "describe_table" and isinstance(result.get("columns"), list):
+            table = str(args.get("table") or result.get("table") or "")
+            block_lines = _format_describe_table_observation(table, result)
         elif "relations" in result:
             rels = (result.get("relations") or [])[:4]
-            line = f"- list_relations: {rels}"
+            block_lines = [f"- list_relations: {rels}"]
         elif "path" in result:
-            line = f"- get_join_path: {result.get('path')}"
+            block_lines = [f"- get_join_path: {result.get('path')}"]
         elif "metrics" in result:
-            line = f"- search_metrics: count={result.get('count', len(result.get('metrics') or []))}"
+            block_lines = [
+                f"- search_metrics: count={result.get('count', len(result.get('metrics') or []))}"
+            ]
         elif "values" in result:
-            line = f"- search_field_values: count={result.get('count', len(result.get('values') or []))}"
+            block_lines = [
+                f"- search_field_values: count={result.get('count', len(result.get('values') or []))}"
+            ]
         else:
-            line = f"- {tool}: count={result.get('count', 'ok')}"
-        if used + len(line) > max_chars:
-            lines.append("- …（观察截断）")
-            break
-        lines.append(line)
-        used += len(line)
+            block_lines = [f"- {tool}: count={result.get('count', 'ok')}"]
+        for line in block_lines:
+            if used + len(line) + 1 > max_chars:
+                lines.append("- …（观察截断）")
+                return lines
+            lines.append(line)
+            used += len(line) + 1
     return lines
 
 
@@ -600,18 +755,32 @@ async def build_agent_context_text(
                 )
             )
         if merged.prompt_columns:
-            parts.append("【候选表字段（仅可使用下列列名）】")
+            parts.append("【候选表字段（仅可使用下列列名；括号内为口径，方括号为别名）】")
             meta_repo = MetaRepository(copilot_session)
+            col_map: dict[str, dict[str, ColumnMetaRow]] = {}
+            for table in merged.tables:
+                col_map[table.table_name] = await meta_repo.get_column_map(table.id)
             for table_name in merged.table_names[:6]:
                 names = merged.prompt_columns.get(table_name, [])
                 if names:
-                    parts.append(f"- {table_name}: {', '.join(names[:15])}")
+                    parts.append(
+                        format_prompt_column_line(
+                            table_name,
+                            names,
+                            col_map.get(table_name, {}),
+                        )
+                    )
         if merged.code_artifacts:
             parts.append("【相关业务接口/报表口径】")
             for art in merged.code_artifacts[:4]:
                 summary = (getattr(art, "summary_text", None) or art.search_text)[:180]
                 parts.append(f"- code:artifact:{art.artifact_id} {art.title}：{summary}")
         parts.append("")
+
+    ranked = await load_ranked_sql_examples_for_prompt(
+        question, ctx, copilot_session, settings=cfg
+    )
+    parts.extend(format_curated_sql_example_lines(ranked))
 
     if plan:
         parts.append("【问句规划 plan】")
@@ -631,7 +800,10 @@ async def build_agent_context_text(
         parts.append("")
 
     if observations:
-        parts.extend(_format_tool_observations(observations))
+        candidate_tables = merged.table_names if merged is not None else []
+        parts.extend(
+            _format_tool_observations(observations, candidate_tables=candidate_tables)
+        )
         parts.append("")
 
     parts.append(f"【用户问句】{question}")

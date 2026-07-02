@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.meta.effective import effective_description
-from app.meta.repository import MetaRepository, RelationRow
+from app.meta.repository import MetaRepository, RelationRow, parse_alias_json
 from app.sql.whitelist import get_allowed_tables
 from config.settings import Settings
 
@@ -54,6 +54,8 @@ async def describe_table(
                 "data_type": c.data_type,
                 "role": c.column_role,
                 "description": c.effective_description,
+                "aliases": parse_alias_json(c.alias_json),
+                "alias_json": c.alias_json,
                 "recall_enabled": bool(c.recall_enabled),
             }
             for c in active_cols[:50]

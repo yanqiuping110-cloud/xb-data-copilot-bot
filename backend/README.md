@@ -15,7 +15,7 @@ $env:APP_ENV = "development"
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 测试：`pytest tests/ -q`（需已 `activate` 且 `APP_ENV=development`）。
@@ -36,11 +36,12 @@ python scripts/seed_sql_examples.py
 python scripts/seed_semantic_meta.py
 ```
 
-ES 混合召回索引（需 Docker ES :1200 + Ollama embedding）：
+Zvec 混合召回索引（默认进程内；需 Ollama embedding + 元数据已注册）：
 
 ```powershell
 python scripts/build_search_index.py
 # 或 POST /api/v1/admin/meta/rebuild-index（ADMIN/OPERATOR JWT）
+# 可选：VECTOR_STORE=elasticsearch 时使用 ES（见 .env.example）
 ```
 
 数据库变更策略：[docs/DATABASE_CHANGE_POLICY.md](../docs/DATABASE_CHANGE_POLICY.md)  

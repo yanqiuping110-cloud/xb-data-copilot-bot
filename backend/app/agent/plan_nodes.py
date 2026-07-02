@@ -23,6 +23,7 @@ from app.agent.plan_llm import generate_plan_from_llm
 from app.agent.state import AskGraphState
 from app.ask.example_ranker import rank_curated_examples_for_prompt
 from app.ask.semantic_repository import SemanticRepository
+from app.sql.whitelist import get_allowed_tables
 from config.settings import Settings
 
 
@@ -83,8 +84,9 @@ async def _best_l1_match(
         question,
         ctx,
         examples,
-        top_k=1,
+        top_k=settings.curated_example_top_k,
         min_score=0,
+        allowed_tables=get_allowed_tables(),
     )
     if not ranked:
         return 0, None
@@ -121,11 +123,13 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
 
     l1_score, l1_sql = await _best_l1_match(question, c["ctx"], c["copilot_session"], settings)
     recall_summary = _seed_recall_summary(merged)
+    context_text = state.get("context_text") or ""
 
     plan = await generate_plan_from_llm(
         settings=settings,
         question=question,
         recall_summary=recall_summary,
+        context_text=context_text,
         l1_score=l1_score,
         l1_sql_preview=l1_sql,
     )
@@ -149,6 +153,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
                 "reason": "llm_low_single_sql",
                 "l1_score": l1_score,
                 "multi_sql": False,
+                "context_chars": len(context_text),
                 "plan": plan,
             },
         )
@@ -165,6 +170,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
             "intent": plan.get("intent"),
             "multi_sql": multi_sql,
             "l1_score": l1_score,
+            "context_chars": len(context_text),
             "step_count": len(plan.get("steps") or []),
             "sql_exec_step_count": sql_exec_count,
             "plan": plan,

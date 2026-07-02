@@ -55,6 +55,16 @@ def test_build_chart_node_callable():
     assert inspect.iscoroutinefunction(build_chart)
 
 
+def test_retrieval_modules_import():
+    importlib.import_module("app.retrieval.zvec_client")
+    importlib.import_module("app.retrieval.search_index")
+    from app.retrieval.search_index import create_search_index_client
+    from config.settings import get_settings
+
+    client = create_search_index_client(get_settings())
+    assert client is not None
+
+
 def test_infer_visualization_from_question_chart_intent():
     from app.agent.chart_builder import infer_visualization_from_question
 

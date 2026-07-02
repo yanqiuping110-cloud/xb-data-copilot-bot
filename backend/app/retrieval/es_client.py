@@ -91,6 +91,8 @@ class AskElasticsearchClient:
         query_vector: list[float],
         *,
         top_k: int,
+        query_text: str | None = None,
+        filter_expr: str | None = None,
     ) -> list[dict]:
         """dense_vector kNN 检索，返回 _source + _score。"""
         index = self.index_name(suffix)

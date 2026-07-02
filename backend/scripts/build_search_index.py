@@ -1,9 +1,9 @@
 """
-从 copilot 元数据全量重建 Elasticsearch 问数索引。
+从 copilot 元数据全量重建问数检索索引（默认 Zvec）。
 
 用法（在 backend/ 目录）:
   $env:APP_ENV = "development"
-  # 需已 seed_semantic_meta.py；ES :1200 可访问；Ollama embedding 可用
+  # 需已 seed_semantic_meta.py；Ollama embedding 可用
   python scripts/build_search_index.py
 """
 
@@ -31,8 +31,11 @@ async def main() -> None:
     async with factory() as session:
         svc = MetaKnowledgeService(session, settings)
         try:
-            if not await svc.ping_elasticsearch():
-                print("警告：Elasticsearch 不可达，请确认 Docker es01 已启动且 ELASTICSEARCH_URL 正确")
+            if not await svc.ping_search_index():
+                print(
+                    f"警告：检索后端不可用（VECTOR_STORE={settings.vector_store}），"
+                    "请检查 ZVEC_DATA_DIR 或 ELASTICSEARCH_URL"
+                )
                 return
             result = await svc.rebuild_all()
             print(

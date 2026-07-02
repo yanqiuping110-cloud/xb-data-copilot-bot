@@ -22,7 +22,7 @@
             <el-form-item label="业务表名" required>
               <el-input
                 v-model="tableName"
-                placeholder="如 sport_activity_qzs_record"
+                placeholder="如 your_fact_table"
                 @keyup.enter="onIntrospect"
               />
             </el-form-item>

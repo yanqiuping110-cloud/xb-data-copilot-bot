@@ -1,4 +1,4 @@
-"""混合召回：Embedding、Elasticsearch 与 HybridRetriever。"""
+"""混合召回：Embedding、Zvec/ES 检索与 HybridRetriever。"""
 
 from app.retrieval.hybrid import HybridRetriever
 

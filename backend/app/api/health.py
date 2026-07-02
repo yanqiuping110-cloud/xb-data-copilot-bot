@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.db.business import check_business_connection
 from app.db.copilot import check_copilot_connection
-from app.retrieval.es_client import AskElasticsearchClient
+from app.retrieval.search_index import create_search_index_client
 from config.settings import Settings
 
 router = APIRouter()
@@ -31,22 +31,25 @@ async def ready(request: Request):
     settings: Settings = request.app.state.settings
     copilot_ok = await check_copilot_connection()
     business_ok = await check_business_connection()
-    es_client = AskElasticsearchClient(settings)
+    index_client = create_search_index_client(settings)
     try:
-        es_ok = await es_client.ping()
+        search_index_ok = await index_client.ping()
     except Exception:
-        es_ok = False
+        search_index_ok = False
     finally:
-        await es_client.close()
+        await index_client.close()
 
     checks = {
         "app_env": settings.app_env,
         "mysql_copilot": copilot_ok,
         "mysql_business": business_ok,
-        "elasticsearch": es_ok,
+        "vector_store": settings.vector_store,
+        "search_index": search_index_ok,
         "llm_api_base": settings.llm_api_base,
         "ragflow_enabled": settings.ragflow_enabled,
     }
+    if settings.vector_store.lower() == "elasticsearch":
+        checks["elasticsearch"] = search_index_ok
     all_ok = copilot_ok and business_ok
     body = {"status": "ready" if all_ok else "degraded", "checks": checks}
     if not all_ok:

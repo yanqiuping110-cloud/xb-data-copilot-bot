@@ -68,7 +68,7 @@ def _replace_time_in_question(base: str, new_time: str) -> str:
 
 
 def _add_project_filter(base: str, project: str) -> str:
-    """在指标描述前注入项目名（如「只要跳绳」）。"""
+    """在指标描述前注入问句中的项目/维度过滤词。"""
     if project in base:
         return base
     for anchor in ("参与人数趋势", "参与人数", "参与人次", "人数趋势", "趋势", "人数", "人次"):

@@ -95,18 +95,18 @@ def build_llm_sql_generation_constraints(
     """LLM Prompt【生成约束】：方言、表白名单、JOIN 别名、sch_id 等。"""
     lines = [
         "- 方言：MySQL 5.7，仅单条 SELECT，不要 INSERT/UPDATE/DELETE",
-        "- 只能使用上表白名单中的表",
+        "- 表名与列名仅可使用【允许查询的业务表】与【候选表字段清单】中已列出的名称，禁止引用未出现的表或字段",
         (
             "- 涉及多表 JOIN 时：FROM/JOIN 中每张表必须定义短别名"
-            "（如 sport_activity_qzs_record r、sport_project p）"
+            "（别名自定，如 t1、t2），且只能 JOIN 白名单内的表"
         ),
         (
             "- 多表查询时 SELECT、WHERE、GROUP BY、ORDER BY、HAVING 中的字段"
-            "必须带表别名前缀（如 r.create_time、p.project_name），禁止裸写字段名"
+            "必须带表别名前缀，禁止裸写字段名"
         ),
         (
-            "- 按项目名称过滤时使用 sport_project.project_name（别名 p.project_name）；"
-            "运动值字段为 sport_activity_qzs_record.sport_value（别名 r.sport_value）"
+            "- 按项目/枚举过滤时：使用候选字段清单中的真实列名"
+            "（如 project_id、project_name 等，以清单为准）"
         ),
     ]
     lines.extend(build_llm_sch_id_constraints(ctx, settings=settings))
@@ -115,11 +115,11 @@ def build_llm_sql_generation_constraints(
     )
     lines.append(
         "- 字段取值映射：问句提及项目名/枚举别名时，用对应 column = 库内值 过滤"
-        "（如 project_id=1 或 JOIN sport_project 后 p.project_name='跳绳'）"
+        "（具体 column 以【候选表字段清单】为准）"
     )
     lines.append(
         "- 只能使用【候选表字段清单】中的真实 column_name，"
-        "禁止编造 student_name、enrollment_year 等未列出的字段"
+        "禁止编造未列出的字段"
     )
     lines.append("- 输出仅包含 SQL，不要解释")
     return lines

@@ -99,12 +99,42 @@ class Settings(BaseSettings):
         alias="ASK_RATE_LIMIT_PER_USER_PER_MIN",
     )
 
-    # ---------- RAGFlow / ES（二期可选）----------
+    # ---------- 问数检索（默认 Zvec；ES 保留供 RAGFlow / 可选后端）----------
+    vector_store: str = Field(
+        default="zvec",
+        alias="VECTOR_STORE",
+        description="问数检索后端：zvec（默认）或 elasticsearch",
+    )
+    zvec_data_dir: str = Field(
+        default="data/zvec",
+        alias="ZVEC_DATA_DIR",
+        description="Zvec collection 持久化目录（相对 backend/ 或绝对路径）",
+    )
+    zvec_index_prefix: str = Field(
+        default="copilot_ask_",
+        alias="ZVEC_INDEX_PREFIX",
+    )
+    recall_hybrid_rerank: bool = Field(
+        default=True,
+        alias="RECALL_HYBRID_RERANK",
+        description="向量召回时融合 search_text 全文并 RRF 重排（Zvec）",
+    )
+    recall_rerank_fetch_multiplier: int = Field(
+        default=3,
+        alias="RECALL_RERANK_FETCH_MULTIPLIER",
+        description="混合召回每路先取 top_k×N 候选再 RRF 截断",
+    )
+    recall_rrf_rank_constant: int = Field(
+        default=60,
+        alias="RECALL_RRF_RANK_CONSTANT",
+        description="RRF 融合 rank_constant（k）",
+    )
     ragflow_enabled: bool = Field(default=False, alias="RAGFLOW_ENABLED")
     ragflow_base_url: str = Field(default="https://127.0.0.1", alias="RAGFLOW_BASE_URL")
     elasticsearch_url: str = Field(
         default="http://127.0.0.1:1200",
         alias="ELASTICSEARCH_URL",
+        description="RAGFlow 栈 ES 地址；VECTOR_STORE=elasticsearch 时亦用于问数索引",
     )
     elasticsearch_index_prefix: str = Field(
         default="copilot_ask_",
@@ -124,9 +154,9 @@ class Settings(BaseSettings):
         description="是否启用 ES/关键词字段召回；关闭时仅按召回表从元数据加载 Prompt 字段",
     )
     curated_example_top_k: int = Field(
-        default=5,
+        default=1,
         alias="CURATED_EXAMPLE_TOP_K",
-        description="注入 LLM Prompt 的 L1 样例软参考最大条数",
+        description="注入 LLM Prompt 的 L1 样例软参考最大条数（仅取得分最高的一条）",
     )
     curated_example_min_score: int = Field(
         default=1,
@@ -188,7 +218,7 @@ class Settings(BaseSettings):
     recall_top_k_code: int = Field(
         default=5,
         alias="RECALL_TOP_K_CODE",
-        description="代码 artifact ES 召回 Top-K",
+        description="代码 artifact 向量召回 Top-K",
     )
     code_knowledge_enabled: bool = Field(
         default=True,
@@ -245,6 +275,14 @@ class Settings(BaseSettings):
 
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     minio_endpoint: str = Field(default="http://127.0.0.1:9000", alias="MINIO_ENDPOINT")
+
+    @property
+    def zvec_data_path(self) -> Path:
+        """Zvec 数据目录绝对路径。"""
+        path = Path(self.zvec_data_dir)
+        if path.is_absolute():
+            return path
+        return ROOT_DIR / path
 
     @property
     def cors_origin_list(self) -> list[str]:

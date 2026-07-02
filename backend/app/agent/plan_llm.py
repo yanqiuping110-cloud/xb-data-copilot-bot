@@ -16,6 +16,18 @@ from config.settings import Settings
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
+# 与 build_llm_context 一致的全量上下文上限（字符），超出截断并注明
+_PLAN_CONTEXT_MAX_CHARS = 20_000
+
+
+def _truncate_plan_context(context_text: str, *, max_chars: int = _PLAN_CONTEXT_MAX_CHARS) -> str:
+    text = (context_text or "").strip()
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n…（上下文已截断，原长 {len(text)} 字符）"
+
 
 def _extract_json(text: str) -> dict[str, Any] | None:
     stripped = text.strip()
@@ -138,11 +150,15 @@ async def generate_plan_from_llm(
     settings: Settings,
     question: str,
     recall_summary: str,
+    context_text: str = "",
     l1_score: int | None = None,
     l1_sql_preview: str | None = None,
 ) -> dict[str, Any] | None:
     """
     调用 LLM 生成问句分解 plan。
+
+    context_text 为 build_llm_context 产出的完整问数上下文（字段/JOIN/指标口径等），
+    与 SQL 生成阶段一致，供 Plan 判定 multi_sql 与步骤分解。
 
     Returns:
         规范化后的 plan dict；解析失败返回 None。
@@ -159,21 +175,21 @@ async def generate_plan_from_llm(
         "  · false：一条 SQL 即可（可用 WITH/CTE），走常规生成\n"
         "- assembly_mode: multi_sql=true 时填 join_by_date | pivot | join\n"
         "- join_key: 组装对齐键，中文别名如「日期」\n"
-        "- metrics: 问句要求的全部指标/输出列（中文），如打卡人数、跳绳运动个数、跑步运动个数\n"
+        "- metrics: 问句要求的全部指标/输出列（中文），如参与人数、各项目运动个数\n"
         "- steps: 每步含 id, goal, needs_tool, sql_step, entity_label, filter_hint, metrics\n"
         "  · sql_step=true 表示该步单独生成并执行一条 SELECT\n"
         "  · goal 须写清本步要输出的全部指标（不可只写「按日指标」而遗漏问句中的分项）\n"
         "  · metrics 为本步 SQL 结果列应覆盖的指标（与问句一致，逐步可相同）\n"
-        "  · filter_hint 可含 activity_id、activity_name、project_names（项目名列表）\n"
-        "  · 问句若要求按运动项目分项统计，needs_tool 应含 list_relations/get_join_path，"
-        "并在 goal 中写明需关联项目表（如 sport_project）或按 project 过滤\n"
+        "  · filter_hint 可含 activity_id、activity_name、project_names（问句中的项目/维度名列表）\n"
+        "  · 问句若要求按项目/维度分项统计，needs_tool 应含 list_relations/get_join_path，"
+        "并在 goal 中写明需关联维度表或按项目字段过滤\n"
         "  · needs_tool 从 describe_table, list_relations, get_join_path, search_metrics, "
         "search_field_values, search_sql_examples 选取\n"
         "判定原则（由你根据语义判断，勿依赖固定关键词表）：\n"
         "· 简单单指标、单表、单时间范围 → complexity=low, multi_sql=false, 1 步\n"
         "· 多实体对比且需按日对齐宽表 → multi_sql=true，每实体一步 sql_step\n"
-        "· 问句含多个指标（如打卡人数 + 多个项目运动个数）→ metrics 与每步 goal 须全部列出，"
-        "SQL 阶段需 JOIN/过滤项目维度，禁止仅用 SUM(sport_value) 一个总数代替分项\n"
+        "· 问句含多个指标或多个分项 → metrics 与每步 goal 须全部列出，"
+        "SQL 阶段需 JOIN/过滤维度，禁止用一个未分项的总聚合代替分项\n"
         "· 复杂多维但一条 SQL 可完成 → multi_sql=false, complexity=high, needs_tool 探索\n"
         "- visualization: 图表展示意图（必填）\n"
         "  · enabled: boolean，是否尝试生成图表（明细/列表/单值汇总 → false）\n"
@@ -191,6 +207,15 @@ async def generate_plan_from_llm(
         "",
         f"种子召回摘要：\n{recall_summary}",
     ]
+    full_context = _truncate_plan_context(context_text)
+    if full_context:
+        user_parts.extend(
+            [
+                "",
+                "问数上下文（与 SQL 生成一致；含表白名单、字段清单、JOIN、指标口径、过滤与约束）：",
+                full_context,
+            ]
+        )
     if l1_score is not None and l1_score > 0:
         user_parts.append(f"\nL1 样例软参考得分：{l1_score}（仅供参考，仍以问句语义决定是否分步 SQL）")
     if l1_sql_preview:
@@ -204,11 +229,11 @@ async def generate_plan_from_llm(
             "请输出 JSON 示例：",
             '{"complexity":"high","intent":"entity_compare","multi_sql":true,'
             '"assembly_mode":"join_by_date","join_key":"日期",'
-            '"metrics":["打卡人数","跳绳运动个数","跑步运动个数"],'
-            '"steps":[{"id":1,"goal":"活动5780按日：打卡人数、跳绳与跑步项目运动个数",'
-            '"sql_step":true,"entity_label":"活动5780",'
-            '"metrics":["打卡人数","跳绳运动个数","跑步运动个数"],'
-            '"filter_hint":{"activity_id":5780,"project_names":["跳绳","跑步"]},'
+            '"metrics":["指标A","指标B","指标C"],'
+            '"steps":[{"id":1,"goal":"实体X按日：指标A、B、C",'
+            '"sql_step":true,"entity_label":"实体X",'
+            '"metrics":["指标A","指标B","指标C"],'
+            '"filter_hint":{"activity_id":1001,"project_names":["项目甲","项目乙"]},'
             '"needs_tool":["describe_table","list_relations"]}],'
             '"visualization":{"enabled":true,"user_explicit":false,'
             '"preferred_types":["line","bar"],"reason":"多实体按日对比",'

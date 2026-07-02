@@ -365,11 +365,15 @@ async def rebuild_search_index(
     copilot: Annotated[AsyncSession, Depends(get_copilot_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> RebuildIndexResponse:
-    """全量重建 ES 字段/指标向量索引与字段取值全文索引。"""
+    """全量重建字段/指标向量索引与字段取值全文索引。"""
     svc = MetaKnowledgeService(copilot, settings)
     try:
-        if not await svc.ping_elasticsearch():
-            raise MetaError("ES_UNAVAILABLE", "Elasticsearch 不可达，请检查 ELASTICSEARCH_URL", 503)
+        if not await svc.ping_search_index():
+            raise MetaError(
+                "SEARCH_INDEX_UNAVAILABLE",
+                f"检索后端不可用（VECTOR_STORE={settings.vector_store}）",
+                503,
+            )
         result = await svc.rebuild_all()
     finally:
         await svc.close()

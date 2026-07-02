@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.memory.models import SessionMemory, SessionTurnSlot, UserPreferenceItem
 from app.memory.preference_keys import PREFERENCE_KEY_WHITELIST
 from app.security.prompt_boundary import wrap_untrusted
+from app.sql.whitelist import get_allowed_tables
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,23 @@ _TABLE_RE = re.compile(
     r"\b(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)",
     flags=re.IGNORECASE,
 )
+
+
+def _tables_in_sql(sql: str) -> set[str]:
+    if not sql:
+        return set()
+    return {t.lower() for t in _TABLE_RE.findall(sql)}
+
+
+def _session_sql_allowed_for_prompt(sql: str) -> bool:
+    """仅当 SQL 涉及表均在当前白名单内时，才注入会话 few-shot。"""
+    allowed = get_allowed_tables()
+    if not allowed:
+        return True
+    used = _tables_in_sql(sql)
+    if not used:
+        return True
+    return used.issubset({t.lower() for t in allowed})
 
 
 class MemoryService:
@@ -315,11 +333,13 @@ def build_memory_prompt_sections(
         if last:
             q = wrap_untrusted("session_question", last.question[:200], enabled=boundary_enabled)
             parts.append(f"- 上一轮问句：{q}")
-            if last.final_sql:
+            if last.final_sql and _session_sql_allowed_for_prompt(last.final_sql):
                 sql_preview = " ".join(last.final_sql.split())[:400]
                 parts.append(
                     f"- 上一轮 SQL：{wrap_untrusted('session_sql', sql_preview, enabled=boundary_enabled)}"
                 )
+            elif last.final_sql:
+                parts.append("- 上一轮 SQL：（略，涉及表不在当前白名单）")
             if last.tables_used:
                 parts.append(f"- 涉及表：{last.tables_used}")
             if last.row_count is not None:

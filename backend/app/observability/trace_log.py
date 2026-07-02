@@ -11,6 +11,7 @@ from typing import Any
 _MAX_JSON_BYTES = 512 * 1024
 _MAX_SQL_LEN = 4096
 _MAX_TEXT_PREVIEW = 500
+_MAX_CONTEXT_TEXT_LEN = 131072  # build_*_context 调试：trace 内保留完整 Prompt 上限
 _MAX_ROWS_SAMPLE = 2
 _MAX_RESULT_ROWS = 100
 
@@ -35,8 +36,15 @@ def sanitize_detail(detail: dict[str, Any] | None) -> dict[str, Any] | None:
         if key in ("sql", "final_sql", "raw_sql") and isinstance(value, str):
             out[key if key != "raw_sql" else "sql_preview"] = _truncate(value, _MAX_SQL_LEN)
         elif key == "context_text" and isinstance(value, str):
-            preview = value.replace("\n", " ")[:_MAX_TEXT_PREVIEW]
-            out[key] = f"len={len(value)} preview={preview!r}"
+            if len(value) <= _MAX_CONTEXT_TEXT_LEN:
+                out[key] = value
+            else:
+                out[key] = value[:_MAX_CONTEXT_TEXT_LEN] + f"\n…（已截断，总长 {len(value)} 字符）"
+        elif key == "prompt_text" and isinstance(value, str):
+            if len(value) <= _MAX_CONTEXT_TEXT_LEN:
+                out[key] = value
+            else:
+                out[key] = value[:_MAX_CONTEXT_TEXT_LEN] + f"\n…（已截断，总长 {len(value)} 字符）"
         elif key == "rows" and isinstance(value, list):
             out[key] = {"count": len(value), "sample": value[:_MAX_ROWS_SAMPLE]}
         elif key == "answer" and isinstance(value, str):

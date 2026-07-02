@@ -58,7 +58,8 @@ flowchart TB
 
     subgraph Knowledge["知识层"]
         MySQLMeta[("MySQL copilot 库<br/>元数据 · 语义 · 审计 · Scope")]
-        ES["Elasticsearch<br/>向量 + 全文索引"]
+        Zvec["Zvec 进程内索引<br/>向量 + 全文 · RRF 混合召回"]
+        ES["Elasticsearch（可选）<br/>RAGFlow / VECTOR_STORE=elasticsearch"]
         CodeKG["Git 代码知识图谱<br/>Artifact · 调用关系"]
     end
 
@@ -74,6 +75,7 @@ flowchart TB
     Ask --> Agent
     Auth --> Ask
     Agent --> Recall
+    Recall --> Zvec
     Recall --> ES
     Recall --> MySQLMeta
     Recall --> CodeKG
@@ -85,7 +87,7 @@ flowchart TB
     Exec --> BizDB
     Obs --> MySQLMeta
     Meta --> MySQLMeta
-    Meta --> ES
+    Meta --> MySQLMeta
 ```
 
 ### 部署拓扑
@@ -97,12 +99,13 @@ flowchart TB
 │  · Vue Vite :5173          ← 前端（开发）；生产为静态资源 + Nginx      │
 │  · Ollama / 内网 LLM       ← 大模型 + Embedding（OpenAI 兼容协议）     │
 │  · MySQL 5.7+              ← 业务只读库 + copilot 治理库（同实例可共存）  │
+│  · Zvec（默认）            ← 问数元数据向量/全文索引，数据目录 data/zvec   │
 └───────────────────────────────┬──────────────────────────────────────┘
-                                │ host.docker.internal
+                                │ host.docker.internal（可选）
 ┌───────────────────────────────▼──────────────────────────────────────┐
-│  检索基础设施（Docker Compose）                                        │
-│  · Elasticsearch :9200     ← 字段向量 · 取值全文 · 代码 Artifact 索引   │
-│  · Redis / MinIO（可选）   ← 文档 RAG 栈，与问数元数据解耦              │
+│  可选基础设施（Docker Compose · RAGFlow 栈）                            │
+│  · Elasticsearch :1200     ← RAGFlow 依赖；问数可设 VECTOR_STORE=elasticsearch │
+│  · Redis / MinIO（可选）     ← 文档 RAG 栈，与问数元数据索引解耦              │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -162,7 +165,7 @@ sequenceDiagram
     participant FE as Vue 前端
     participant API as FastAPI
     participant Graph as LangGraph
-    participant ES as Elasticsearch
+    participant Zvec as Zvec 索引
     participant LLM as 大模型
     participant Guard as SQL Guard
     participant DB as 业务 MySQL
@@ -173,8 +176,8 @@ sequenceDiagram
     API->>Graph: 启动 AskGraph (trace_id)
 
     Graph->>Graph: 加载会话记忆 / 用户偏好（定界后注入 Prompt）
-    Graph->>ES: 混合召回（表/字段/指标/取值/代码，片段清洗）
-    ES-->>Graph: Top-K 上下文
+    Graph->>Zvec: 混合召回（表/字段/指标/取值/代码，向量+全文 RRF）
+    Zvec-->>Graph: Top-K 上下文
     Graph->>LLM: Plan / Agent 工具循环（System 拒令 + 不可信定界）
     LLM-->>Graph: SQL 草案
 
@@ -204,16 +207,56 @@ sequenceDiagram
 │  结构化元数据    │   │  语义指标库      │   │  代码知识图谱    │
 │  表/字段/关系    │ + │  口径/别名/公式  │ + │  Git 同步解析    │
 │  information_   │   │  L1 SQL 样例     │   │  Java/MyBatis   │
-│  schema 半自动   │   │  badcase 闭环    │   │  ES 向量召回     │
+│  schema 半自动   │   │  badcase 闭环    │   │  Zvec/ES 向量召回 │
 └────────┬────────┘   └────────┬────────┘   └────────┬────────┘
          └─────────────────────┼─────────────────────┘
                                ▼
                     HybridRetriever → LLM Context
 ```
 
-- **向量召回**：字段 / 指标语义相似度（Elasticsearch `dense_vector`）
-- **全文召回**：枚举取值、业务术语（BM25）
-- **结构化补全**：MySQL 元数据 + keyword 降级（ES 不可用时仍可服务）
+- **向量召回**：字段 / 指标语义相似度（Zvec HNSW + cosine；可选 ES `dense_vector`）
+- **全文召回**：枚举取值、业务术语（Zvec FTS / BM25；字段 `search_text`）
+- **混合重排（Zvec 默认）**：向量 + 全文双路查询，**RRF（Reciprocal Rank Fusion）** 融合排序
+- **结构化补全**：MySQL 元数据 + keyword 降级（检索后端不可用时仍可服务）
+
+### 问数检索：Zvec（默认）与 Elasticsearch（可选）
+
+问数链路的表 / 字段 / 指标 / 字段取值 / 代码 Artifact 索引，**默认使用 [Zvec](https://zvec.org/) 进程内向量库**，无需单独部署 Elasticsearch。
+
+| 能力 | Zvec（`VECTOR_STORE=zvec`） | Elasticsearch（`VECTOR_STORE=elasticsearch`） |
+|------|----------------------------|-----------------------------------------------|
+| 部署 | 嵌入式，`ZVEC_DATA_DIR` 持久化 | 需 ES 服务（如 RAGFlow 栈 `:1200`） |
+| 向量检索 | HNSW + cosine | kNN `dense_vector` |
+| 全文检索 | FTS（jieba 分词） | `match` 全文 |
+| 混合召回 | 向量 + FTS + **RRF rerank** | 向量单路（或自行扩展） |
+| 列召回过滤 | 查询侧 `filter`（按 `table_name`） | 内存 over-fetch 后过滤 |
+| 索引重建 | 管理 API / `build_search_index.py` | 同上（切换后端） |
+
+**配置（`backend/.env.development`）**：
+
+```env
+VECTOR_STORE=zvec
+ZVEC_DATA_DIR=data/zvec
+ZVEC_INDEX_PREFIX=copilot_ask_
+RECALL_HYBRID_RERANK=true
+RECALL_RERANK_FETCH_MULTIPLIER=3
+RECALL_RRF_RANK_CONSTANT=60
+```
+
+**索引 collection**（前缀 `copilot_ask_`）：`table`、`column`、`metric`、`value`（仅全文）、`code_artifact`。
+
+**重建索引**（元数据变更后）：
+
+```powershell
+cd backend
+$env:APP_ENV = "development"
+python scripts/build_search_index.py
+# 或管理端 POST /api/v1/admin/meta/rebuild-index
+```
+
+**切换回 ES**（与 RAGFlow 共用集群时）：安装可选依赖 `pip install -e ".[legacy-es]"`，设置 `VECTOR_STORE=elasticsearch` 与 `ELASTICSEARCH_URL`。工厂见 `app/retrieval/search_index.py`（`AskZvecClient` / `AskElasticsearchClient`）。
+
+**注意**：多进程部署时 Zvec 写索引宜单 worker 或独立 job；问数只读召回可多进程并发。
 
 ### 2. SQL 安全网关（Defense in Depth）
 
@@ -263,7 +306,7 @@ flowchart TD
 
 ### 4. Prompt Injection 纵深防御
 
-问数链路中用户问句、会话 Memory、ES 召回、代码 `raw_snippet` 均可进入 LLM Prompt。平台采用 **Prompt 层缩小攻击面 + 执行层硬兜底**：
+问数链路中用户问句、会话 Memory、检索召回片段、代码 `raw_snippet` 均可进入 LLM Prompt。平台采用 **Prompt 层缩小攻击面 + 执行层硬兜底**：
 
 | 类型 | 缓解措施 |
 |------|----------|
@@ -308,7 +351,7 @@ flowchart TD
 | 编排 | LangGraph · LangChain | 有向图问数流水线 |
 | 前端 | Vue 3 · Vite · Pinia | 问数对话 + 元数据管理后台 |
 | 数据库 | MySQL 5.7+ | 双库：业务只读 + copilot 治理 |
-| 检索 | Elasticsearch 8.x | 向量 + 全文混合召回 |
+| 检索 | **Zvec**（默认）· Elasticsearch 8.x（可选） | 向量 + 全文混合召回；RRF rerank |
 | LLM | Ollama / 通义 / DeepSeek 等 | OpenAI 兼容 `chat/completions` |
 | 安全 | JWT · bcrypt · sqlglot · DataScope · Prompt 定界 | 认证 + AST 校验 + 注入防护 |
 | 部署 | Docker Compose · Uvicorn | 后端容器化；DB/LLM 宿主机 |
@@ -326,8 +369,8 @@ data-copilot-bot/
 │   │   ├── auth/           # JWT、用户仓储
 │   │   ├── policy/         # EffectivePolicy、ScopeInjector、role_policy
 │   │   ├── security/       # Prompt 定界、召回清洗（prompt_boundary）
-│   │   ├── meta/           # 元数据 CRUD、ES 索引
-│   │   ├── retrieval/      # HybridRetriever、ES Client
+│   │   ├── meta/           # 元数据 CRUD、检索索引构建
+│   │   ├── retrieval/      # HybridRetriever、Zvec/ES Client（search_index 工厂）
 │   │   ├── sql/            # SQL Guard、白名单、列 deny
 │   │   ├── code/           # Git 同步、代码解析、知识图谱
 │   │   ├── memory/         # 会话记忆、用户偏好
@@ -369,10 +412,10 @@ data-copilot-bot/
 | POST | `/api/v1/admin/meta/column-deny` | 敏感列 deny |
 | PUT | `/api/v1/admin/users/{id}/data-grants` | 用户行级授权 |
 | PUT | `/api/v1/admin/users/{id}/table-grants` | 用户表级 allow |
-| POST | `/api/v1/admin/meta/rebuild-index` | 重建 ES 问数索引 |
+| POST | `/api/v1/admin/meta/rebuild-index` | 重建问数检索索引（Zvec / ES） |
 | GET/POST | `/api/v1/admin/code/*` | Git 仓库同步、代码索引 |
 | GET/POST | `/api/v1/admin/users` | 超管用户管理 |
-| GET | `/health` · `/ready` | 存活探针（含 MySQL / ES） |
+| GET | `/health` · `/ready` | 存活探针（含 MySQL / `search_index`） |
 
 完整 OpenAPI 文档：启动后端后访问 `/docs`。
 
@@ -387,7 +430,8 @@ data-copilot-bot/
 | MySQL 5.7+ | 业务库（只读）+ `copilot` 治理库 |
 | Python 3.10+ | 后端运行时 |
 | Node.js 18+ | 前端构建 |
-| Elasticsearch 8.x | 混合召回（可选 keyword 降级） |
+| Zvec 0.5+（默认） | 问数混合召回；`pip install zvec`，数据目录 `ZVEC_DATA_DIR` |
+| Elasticsearch 8.x（可选） | `VECTOR_STORE=elasticsearch` 或 RAGFlow 栈 |
 | Ollama 或兼容 API | LLM + Embedding |
 
 ### 后端
@@ -395,7 +439,7 @@ data-copilot-bot/
 ```powershell
 cd backend
 copy .env.example .env.development
-# 编辑 MySQL、JWT、LLM、ES 等配置
+# 编辑 MySQL、JWT、LLM、ZVEC_DATA_DIR 等配置
 
 $env:APP_ENV = "development"
 python -m venv .venv
@@ -406,6 +450,9 @@ pip install -e ".[dev]"
 mysql -u root -p copilot < scripts/sql/copilot/V001__init_copilot_tables.sql
 # … 依次执行至 V010__data_scope.sql（启用 DataScope 时需要）
 python scripts/seed_admin.py
+
+# 元数据注册后重建 Zvec 问数索引（需 Ollama embedding 可用）
+python scripts/build_search_index.py
 
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```

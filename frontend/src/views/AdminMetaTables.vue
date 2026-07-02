@@ -307,7 +307,7 @@ async function doRebuild() {
 
 async function onRebuildIndex() {
   await ElMessageBox.confirm(
-    '将全量重建 ES 字段/指标/取值索引，需 ES 与 Embedding 可用。继续？',
+    '将全量重建字段、指标与取值检索索引，需 Embedding 服务可用。继续？',
     '重建检索索引',
     { type: 'warning' },
   )

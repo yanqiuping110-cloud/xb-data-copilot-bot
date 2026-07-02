@@ -1,10 +1,12 @@
 """
-注册首表元数据 + 人工字段定义 + project_id 取值种子。
+注册首表元数据 + 人工字段定义（开发/bootstrap 用）。
 
 用法（在 backend/ 目录）:
   $env:APP_ENV = "development"
-  # 需先执行 scripts/sql/copilot/V004__meta_knowledge.sql
+  $env:SEED_PRIMARY_TABLE = "your_fact_table"
   python scripts/seed_semantic_meta.py
+
+字段取值（project_id 等）请在管理后台「字段取值」维护，不在脚本中写死。
 """
 
 from __future__ import annotations
@@ -25,14 +27,14 @@ from app.meta.repository import MetaRepository, dump_alias_json
 from app.meta.service import ColumnInput, MetaService, TableRegisterInput
 from config.settings import get_settings
 
-_TABLE = "sport_activity_qzs_record"
+_TABLE = (os.getenv("SEED_PRIMARY_TABLE") or "").strip()
 
 _TABLE_INPUT = TableRegisterInput(
     table_name=_TABLE,
     table_role="fact",
     biz_domain="活动打卡",
-    description_manual="亲子活动打卡记录表，每条记录为某用户在某运动项目上的一次打卡。",
-    grain="一人一项目一次打卡一条记录",
+    description_manual="活动打卡/运动统计事实表（列定义须与业务库一致，不存在则跳过）。",
+    grain="按业务库实际粒度维护",
     sch_id_column="sch_id",
     status=1,
     columns=[
@@ -43,6 +45,12 @@ _TABLE_INPUT = TableRegisterInput(
             aliases=["参与人", "学生", "用户"],
         ),
         ColumnInput(
+            column_name="user_id",
+            description_manual="用户 ID，统计参与人数/打卡人数时对 user_id 去重计数。",
+            column_role="dimension",
+            aliases=["参与人", "用户", "打卡人数"],
+        ),
+        ColumnInput(
             column_name="sch_id",
             description_manual="学校 ID，学校账户问数必须按本校 sch_id 过滤。",
             column_role="filter",
@@ -50,15 +58,21 @@ _TABLE_INPUT = TableRegisterInput(
         ),
         ColumnInput(
             column_name="project_id",
-            description_manual="运动项目 ID，如跳绳=1、跑步=20，问句含项目名时需过滤。",
+            description_manual="项目/维度 ID；问句含项目名时须结合字段取值映射或 JOIN 维度表过滤。",
             column_role="filter",
             aliases=["项目", "运动项目"],
         ),
         ColumnInput(
             column_name="create_time",
-            description_manual="打卡时间，按月/日/最近 N 天统计时作为时间维度。",
+            description_manual="记录创建时间，可用于时间范围筛选。",
             column_role="time",
-            aliases=["打卡时间", "时间", "日期"],
+            aliases=["创建时间", "打卡时间"],
+        ),
+        ColumnInput(
+            column_name="record_date",
+            description_manual="业务日期（yyyy-MM-dd），活动时间/打卡时间判定优先使用。",
+            column_role="time",
+            aliases=["打卡时间", "活动日期", "日期"],
         ),
         ColumnInput(
             column_name="activity_id",
@@ -74,19 +88,6 @@ _TABLE_INPUT = TableRegisterInput(
         ),
     ],
 )
-
-_PROJECT_VALUES = [
-    {
-        "value_text": "1",
-        "display_label": "跳绳",
-        "alias_json": json.dumps(["跳绳", "跳绳项目"], ensure_ascii=False),
-    },
-    {
-        "value_text": "20",
-        "display_label": "跑步",
-        "alias_json": json.dumps(["跑步", "跑步项目"], ensure_ascii=False),
-    },
-]
 
 _METRIC_UPDATES = [
     {
@@ -156,24 +157,6 @@ async def _seed_table(svc: MetaService, repo: MetaRepository) -> int:
     return table_id
 
 
-async def _seed_project_values(repo: MetaRepository, table_id: int) -> None:
-    """写入 project_id 枚举取值。"""
-    col_map = await repo.get_column_map(table_id)
-    project_col = col_map.get("project_id")
-    if project_col is None:
-        print("未找到 project_id 字段，跳过取值种子")
-        return
-
-    for item in _PROJECT_VALUES:
-        fid = await repo.upsert_field_value(
-            project_col.id,
-            value_text=item["value_text"],
-            display_label=item["display_label"],
-            alias_json=item["alias_json"],
-        )
-        print(f"  取值 {item['display_label']}={item['value_text']} id={fid}")
-
-
 async def _seed_metric_extensions(session: AsyncSession) -> None:
     """补充 V004 指标扩展字段。"""
     from sqlalchemy import text
@@ -198,6 +181,10 @@ async def _seed_metric_extensions(session: AsyncSession) -> None:
 
 
 async def main() -> None:
+    if not _TABLE:
+        print("请设置环境变量 SEED_PRIMARY_TABLE")
+        sys.exit(1)
+
     settings = get_settings()
     copilot_engine = create_async_engine(settings.copilot_database_url, echo=False)
     copilot_factory = async_sessionmaker(copilot_engine, expire_on_commit=False)
@@ -209,7 +196,6 @@ async def main() -> None:
         svc = MetaService(copilot, business, settings)
         repo = MetaRepository(copilot)
         table_id = await _seed_table(svc, repo)
-        await _seed_project_values(repo, table_id)
         await _seed_metric_extensions(copilot)
         await copilot.commit()
         col_count = len(await repo.list_columns(table_id))

@@ -1,5 +1,5 @@
 """
-混合召回：ES 向量/全文 + MySQL 关键词降级。
+混合召回：Zvec/ES 向量+全文混合 + MySQL 关键词降级。
 """
 
 from __future__ import annotations
@@ -26,7 +26,8 @@ from app.meta.repository import (
     parse_alias_json,
 )
 from app.retrieval.embedding import EmbeddingClient
-from app.retrieval.es_client import AskElasticsearchClient
+from app.retrieval.search_index import SearchIndexClient, create_search_index_client
+from app.retrieval.zvec_client import build_table_name_filter
 from app.retrieval.keyword_extractor import extract_keywords
 from config.settings import Settings
 
@@ -246,7 +247,7 @@ def rank_field_values_by_keywords(
 
 
 class HybridRetriever:
-    """问句混合召回：向量 + 全文，ES 故障时 MySQL 关键词降级。"""
+    """问句混合召回：向量 + 全文，检索后端不可用时 MySQL 关键词降级。"""
 
     def __init__(
         self,
@@ -254,19 +255,24 @@ class HybridRetriever:
         settings: Settings,
         *,
         embedding: EmbeddingClient | None = None,
-        es: AskElasticsearchClient | None = None,
+        search_index: SearchIndexClient | None = None,
     ):
         self._session = copilot_session
         self._settings = settings
         self._repo = MetaRepository(copilot_session)
         self._embedding = embedding or EmbeddingClient(settings)
-        self._es = es or AskElasticsearchClient(settings)
+        self._index = search_index or create_search_index_client(settings)
 
     async def close(self) -> None:
-        await self._es.close()
+        await self._index.close()
 
-    async def _es_available(self) -> bool:
-        return await self._es.ping()
+    async def _index_available(self) -> bool:
+        return await self._index.ping()
+
+    def _vector_recall_mode(self) -> str:
+        if self._settings.recall_hybrid_rerank and self._settings.vector_store.lower() != "elasticsearch":
+            return "vector_hybrid"
+        return "vector"
 
     async def recall_tables_only(
         self,
@@ -275,10 +281,10 @@ class HybridRetriever:
     ) -> tuple[list[RecalledTable], str]:
         """表级向量/关键词召回。"""
         kws = keywords if keywords is not None else extract_keywords(question)
-        use_es = await self._es_available()
-        tables = await self._recall_tables(question, kws, use_es=use_es)
+        use_index = await self._index_available()
+        tables = await self._recall_tables(question, kws, use_index=use_index)
         mode = "keyword_fallback" if tables and tables[0].recall_mode == "keyword_fallback" else "hybrid"
-        if not use_es and self._settings.recall_keyword_fallback:
+        if not use_index and self._settings.recall_keyword_fallback:
             mode = "keyword_fallback"
         return tables, mode
 
@@ -291,11 +297,11 @@ class HybridRetriever:
     ) -> tuple[list[RecalledColumn], str]:
         """字段向量/关键词召回；可选限定在候选表内。"""
         kws = keywords if keywords is not None else extract_keywords(question)
-        use_es = await self._es_available()
+        use_index = await self._index_available()
         scope = set(table_names) if table_names else None
-        cols = await self._recall_columns(question, kws, use_es=use_es, table_names=scope)
+        cols = await self._recall_columns(question, kws, use_index=use_index, table_names=scope)
         mode = "keyword_fallback" if cols and cols[0].recall_mode == "keyword_fallback" else "hybrid"
-        if not use_es and self._settings.recall_keyword_fallback:
+        if not use_index and self._settings.recall_keyword_fallback:
             mode = "keyword_fallback"
         return cols, mode
 
@@ -306,8 +312,8 @@ class HybridRetriever:
     ) -> list[RecalledMetric]:
         """仅指标召回。"""
         kws = keywords if keywords is not None else extract_keywords(question)
-        use_es = await self._es_available()
-        return await self._recall_metrics(question, kws, use_es=use_es)
+        use_index = await self._index_available()
+        return await self._recall_metrics(question, kws, use_index=use_index)
 
     async def recall_field_values_only(
         self,
@@ -316,8 +322,8 @@ class HybridRetriever:
     ) -> list[RecalledFieldValue]:
         """仅字段取值召回。"""
         kws = keywords if keywords is not None else extract_keywords(question)
-        use_es = await self._es_available()
-        return await self._recall_field_values(question, kws, use_es=use_es)
+        use_index = await self._index_available()
+        return await self._recall_field_values(question, kws, use_index=use_index)
 
     async def recall_all(self, question: str, keywords: list[str] | None = None) -> HybridRecallResult:
         """执行表/字段/指标/取值召回并返回合并结果。"""
@@ -353,15 +359,21 @@ class HybridRetriever:
         question: str,
         keywords: list[str],
         *,
-        use_es: bool,
+        use_index: bool,
     ) -> list[RecalledTable]:
         top_k = self._settings.recall_top_k_table
-        if use_es:
+        recall_mode = self._vector_recall_mode()
+        if use_index:
             try:
                 query_text = " ".join(keywords) or question
                 vectors = await self._embedding.embed_texts([query_text])
                 if vectors:
-                    hits = await self._es.search_vector("table", vectors[0], top_k=top_k)
+                    hits = await self._index.search_vector(
+                        "table",
+                        vectors[0],
+                        top_k=top_k,
+                        query_text=query_text,
+                    )
                     if hits:
                         return [
                             RecalledTable(
@@ -369,12 +381,12 @@ class HybridRetriever:
                                 table_name=str(h["table_name"]),
                                 search_text=str(h.get("search_text") or ""),
                                 score=float(h.get("_score") or 0.0),
-                                recall_mode="es_vector",
+                                recall_mode=recall_mode,
                             )
                             for h in hits
                         ]
             except Exception:
-                use_es = False
+                use_index = False
 
         if not self._settings.recall_keyword_fallback:
             return []
@@ -387,40 +399,39 @@ class HybridRetriever:
         question: str,
         keywords: list[str],
         *,
-        use_es: bool,
+        use_index: bool,
         table_names: set[str] | None = None,
     ) -> list[RecalledColumn]:
         top_k = self._settings.recall_top_k_column
-        if use_es:
+        recall_mode = self._vector_recall_mode()
+        if use_index:
             try:
                 query_text = " ".join(keywords) or question
                 vectors = await self._embedding.embed_texts([query_text])
                 if vectors:
-                    fetch_k = top_k * 3 if table_names else top_k
-                    hits = await self._es.search_vector("column", vectors[0], top_k=fetch_k)
+                    filter_expr = build_table_name_filter(table_names)
+                    hits = await self._index.search_vector(
+                        "column",
+                        vectors[0],
+                        top_k=top_k,
+                        query_text=query_text,
+                        filter_expr=filter_expr,
+                    )
                     if hits:
-                        results: list[RecalledColumn] = []
-                        for h in hits:
-                            table_name = str(h["table_name"])
-                            if table_names is not None and table_name not in table_names:
-                                continue
-                            results.append(
-                                RecalledColumn(
-                                    column_id=int(h["column_id"]),
-                                    table_id=int(h["table_id"]),
-                                    table_name=table_name,
-                                    column_name=str(h["column_name"]),
-                                    search_text=str(h.get("search_text") or ""),
-                                    score=float(h.get("_score") or 0.0),
-                                    recall_mode="es_vector",
-                                )
+                        return [
+                            RecalledColumn(
+                                column_id=int(h["column_id"]),
+                                table_id=int(h["table_id"]),
+                                table_name=str(h["table_name"]),
+                                column_name=str(h["column_name"]),
+                                search_text=str(h.get("search_text") or ""),
+                                score=float(h.get("_score") or 0.0),
+                                recall_mode=recall_mode,
                             )
-                            if len(results) >= top_k:
-                                break
-                        if results:
-                            return results
+                            for h in hits
+                        ]
             except Exception:
-                use_es = False
+                use_index = False
 
         if not self._settings.recall_keyword_fallback:
             return []
@@ -433,15 +444,21 @@ class HybridRetriever:
         question: str,
         keywords: list[str],
         *,
-        use_es: bool,
+        use_index: bool,
     ) -> list[RecalledMetric]:
         top_k = self._settings.recall_top_k_metric
-        if use_es:
+        recall_mode = self._vector_recall_mode()
+        if use_index:
             try:
                 query_text = " ".join(keywords) or question
                 vectors = await self._embedding.embed_texts([query_text])
                 if vectors:
-                    hits = await self._es.search_vector("metric", vectors[0], top_k=top_k)
+                    hits = await self._index.search_vector(
+                        "metric",
+                        vectors[0],
+                        top_k=top_k,
+                        query_text=query_text,
+                    )
                     if hits:
                         return [
                             RecalledMetric(
@@ -450,13 +467,13 @@ class HybridRetriever:
                                 metric_name=str(h["metric_name"]),
                                 search_text=str(h.get("search_text") or ""),
                                 score=float(h.get("_score") or 0.0),
-                                recall_mode="es_vector",
+                                recall_mode=recall_mode,
                                 relevant_tables=h.get("relevant_tables"),
                             )
                             for h in hits
                         ]
             except Exception:
-                use_es = False
+                use_index = False
 
         if not self._settings.recall_keyword_fallback:
             return []
@@ -469,13 +486,13 @@ class HybridRetriever:
         question: str,
         keywords: list[str],
         *,
-        use_es: bool,
+        use_index: bool,
     ) -> list[RecalledFieldValue]:
         top_k = self._settings.recall_top_k_value
-        if use_es:
+        if use_index:
             try:
                 query_text = " ".join(keywords) or question
-                hits = await self._es.search_fulltext("value", query_text, top_k=top_k)
+                hits = await self._index.search_fulltext("value", query_text, top_k=top_k)
                 if hits:
                     return [
                         RecalledFieldValue(
@@ -486,12 +503,12 @@ class HybridRetriever:
                             display_label=h.get("display_label"),
                             search_text=str(h.get("search_text") or ""),
                             score=float(h.get("_score") or 0.0),
-                            recall_mode="es_fulltext",
+                            recall_mode="fulltext",
                         )
                         for h in hits
                     ]
             except Exception:
-                use_es = False
+                use_index = False
 
         if not self._settings.recall_keyword_fallback:
             return []
@@ -512,13 +529,19 @@ class HybridRetriever:
         kws = keywords if keywords is not None else extract_keywords(question)
         limit = top_k or self._settings.recall_top_k_code
         code_repo = CodeKnowledgeRepository(self._session)
-        use_es = await self._es_available()
-        if use_es:
+        use_index = await self._index_available()
+        recall_mode = self._vector_recall_mode()
+        if use_index:
             try:
                 query_text = " ".join(kws) or question
                 vectors = await self._embedding.embed_texts([query_text])
                 if vectors:
-                    hits = await self._es.search_vector("code_artifact", vectors[0], top_k=limit)
+                    hits = await self._index.search_vector(
+                        "code_artifact",
+                        vectors[0],
+                        top_k=limit,
+                        query_text=query_text,
+                    )
                     if hits:
                         items: list[RecalledCodeArtifact] = []
                         for h in hits:
@@ -537,14 +560,14 @@ class HybridRetriever:
                                     artifact_type=str(h.get("artifact_type") or ""),
                                     search_text=str(h.get("search_text") or ""),
                                     score=float(h.get("_score") or 0.0),
-                                    recall_mode="es_vector",
+                                    recall_mode=recall_mode,
                                     summary_text=h.get("summary_text"),
                                     tables=list(tables) if isinstance(tables, list) else [],
                                 )
                             )
                         return items, "hybrid"
             except Exception:
-                use_es = False
+                use_index = False
 
         rows = await code_repo.list_indexable_artifacts()
         scored: list[tuple[float, object]] = []

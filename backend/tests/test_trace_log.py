@@ -14,6 +14,24 @@ from app.observability.trace_log import (
 )
 
 
+def test_sanitize_detail_preserves_context_text_for_debug() -> None:
+    prompt = "【允许查询的业务表】\n" + ("line\n" * 200)
+    out = sanitize_detail({"context_text": prompt, "chars": len(prompt)})
+    assert out is not None
+    assert out["context_text"] == prompt
+    assert "preview=" not in out["context_text"]
+
+
+def test_sanitize_detail_truncates_oversized_context_text() -> None:
+    from app.observability import trace_log
+
+    huge = "x" * (trace_log._MAX_CONTEXT_TEXT_LEN + 1000)
+    out = sanitize_detail({"context_text": huge})
+    assert out is not None
+    assert len(out["context_text"]) < len(huge)
+    assert "已截断" in out["context_text"]
+
+
 def test_sanitize_detail_truncates_sql() -> None:
     long_sql = "SELECT " + "x" * 5000
     out = sanitize_detail({"sql_preview": long_sql})

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from app.ask.example_ranker import rank_curated_examples_for_prompt
+from app.ask.example_ranker import format_curated_sql_example_lines, rank_curated_examples_for_prompt
 from app.ask.semantic_repository import SemanticRepository
 from app.core.context import UserContext
 from app.policy.role_policy import build_llm_sql_generation_constraints, build_role_context_header
@@ -63,13 +63,9 @@ async def build_retrieval_context(
         examples,
         top_k=cfg.curated_example_top_k,
         min_score=cfg.curated_example_min_score,
+        allowed_tables=frozenset(allowed),
     )
-    if ranked:
-        parts.append("【相似样例 SQL（仅供参考，勿照搬若不符合问句）】")
-        for ex, relevance in ranked:
-            parts.append(f"问法示例：{ex.question_pattern}（相关度={relevance}）")
-            parts.append(f"SQL：{ex.sql_text[:500]}")
-            parts.append("")
+    parts.extend(format_curated_sql_example_lines(ranked))
 
     parts.append("【生成约束】")
     parts.extend(build_llm_sql_generation_constraints(ctx))

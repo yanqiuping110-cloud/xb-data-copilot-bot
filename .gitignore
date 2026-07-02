@@ -39,6 +39,7 @@ frontend/dist/
 
 # 本地数据
 *.db
+backend/data/zvec/
 .coverage
 htmlcov/
 

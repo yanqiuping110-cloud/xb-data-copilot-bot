@@ -16,6 +16,11 @@ from config.settings import Settings
 _SQL_BLOCK_RE = re.compile(r"```(?:sql)?\s*([\s\S]*?)```", re.IGNORECASE)
 _SQL_START_RE = re.compile(r"((?:WITH|SELECT)[\s\S]+)", re.IGNORECASE)
 
+_CONTEXT_ONLY_HINT = (
+    "严格遵守上下文【允许查询的业务表】与【候选表字段清单】中的真实表名与列名，禁止编造。"
+    "时间/日期筛选须使用清单中的日期或时间列，禁止把中文「日期」当作列名。"
+)
+
 
 def _extract_sql(text: str) -> str | None:
     """从模型输出中提取 SELECT 或 WITH ... SELECT 语句。"""
@@ -61,12 +66,9 @@ async def generate_sql_from_llm(
     system = (
         build_sql_system_preamble()
         + "你是企业问数系统的 SQL 生成助手，只为业务库生成只读查询。"
-        "严格遵守上下文中的表白名单与 MySQL 5.7 语法。"
-        "只能使用上下文中【候选表字段清单】列出的真实列名，禁止编造任何字段。"
-        "时间/日期筛选请用 create_time、activity_start_time 等真实列，禁止把中文「日期」当作列名。"
-        "SELECT 列别名优先使用中文（如 AS 学生名、AS 入学年份）；"
-        "仅当用户明确要求英文表头时才使用英文别名。"
-        f"{LLM_JOIN_ALIAS_SYSTEM_HINT}"
+        + _CONTEXT_ONLY_HINT
+        + "SELECT 列别名优先使用中文；仅当用户明确要求英文表头时才使用英文别名。"
+        + LLM_JOIN_ALIAS_SYSTEM_HINT
     )
     bounded_q = wrap_untrusted(
         "user_question",
@@ -126,10 +128,11 @@ async def generate_sql_step_from_llm(
     system = (
         "你是企业问数 SQL 生成助手。根据规划步骤与用户问题生成一条可执行的 MySQL 只读 SELECT。"
         "优先写简单 SQL：单条 SELECT + WHERE/GROUP BY 即可；仅在步骤明确需要时才使用 WITH CTE。"
-        "禁止无关 CROSS JOIN、笛卡尔积或过度嵌套；对比多个项目用 GROUP BY 或条件聚合。"
-        "趋势类问题按日期 GROUP BY；人数/人次用 COUNT(DISTINCT user_id) 或 COUNT(*) 视上下文而定。"
-        "严格遵守上下文表白名单与真实列名，禁止编造字段。"
-        f"{LLM_JOIN_ALIAS_SYSTEM_HINT}"
+        "禁止无关 CROSS JOIN、笛卡尔积或过度嵌套；多维度对比用 GROUP BY 或条件聚合。"
+        "趋势类问题按上下文中的日期/时间列 GROUP BY；"
+        "人数类指标用 COUNT(DISTINCT 清单中的人员标识列) 或 COUNT(*) 视字段含义而定。"
+        + _CONTEXT_ONLY_HINT
+        + LLM_JOIN_ALIAS_SYSTEM_HINT
     )
     user = (
         f"{context_text}\n\n"
@@ -191,41 +194,40 @@ async def generate_sql_for_plan_step(
     constraints: list[str] = []
     if filter_hint.get("activity_id") is not None:
         constraints.append(
-            f"必须且只能查询 activity_id = {filter_hint['activity_id']} 的活动数据；"
-            "禁止 WHERE activity_id IN (...) 同时查多个活动。"
+            f"必须且只能查询 activity_id = {filter_hint['activity_id']} 的实体数据；"
+            "禁止 WHERE activity_id IN (...) 一次查多个实体（activity_id 须为上下文候选字段）。"
         )
     if filter_hint.get("activity_name"):
         name = str(filter_hint["activity_name"])
         short = name[:60] + ("…" if len(name) > 60 else "")
         constraints.append(
-            f"必须且只能查询活动名称与「{short}」匹配的那一个活动；禁止一次查多个活动。"
+            f"必须且只能查询名称与「{short}」匹配的那一个实体；禁止一次查多个。"
         )
     project_names = filter_hint.get("project_names") or []
     if project_names:
         projects = "、".join(project_names[:8])
         constraints.append(
-            f"问句要求按运动项目分项：{projects}。"
-            "须通过 project_id JOIN sport_project（或上下文中的项目表）按项目过滤/分组，"
-            "为每个项目在结果中提供独立指标列（如跳绳运动个数、跑步运动个数）；"
-            "禁止仅用 SUM(sport_value) 一个总数列代替多个项目分项。"
+            f"问句要求按项目/维度分项：{projects}。"
+            "须通过上下文中的关联表与项目名字段（或字段取值映射）过滤/分组，"
+            "为每个分项在结果中提供独立指标列；"
+            "禁止用一个未分项的总聚合列代替多个分项。"
         )
     if step_metrics:
         metrics_line = "、".join(step_metrics[:12])
         constraints.append(
             f"本步结果列须覆盖以下指标（中文列名）：{metrics_line}。"
-            "打卡人数用 COUNT(DISTINCT 人员标识列)；各项目运动个数分别聚合。"
+            "人数类用 COUNT(DISTINCT 人员标识列)；各分项分别聚合。"
         )
     constraint_text = "\n".join(constraints)
 
     system = (
         "你是企业问数 SQL 生成助手。根据用户问句、规划步骤与上下文，生成一条可独立执行的 MySQL 只读 SELECT。"
-        "本步骤 SQL 将单独执行；多活动对比时每一步只查一个活动，由程序按日期合并结果。"
-        "须完整实现问句与本步 goal/metrics 中的全部指标，不得省略项目维度或合并为单一运动总数。"
-        "事实表常见 sport_activity_qzs_time（含 activity_id、project_id、sport_value、record_date）；"
-        "项目维度常见 sport_project，通过 project_id 关联。"
-        "结果须含日期列（别名「日期」）及各指标列；优先 JOIN + GROUP BY 或条件聚合。"
-        "严格遵守上下文表白名单与真实列名，禁止编造字段。"
-        f"{LLM_JOIN_ALIAS_SYSTEM_HINT}"
+        "本步骤 SQL 将单独执行；多实体对比时每一步只查一个实体，由程序按对齐键合并结果。"
+        "须完整实现问句与本步 goal/metrics 中的全部指标，不得省略维度或合并为单一总数。"
+        "多表关联时使用上下文【候选表字段】中的外键与维度表；"
+        "结果须含对齐键列（如日期，别名「日期」）及各指标列；优先 JOIN + GROUP BY 或条件聚合。"
+        + _CONTEXT_ONLY_HINT
+        + LLM_JOIN_ALIAS_SYSTEM_HINT
     )
     user_parts = [
         context_text,
@@ -240,7 +242,7 @@ async def generate_sql_for_plan_step(
         user_parts.append(f"本步 metrics：{'、'.join(step_metrics)}")
     if constraint_text:
         user_parts.extend(["", "【本步硬性约束】", constraint_text])
-    user_parts.extend(["", "请输出本步骤的一条 SELECT（列别名优先中文，须含日期列）。"])
+    user_parts.extend(["", "请输出本步骤的一条 SELECT（列别名优先中文，须含对齐键列）。"])
     user = "\n".join(user_parts)
     response = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
     content = response.content if isinstance(response.content, str) else str(response.content)

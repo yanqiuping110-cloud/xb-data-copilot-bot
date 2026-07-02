@@ -9,8 +9,8 @@ import re
 
 _TABLE_RE = re.compile(r"\b(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)", flags=re.IGNORECASE)
 
-# 问句中常见统计词，用于生成宽松 matchAll
-_STAT_TERMS = ("参与", "参与人数", "人次", "打卡", "趋势", "汇总", "人数", "个数")
+# 问句中常见统计词，用于生成宽松 matchAll（不含具体运动/项目名）
+_STAT_TERMS = ("参与", "参与人数", "人次", "打卡", "趋势", "汇总", "人数", "个数", "合计", "占比")
 
 
 def extract_tables_from_sql(sql: str) -> list[str]:
@@ -21,7 +21,7 @@ def extract_tables_from_sql(sql: str) -> list[str]:
 
 
 def _guess_match_keywords(question: str) -> dict:
-    """根据问句生成 L1 匹配规则草案。"""
+    """根据问句生成 L1 匹配规则草案（仅通用统计/时间词，不写死业务枚举）。"""
     q = (question or "").strip()
     meta: dict = {}
     found = [t for t in _STAT_TERMS if t in q]
@@ -35,12 +35,7 @@ def _guess_match_keywords(question: str) -> dict:
         meta["adminOnly"] = True
         meta["requiresSchoolFilter"] = False
         meta.setdefault("matchAny", []).append("全平台")
-    if "跳绳" in q:
-        meta.setdefault("matchAny", []).append("跳绳")
-    if "跑步" in q:
-        meta.setdefault("matchAny", []).append("跑步")
     if not meta.get("matchAll") and not meta.get("matchAny") and not meta.get("matchAllGroups"):
-        # 无规则时用问句前 30 字作 questionPattern 参考
         meta["questionPattern"] = q[:80]
     return meta
 

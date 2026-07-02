@@ -153,6 +153,7 @@ async def build_agent_context(state: AskGraphState, config: RunnableConfig) -> d
         "success",
         {
             "chars": len(context_text),
+            "context_text": context_text,
             "observation_count": len(observations),
             "plan_steps": len((plan or {}).get("steps") or []),
         },

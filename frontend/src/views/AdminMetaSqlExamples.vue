@@ -62,7 +62,7 @@
             v-model="form.metaJsonText"
             type="textarea"
             :rows="6"
-            placeholder='{"matchAll":["参与人数"],"answerTemplate":"…","tables":["sport_activity_qzs_record"]}'
+            placeholder='{"matchAll":["参与人数"],"answerTemplate":"…","tables":["your_fact_table"]}'
           />
         </el-form-item>
       </el-form>

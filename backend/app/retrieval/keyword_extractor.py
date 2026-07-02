@@ -65,7 +65,7 @@ def _split_chinese_phrases(text: str, *, max_len: int = 6) -> list[str]:
 
 
 def _extract_short_chinese_bigrams(text: str) -> list[str]:
-    """从问句提取全部连续 2 字中文片段，优先保留业务实体词（如「跳绳」）。"""
+    """从问句提取全部连续 2 字中文片段，优先保留领域实体词。"""
     found: list[str] = []
     seen: set[str] = set()
     for i in range(len(text) - 1):
@@ -95,7 +95,7 @@ def extract_keywords(question: str, *, max_keywords: int = 12) -> list[str]:
     tokens: list[str] = []
     seen: set[str] = set()
 
-    # 先放入全部 2 字中文片段，避免长句 n-gram 挤掉「跳绳」等领域词
+    # 先放入全部 2 字中文片段，避免长句 n-gram 挤掉短领域词
     for token in _extract_short_chinese_bigrams(q):
         seen.add(token)
         tokens.append(token)
