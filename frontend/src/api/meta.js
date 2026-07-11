@@ -1,5 +1,5 @@
 /**
- * 元数据 / 语义库管理 API（ADMIN / OPERATOR，对应 backend /api/v1/admin/meta）。
+ * 元数据 / 语义库管理 API（仅 ADMIN，对应 backend /api/v1/admin/meta）。
  */
 import request from '../utils/request'
 

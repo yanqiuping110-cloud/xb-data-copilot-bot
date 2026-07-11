@@ -80,6 +80,12 @@ const routes = [
     meta: { requiresMetaManager: true },
   },
   {
+    path: '/admin/meta/scope',
+    name: 'AdminMetaScope',
+    component: () => import('../views/AdminMetaScope.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
     path: '/admin/meta/badcases',
     name: 'AdminBadcases',
     component: () => import('../views/AdminBadcases.vue'),
@@ -121,7 +127,7 @@ router.beforeEach((to) => {
   }
   if (to.meta.requiresMetaManager) {
     const role = localStorage.getItem('userRole')
-    if (role !== 'ADMIN' && role !== 'OPERATOR') {
+    if (role !== 'ADMIN') {
       return { name: 'Ask' }
     }
   }

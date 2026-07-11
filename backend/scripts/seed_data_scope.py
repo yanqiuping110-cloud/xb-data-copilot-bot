@@ -18,19 +18,29 @@ from sqlalchemy import text
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.db.copilot import async_session_factory  # noqa: E402
+from app.db.copilot import get_session_factory  # noqa: E402
 
 
 async def main() -> None:
-    async with async_session_factory() as session:
-        # 为已注册表绑定 school 维度（列名取自 table_meta.sch_id_column）
+    factory = get_session_factory()
+    async with factory() as session:
+        # 仅当绑定列在 column_meta 中真实存在时才注册 school 维度
         await session.execute(
             text(
                 """
                 INSERT INTO copilot_table_scope_binding (table_id, dimension_code, column_name)
-                SELECT tm.id, 'school', tm.sch_id_column
+                SELECT tm.id, 'school', COALESCE(NULLIF(tm.sch_id_column, ''), 'sch_id')
                 FROM copilot_table_meta tm
                 WHERE tm.deleted = 0 AND tm.status = 1
+                  AND EXISTS (
+                    SELECT 1 FROM copilot_column_meta c
+                    WHERE c.table_id = tm.id
+                      AND c.deleted = 0
+                      AND c.status = 1
+                      AND LOWER(c.column_name) = LOWER(
+                        COALESCE(NULLIF(tm.sch_id_column, ''), 'sch_id')
+                      )
+                  )
                   AND NOT EXISTS (
                     SELECT 1 FROM copilot_table_scope_binding b
                     WHERE b.table_id = tm.id AND b.dimension_code = 'school' AND b.deleted = 0
@@ -38,6 +48,27 @@ async def main() -> None:
                 """
             )
         )
+
+        # 清理历史误绑：列在元数据中不存在的 school 绑定
+        cleanup = await session.execute(
+            text(
+                """
+                UPDATE copilot_table_scope_binding b
+                JOIN copilot_table_meta tm ON tm.id = b.table_id
+                SET b.deleted = b.id, b.updated_at = NOW()
+                WHERE b.deleted = 0
+                  AND b.dimension_code = 'school'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM copilot_column_meta c
+                    WHERE c.table_id = tm.id
+                      AND c.deleted = 0
+                      AND c.status = 1
+                      AND LOWER(c.column_name) = LOWER(b.column_name)
+                  )
+                """
+            )
+        )
+        cleaned = cleanup.rowcount or 0
 
         # 学校用户：sch_id → data_grant + 全表白名单 grant
         users = await session.execute(
@@ -93,7 +124,10 @@ async def main() -> None:
                 )
 
         await session.commit()
-        print("DataScope 种子完成：table_scope_binding + SCHOOL 用户 grant")
+        print(
+            f"DataScope 种子完成：table_scope_binding + SCHOOL 用户 grant"
+            f"（清理无效绑定 {cleaned} 条）"
+        )
 
 
 if __name__ == "__main__":

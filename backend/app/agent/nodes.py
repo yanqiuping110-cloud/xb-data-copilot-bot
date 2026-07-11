@@ -25,6 +25,7 @@ from app.policy.role_policy import (
     require_school_scope,
     strip_sch_id_for_broad_roles,
 )
+from app.policy.scope_injector import apply_scope_to_sql, validate_scope_literals
 from app.sql.executor import execute_readonly
 from app.meta.repository import MetaRepository
 from app.sql.column_guard import validate_sql_columns
@@ -304,7 +305,11 @@ async def apply_policy(state: AskGraphState, config: RunnableConfig) -> dict:
             validate_scope_literals(final_sql, policy)
             scoped_sql, scope_params = apply_scope_to_sql(final_sql, policy)
             params.update(scope_params)
-            detail = {"scope_injected": scoped_sql != final_sql, "grants_hash": policy.grants_hash}
+            detail = {
+                "scope_injected": scoped_sql != final_sql,
+                "grants_hash": policy.grants_hash,
+                "sql_params": dict(params),
+            }
             await _span(config, "apply_policy", t0, "success", detail)
             return {"sql_params": params, "final_sql": scoped_sql}
         except SqlGuardError as exc:
@@ -396,7 +401,17 @@ async def execute_sql(state: AskGraphState, config: RunnableConfig) -> dict:
             max_rows=settings.sql_max_rows,
         )
         exec_ms = int((time.perf_counter() - t0) * 1000)
-        await _span(config, "execute_sql", t0, "success", {"row_count": len(rows)})
+        await _span(
+            config,
+            "execute_sql",
+            t0,
+            "success",
+            {
+                "row_count": len(rows),
+                "sql_preview": final_sql,
+                "sql_params": dict(params),
+            },
+        )
         tables = state.get("tables_used") or ""
         if not tables and state.get("matched"):
             tables = ",".join(state["matched"].tables)
@@ -426,7 +441,7 @@ async def execute_sql(state: AskGraphState, config: RunnableConfig) -> dict:
                 "error_code": "SQL_EXEC_ERROR",
                 "error_message": str(exc),
                 "sql_preview": final_sql,
-                "params": params,
+                "sql_params": dict(params),
             },
         )
         return {
@@ -458,6 +473,30 @@ async def format_answer(state: AskGraphState, config: RunnableConfig) -> dict:
     t0 = time.perf_counter()
     error_code = state.get("error_code")
     rows = state.get("rows") or []
+    # 语义验证失败但已有结果集：仍返回可读答复，避免「有表却整单 fail」
+    if error_code == "VERIFY_FAILED" and rows:
+        answer = _format_answer_text(state) or f"查询返回 {len(rows)} 行数据。"
+        note = state.get("error_message")
+        if note and note not in answer:
+            answer = f"{answer}\n\n（校验提示：{note}）"
+        c = _cfg(config)
+        delta_queue = c.get("answer_delta_queue")
+        if delta_queue is not None:
+            await _emit_answer_deltas(answer, delta_queue)
+        await _span(
+            config,
+            "format_answer",
+            t0,
+            "success",
+            {"answer_preview": answer, "verify_failed_with_rows": True},
+        )
+        return {
+            "answer": answer,
+            "status": "success",
+            "error_code": None,
+            "error_message": None,
+        }
+
     # 语义验证仅因空结果失败且已耗尽修正：仍返回可读答复，避免多轮记忆链断裂
     if error_code == "VERIFY_FAILED" and not rows:
         answer = _format_answer_text(state) or "查询结果为空，请尝试调整时间范围或筛选条件。"

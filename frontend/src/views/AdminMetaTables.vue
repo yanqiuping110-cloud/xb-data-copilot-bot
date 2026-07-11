@@ -115,7 +115,9 @@
             </div>
             <el-button link type="primary" @click="addBindingRow">添加绑定</el-button>
           </div>
-          <p class="field-hint">多维度绑列后，问数时按 grant 对各列 IN 过滤并 AND 组合。</p>
+          <p class="field-hint">
+            仅对「确实有该物理列」的表绑定维度；无学校隔离的维表请留空。删掉绑定后点保存才会生效。
+          </p>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -231,19 +233,14 @@ async function openEdit(row) {
     ])
     tableColumns.value = colsRes.items || []
     const bindings = bindRes.items || []
-    if (bindings.length) {
-      editForm.scopeBindings = bindings.map((b) => ({
-        dimensionCode: b.dimensionCode,
-        columnName: b.columnName,
-      }))
-    } else if (row.schIdColumn) {
-      editForm.scopeBindings = [{ dimensionCode: 'school', columnName: row.schIdColumn }]
-    }
+    // 只展示库里真实绑定；不要用 schIdColumn 默认塞回 school（否则删了再打开又出现）
+    editForm.scopeBindings = bindings.map((b) => ({
+      dimensionCode: b.dimensionCode,
+      columnName: b.columnName,
+    }))
   } catch {
     tableColumns.value = []
-    if (row.schIdColumn) {
-      editForm.scopeBindings = [{ dimensionCode: 'school', columnName: row.schIdColumn }]
-    }
+    editForm.scopeBindings = []
   }
   editVisible.value = true
 }

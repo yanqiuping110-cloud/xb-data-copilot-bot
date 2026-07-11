@@ -43,6 +43,29 @@ def test_apply_scope_injects_in_clause():
     assert params["scope_tenant_0"] == 10
 
 
+def test_apply_scope_only_on_tables_with_binding():
+    """JOIN 时只对有 school 绑定的事实表注入，不对无 sch_id 的维度表注入。"""
+    policy = EffectivePolicy(
+        data_grants={"school": [1, 2, 3]},
+        table_bindings={
+            "sport_activity_qzs_time": [("school", "sch_id")],
+        },
+        allowed_tables=frozenset({"sport_activity_qzs_time", "sport_activity_new"}),
+        is_admin_bypass=False,
+    )
+    sql = (
+        "SELECT a.record_date AS `日期`, COUNT(DISTINCT a.user_id) AS `活动参与人数` "
+        "FROM sport_activity_qzs_time AS a "
+        "JOIN sport_activity_new AS act ON a.activity_id = act.id AND act.status = 1 "
+        "WHERE a.record_date >= CURRENT_DATE - INTERVAL '30' DAY "
+        "GROUP BY a.record_date"
+    )
+    scoped, params = apply_scope_to_sql(sql, policy)
+    assert "a.sch_id" in scoped.lower()
+    assert "act.sch_id" not in scoped.lower()
+    assert params == {"scope_school_0": 1, "scope_school_1": 2, "scope_school_2": 3}
+
+
 def test_validate_denied_column():
     policy = _policy_fixture()
     with pytest.raises(SqlGuardError) as exc:

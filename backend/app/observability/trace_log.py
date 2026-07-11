@@ -58,6 +58,9 @@ def sanitize_detail(detail: dict[str, Any] | None) -> dict[str, Any] | None:
             out[key] = {"count": len(value), "sample": value[:_MAX_ROWS_SAMPLE]}
         elif key == "answer" and isinstance(value, str):
             out["answer_preview"] = _truncate(value, _MAX_TEXT_PREVIEW)
+        elif key in ("sql_params", "params") and isinstance(value, dict):
+            # 绑定参数（如 scope_school_0）原样保留，供复盘还原真实 SQL
+            out["sql_params"] = {str(k): v for k, v in value.items()}
         elif isinstance(value, str) and len(value) > _MAX_TEXT_PREVIEW:
             out[key] = _truncate(value, _MAX_TEXT_PREVIEW)
         else:
@@ -223,6 +226,9 @@ def build_final_summary(final_state: dict[str, Any]) -> dict[str, Any]:
     }
     if sql:
         summary["sql_preview"] = _truncate(str(sql), _MAX_SQL_LEN)
+    sql_params = final_state.get("sql_params")
+    if isinstance(sql_params, dict) and sql_params:
+        summary["sql_params"] = {str(k): v for k, v in sql_params.items()}
     if answer:
         summary["answer_preview"] = _truncate(str(answer), _MAX_TEXT_PREVIEW)
     if rows:

@@ -23,7 +23,7 @@
           用户管理
         </el-button>
         <el-button
-          v-if="user?.role === 'ADMIN' || user?.role === 'OPERATOR'"
+          v-if="user?.role === 'ADMIN'"
           link
           type="primary"
           @click="router.push('/admin/meta/tables')"
@@ -794,7 +794,7 @@ async function onMarkBadcase(msg) {
       isBadcase: true,
     })
     msg.feedback = 'down'
-    ElMessage.success('已标记为 badcase，运营可在元数据管理中处理')
+    ElMessage.success('已标记为 badcase，管理员可在元数据管理中处理')
   } finally {
     feedbackLoadingId.value = null
   }

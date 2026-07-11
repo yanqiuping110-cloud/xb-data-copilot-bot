@@ -55,15 +55,29 @@ class ScopeRepository:
         return frozenset(row["table_name"].lower() for row in result.mappings() if row.get("table_name"))
 
     async def load_table_bindings(self) -> dict[str, list[tuple[str, str]]]:
-        """物理表名（小写）→ [(dimension_code, column_name)]。"""
+        """
+        物理表名（小写）→ [(dimension_code, column_name)]。
+
+        仅保留「绑定列在 copilot_column_meta 中真实存在」的条目，
+        避免对无 sch_id 的维度表误注入（Unknown column）。
+        """
         result = await self._session.execute(
             text(
                 """
                 SELECT LOWER(tm.table_name) AS table_name,
                        b.dimension_code, b.column_name
                 FROM copilot_table_scope_binding b
-                JOIN copilot_table_meta tm ON tm.id = b.table_id AND tm.deleted = 0
+                JOIN copilot_table_meta tm
+                  ON tm.id = b.table_id AND tm.deleted = 0 AND tm.status = 1
                 WHERE b.deleted = 0
+                  AND EXISTS (
+                    SELECT 1
+                    FROM copilot_column_meta c
+                    WHERE c.table_id = tm.id
+                      AND c.deleted = 0
+                      AND c.status = 1
+                      AND LOWER(c.column_name) = LOWER(b.column_name)
+                  )
                 """
             ),
         )

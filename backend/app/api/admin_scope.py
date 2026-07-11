@@ -10,43 +10,44 @@ import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import UserContext
 from app.core.security import require_admin, require_meta_manager
 from app.db.copilot import get_copilot_session
+from app.schemas.base import CamelModel
 
 router = APIRouter(tags=["admin-scope"])
 
 
-class ScopeDimensionBody(BaseModel):
+class ScopeDimensionBody(CamelModel):
     code: str = Field(min_length=1, max_length=64)
     display_name: str = Field(min_length=1, max_length=128)
     value_type: str = Field(default="int", pattern="^(int|string)$")
     status: int = Field(default=1, ge=0, le=1)
 
 
-class DataGrantsBody(BaseModel):
+class DataGrantsBody(CamelModel):
     grants: dict[str, list[Any]] = Field(
         default_factory=dict,
         description="dimension_code → 允许值列表",
     )
 
 
-class TableGrantsBody(BaseModel):
+class TableGrantsBody(CamelModel):
     table_names: list[str] = Field(default_factory=list)
 
 
-class ColumnDenyBody(BaseModel):
+class ColumnDenyBody(CamelModel):
     table_name: str
     column_name: str
     reason: str | None = None
     user_id: int | None = None
 
 
-class ScopeBindingBody(BaseModel):
+class ScopeBindingBody(CamelModel):
     dimension_code: str
     column_name: str
 
@@ -102,12 +103,25 @@ async def put_user_data_grants(
     admin: Annotated[UserContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_copilot_session)],
 ):
-    """覆盖用户行级数据授权。"""
+    """
+    覆盖用户行级数据授权。
+
+    软删除用 deleted=id，避免 uk_user_dim(user_id, dimension_code, deleted) 冲突。
+    """
     await session.execute(
-        text("UPDATE copilot_user_data_grant SET deleted = 1 WHERE user_id = :uid"),
+        text(
+            """
+            UPDATE copilot_user_data_grant
+            SET deleted = id, updated_at = NOW()
+            WHERE user_id = :uid AND deleted = 0
+            """
+        ),
         {"uid": user_id},
     )
     for dim_code, values in body.grants.items():
+        code = (dim_code or "").strip()
+        if not code:
+            continue
         await session.execute(
             text(
                 """
@@ -118,7 +132,7 @@ async def put_user_data_grants(
             ),
             {
                 "uid": user_id,
-                "dim": dim_code,
+                "dim": code,
                 "vals": json.dumps(values, ensure_ascii=False),
                 "by": admin.user_id,
             },
@@ -134,12 +148,25 @@ async def put_user_table_grants(
     _: Annotated[UserContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_copilot_session)],
 ):
-    """覆盖用户表级 allow 列表。"""
+    """
+    覆盖用户表级 allow 列表。
+
+    软删除用 deleted=id，避免 uk_user_table(user_id, table_name, deleted) 冲突。
+    """
     await session.execute(
-        text("UPDATE copilot_user_table_grant SET deleted = 1 WHERE user_id = :uid"),
+        text(
+            """
+            UPDATE copilot_user_table_grant
+            SET deleted = id, updated_at = NOW()
+            WHERE user_id = :uid AND deleted = 0
+            """
+        ),
         {"uid": user_id},
     )
     for tname in body.table_names:
+        name = (tname or "").strip()
+        if not name:
+            continue
         await session.execute(
             text(
                 """
@@ -147,7 +174,7 @@ async def put_user_table_grants(
                 VALUES (:uid, :tname, 'allow')
                 """
             ),
-            {"uid": user_id, "tname": tname},
+            {"uid": user_id, "tname": name},
         )
     await session.commit()
     return {"ok": True, "userId": user_id, "tables": body.table_names}
@@ -253,14 +280,27 @@ async def put_table_scope_bindings(
     _: Annotated[UserContext, Depends(require_meta_manager)],
     session: Annotated[AsyncSession, Depends(get_copilot_session)],
 ):
-    """覆盖表的维度列绑定。"""
+    """
+    覆盖表的维度列绑定。
+
+    软删除用 deleted=id（避免 uk_table_dim(table_id, dimension_code, deleted)
+    在反复删建时与历史 deleted=1 行冲突）。
+    """
     await session.execute(
         text(
-            "UPDATE copilot_table_scope_binding SET deleted = 1 WHERE table_id = :tid"
+            """
+            UPDATE copilot_table_scope_binding
+            SET deleted = id, updated_at = NOW()
+            WHERE table_id = :tid AND deleted = 0
+            """
         ),
         {"tid": table_id},
     )
     for b in bindings:
+        code = (b.dimension_code or "").strip()
+        col = (b.column_name or "").strip()
+        if not code or not col:
+            continue
         await session.execute(
             text(
                 """
@@ -268,7 +308,7 @@ async def put_table_scope_bindings(
                 VALUES (:tid, :dim, :col)
                 """
             ),
-            {"tid": table_id, "dim": b.dimension_code, "col": b.column_name},
+            {"tid": table_id, "dim": code, "col": col},
         )
     await session.commit()
     return {"ok": True, "tableId": table_id, "count": len(bindings)}

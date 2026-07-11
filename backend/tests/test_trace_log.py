@@ -79,18 +79,33 @@ def test_collector_fatal_and_resolve_error_node() -> None:
     assert resolve_error_node(collector, error_code="LLM_NO_SQL") == "generate_sql"
 
 
+def test_sanitize_detail_preserves_sql_params() -> None:
+    out = sanitize_detail(
+        {
+            "row_count": 5,
+            "sql_preview": "SELECT 1 WHERE sch_id IN (:scope_school_0)",
+            "sql_params": {"scope_school_0": 1140, "scope_school_1": 1220},
+        }
+    )
+    assert out is not None
+    assert out["sql_params"] == {"scope_school_0": 1140, "scope_school_1": 1220}
+
+
 def test_build_final_summary() -> None:
     summary = build_final_summary(
         {
-            "final_sql": "SELECT 1",
+            "final_sql": "SELECT 1 WHERE sch_id IN (:scope_school_0)",
+            "sql_params": {"scope_school_0": 1140},
             "answer": "共 1 行",
             "rows": [[1]],
             "degrade_level": 0,
             "retry_count": 1,
         }
     )
+    assert summary["sql_preview"] == "SELECT 1 WHERE sch_id IN (:scope_school_0)"
+    assert summary["sql_params"] == {"scope_school_0": 1140}
     assert summary["row_count"] == 1
-    assert summary["sql_preview"] == "SELECT 1"
+    assert summary["retry_count"] == 1
     assert summary["answer_preview"] == "共 1 行"
 
 

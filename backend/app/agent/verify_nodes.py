@@ -45,6 +45,40 @@ _DIMENSION_HINTS = (
 # plan 指标中的占比/比率类后缀；列可拆为「基指标 + 占比列」
 _RATIO_MARKERS = ("占比", "比例", "比率", "百分比")
 
+# 时间粒度前缀：plan 常写「每日参与人数」，SQL 别名多为「参与人数」
+_TIME_GRAIN_PREFIXES = (
+    "每日",
+    "每天",
+    "当日",
+    "逐日",
+    "按日",
+    "本周",
+    "上周",
+    "每周",
+    "本月",
+    "上月",
+    "每月",
+    "本年",
+    "今年",
+    "去年",
+    "近期",
+    "最近",
+)
+
+
+def _strip_metric_noise(label: str) -> str:
+    """去掉时间粒度等修饰，便于列名模糊匹配。"""
+    text = label.strip().lower()
+    changed = True
+    while changed and text:
+        changed = False
+        for prefix in _TIME_GRAIN_PREFIXES:
+            if text.startswith(prefix) and len(text) > len(prefix):
+                text = text[len(prefix) :]
+                changed = True
+                break
+    return text
+
 
 def _column_text(columns: list[str]) -> str:
     """列名拼接为小写文本，便于子串匹配。"""
@@ -83,6 +117,7 @@ def _metric_reflected_in_columns(metric: str, columns: list[str]) -> bool:
 
     支持：
     - 列名包含完整指标或关键子串
+    - 去掉「每日/本月」等时间粒度后与列名相等/互含（如 每日参与人数 ↔ 参与人数）
     - 复合占比指标拆列，如 plan「活动运动人数占比」← 列「活动运动人数」+「占比」
     """
     m = metric.strip()
@@ -90,13 +125,23 @@ def _metric_reflected_in_columns(metric: str, columns: list[str]) -> bool:
         return True
     col_list = [str(c) for c in columns]
     m_lower = m.lower()
+    m_core = _strip_metric_noise(m)
 
     for col in col_list:
         c_lower = col.lower()
-        if m_lower == c_lower or m_lower in c_lower:
+        if m_lower == c_lower or m_core == c_lower:
             return True
+        if m_lower in c_lower or m_core in c_lower:
+            return True
+        # 列名是去掉时间前缀后的指标尾部（禁止「运动个数」误匹配「跳绳运动个数」）
+        if len(c_lower) >= 2 and m_core.endswith(c_lower):
+            head = m_core[: -len(c_lower)]
+            if not head:
+                return True
+            if any(head == p or head.endswith(p) for p in _TIME_GRAIN_PREFIXES):
+                return True
         core = (
-            m_lower.replace("项目", "")
+            m_core.replace("项目", "")
             .replace("个数", "")
             .replace("人数", "")
             .replace("运动", "")

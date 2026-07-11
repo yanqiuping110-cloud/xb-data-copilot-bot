@@ -35,6 +35,19 @@ def test_verify_passes_when_plan_metrics_in_columns():
     assert result["passed"] is True
 
 
+def test_verify_passes_daily_metric_vs_shorter_alias():
+    """plan「每日参与人数」与列「参与人数」应视为匹配。"""
+    plan = {"metrics": ["每日参与人数"]}
+    result = verify_answer_heuristic(
+        "最近7天每日趋势",
+        ["日期", "参与人数"],
+        [["2026-07-05", 1]],
+        plan=plan,
+    )
+    assert result["passed"] is True
+    assert result["reason"] == "ok"
+
+
 def test_verify_passes_when_ratio_metric_split_across_columns():
     """plan「活动运动人数占比」可由「活动运动人数」+「占比」两列满足。"""
     plan = {

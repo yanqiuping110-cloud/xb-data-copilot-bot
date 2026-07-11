@@ -110,7 +110,8 @@ async def load_effective_policy(
     加载用户有效数据权限。
 
     `POLICY_DATA_SCOPE_ENABLED=false` 时返回 None（沿用全局白名单 + sch_id Flag）。
-    ADMIN 默认 bypass；其余角色无 grant 时 Fail-closed。
+    ADMIN 默认 bypass；其余角色在 default_deny 下须有可见表；
+    行级 data_grants 可选（空则不注入维度 IN）；渠道账户须有 school。
     """
     if not settings.policy_data_scope_enabled:
         return None
@@ -135,16 +136,22 @@ async def load_effective_policy(
     bindings = await repo.load_table_bindings()
     denied = await repo.load_denied_columns(ctx.user_id)
 
-    if not data_grants and settings.policy_default_deny:
-        raise PolicyError("NO_DATA_SCOPE", "无数据授权，无法问数")
-
     if table_grants:
         allowed = frozenset(t for t in table_grants if t in whitelist)
     else:
         allowed = frozenset() if settings.policy_default_deny else whitelist
 
+    # Fail-closed：默认拒绝时必须有可见表；行级维度可选（空 = 不注入 IN）
     if settings.policy_default_deny and not allowed:
         raise PolicyError("NO_DATA_SCOPE", "无表级授权，无法问数")
+
+    # 渠道账户必须有 school 行级授权，避免无过滤查全库
+    if (
+        ctx.role == UserRole.SCHOOL
+        and settings.policy_default_deny
+        and not data_grants.get("school")
+    ):
+        raise PolicyError("NO_DATA_SCOPE", "渠道账户须配置 school 维度授权")
 
     active_scopes = dict(ctx.active_scopes or {})
     for dim_code, values in data_grants.items():

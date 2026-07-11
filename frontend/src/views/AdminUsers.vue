@@ -87,7 +87,7 @@
         </el-form-item>
         <template v-if="createForm.role !== 'ADMIN'">
           <el-divider content-position="left">数据授权</el-divider>
-          <p class="hint">启用 DataScope 后，运营/渠道账户须配置行级维度与可见表方可问数。</p>
+          <p class="hint">启用 DataScope 后须配置可见表；行级维度可选（不配则不按学校等维度过滤）。渠道账户须配置 school。</p>
           <div v-for="(row, idx) in createForm.grantRows" :key="idx" class="grant-row">
             <el-select v-model="row.dimensionCode" placeholder="维度" style="width: 150px" filterable>
               <el-option
@@ -154,7 +154,7 @@
     <!-- 数据授权 -->
     <el-dialog v-model="grantsVisible" title="数据授权" width="600px" destroy-on-close>
       <p class="hint">
-        行级授权：每个维度配置多值 IN；多维度同时生效时 SQL 条件 AND 组合。表级授权：限制可查询的表白名单。
+        行级授权可选：每个维度配置多值 IN；不配则不注入行级过滤。表级授权：限制可查询的表白名单（必填）。
       </p>
       <el-form label-width="88px">
         <el-form-item label="行级维度">
@@ -258,6 +258,15 @@ function dimValueType(code) {
   return scopeDimensions.value.find((d) => d.code === code)?.value_type || 'int'
 }
 
+function normalizeTableNames(saved) {
+  const byLower = new Map(
+    metaTables.value.map((t) => [String(t.tableName || '').toLowerCase(), t.tableName]),
+  )
+  return (saved || [])
+    .map((n) => byLower.get(String(n).toLowerCase()) || n)
+    .filter(Boolean)
+}
+
 function addGrantRow(rows) {
   rows.push({ dimensionCode: '', valuesText: '' })
 }
@@ -274,7 +283,8 @@ function buildGrantsPayload(grantRows) {
 
 function grantRowsFromData(dataGrants) {
   if (!dataGrants || !Object.keys(dataGrants).length) {
-    return [{ dimensionCode: 'school', valuesText: '' }]
+    // 无行级授权 = 不限制维度；不要默认塞空的 school 行
+    return []
   }
   return Object.entries(dataGrants).map(([code, vals]) => ({
     dimensionCode: code,
@@ -447,7 +457,7 @@ async function openGrants(row) {
   try {
     const res = await getUserGrants(row.id)
     grantsForm.grantRows = grantRowsFromData(res.dataGrants)
-    grantsForm.tableNames = [...(res.tableGrants || [])]
+    grantsForm.tableNames = normalizeTableNames(res.tableGrants)
   } catch {
     if (row.role === 'SCHOOL' && row.boundSchools?.length) {
       grantsForm.grantRows = [{
@@ -455,7 +465,7 @@ async function openGrants(row) {
         valuesText: row.boundSchools.map((s) => s.schId).join(', '),
       }]
     } else {
-      grantsForm.grantRows = [{ dimensionCode: '', valuesText: '' }]
+      grantsForm.grantRows = []
     }
   }
   grantsVisible.value = true

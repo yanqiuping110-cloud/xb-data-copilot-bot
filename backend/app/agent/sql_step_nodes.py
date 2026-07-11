@@ -196,6 +196,7 @@ async def execute_plan_sql_step(state: AskGraphState, config: RunnableConfig) ->
                 "goal": goal,
                 "error_code": "SQL_EXEC_ERROR",
                 "sql_preview": final_sql,
+                "sql_params": dict(params),
             },
         )
         return {
@@ -248,6 +249,7 @@ async def execute_plan_sql_step(state: AskGraphState, config: RunnableConfig) ->
             "row_count": len(rows),
             "columns": columns[:12],
             "sql_preview": final_sql,
+            "sql_params": dict(params),
         },
     )
 
