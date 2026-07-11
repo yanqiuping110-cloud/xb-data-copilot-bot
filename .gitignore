@@ -40,6 +40,8 @@ frontend/dist/
 # 本地数据
 *.db
 backend/data/zvec/
+backend/storage/
+chart-ssr/node_modules/
 .coverage
 htmlcov/
 

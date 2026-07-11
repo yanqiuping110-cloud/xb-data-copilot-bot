@@ -61,7 +61,8 @@ def render_chart_local(
 
     dpi = 120
     fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
-    fig.patch.set_facecolor("#ffffff")
+    fig.patch.set_facecolor("none")
+    ax.set_facecolor("none")
     colors = ["#6366f1", "#8b5cf6", "#06b6d4"]
     for i, yc in enumerate(y_cols[:3]):
         yi = col_idx[yc]
@@ -80,7 +81,7 @@ def render_chart_local(
             ax.pie(y_vals, labels=x_vals, autopct="%1.0f%%", textprops={"fontsize": 7})
             ax.set_title(title or spec.get("title") or "图表", fontsize=11)
             fig.tight_layout()
-            fig.savefig(output_path, bbox_inches="tight", facecolor="white")
+            fig.savefig(output_path, bbox_inches="tight", transparent=True)
             plt.close(fig)
             return str(output_path)
         else:
@@ -94,6 +95,6 @@ def render_chart_local(
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
-    fig.savefig(output_path, bbox_inches="tight", facecolor="white")
+    fig.savefig(output_path, bbox_inches="tight", transparent=True)
     plt.close(fig)
     return str(output_path)

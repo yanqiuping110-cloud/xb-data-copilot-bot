@@ -39,7 +39,15 @@
 
     <main class="main">
       <aside class="session-sidebar">
-        <el-button type="primary" class="new-chat-btn" @click="onNewChat">+ 新对话</el-button>
+        <el-button
+          type="primary"
+          class="new-chat-btn"
+          :loading="sessionBusy"
+          :disabled="sessionBusy || !pageReady"
+          @click="onNewChat"
+        >
+          + 新对话
+        </el-button>
         <ul class="session-list">
           <li
             v-for="s in sessions"
@@ -102,21 +110,23 @@
 
               <!-- 助手消息 -->
               <div v-else class="response-card" :class="{ error: msg.isError }">
-                <details v-if="msg.thinking" class="thinking-panel" open>
-                  <summary>思考过程</summary>
-                  <pre class="thinking-text">{{ msg.thinking }}</pre>
-                </details>
+                <AskPipelineHeader
+                  v-if="msg.pipelineStep > 0"
+                  :active-step="msg.pipelineStep"
+                  :status-text="msg.statusText"
+                  :show-status="loading && idx === messages.length - 1 && !!msg.statusText"
+                />
+                <AskThinkingPanel v-if="canShowThinking && msg.thinking" :text="msg.thinking" />
                 <div class="answer-line">{{ msg.text }}</div>
 
-                <ul v-if="msg.progress?.length" class="progress-list">
-                  <li
-                    v-for="(step, si) in msg.progress"
-                    :key="si"
-                    :class="{ done: step.done, active: step.active }"
-                  >
-                    {{ step.label }}
-                  </li>
-                </ul>
+                <details
+                  v-if="msg.timeline?.length"
+                  class="progress-details"
+                  :open="msg.progressOpen"
+                >
+                  <summary>{{ timelineSummary(msg.timeline) }}</summary>
+                  <AskTimeline :steps="msg.timeline" />
+                </details>
 
                 <template v-if="msg.intermediateSteps?.length">
                   <div class="section-label">分步查询</div>
@@ -292,8 +302,18 @@ import {
   updatePreferences,
 } from '../api/sessions'
 import ResultPanel from '../components/ResultPanel.vue'
+import AskPipelineHeader from '../components/ask/AskPipelineHeader.vue'
+import AskThinkingPanel from '../components/ask/AskThinkingPanel.vue'
+import AskTimeline from '../components/ask/AskTimeline.vue'
 import BriefReportDrawer from '../components/brief-report/BriefReportDrawer.vue'
 import { countReportableMessages } from '../utils/briefReportTurn.js'
+import {
+  applyProgressEvent,
+  createAssistantStreamMessage,
+  finalizeTimeline,
+  formatDurationMs,
+  timelineTotalMs,
+} from '../utils/askProgress.js'
 
 const router = useRouter()
 const user = ref(null)
@@ -308,6 +328,8 @@ const messages = ref([])
 const feedbackLoadingId = ref(null)
 const sessionId = ref(null)
 const sessions = ref([])
+const pageReady = ref(false)
+const sessionBusy = ref(false)
 const messagesEl = ref(null)
 const WELCOME_TEXT =
   '你好，我是问数助手。可尝试：「本校本月跳绳参与人数」「最近7天每日趋势」「昨日全平台活动参与人次」。'
@@ -330,6 +352,7 @@ const needSelectSchool = computed(
 
 /** 仅系统管理员在聊天对话框内可见 SQL */
 const canShowSqlInChat = computed(() => user.value?.role === 'ADMIN')
+const canShowThinking = computed(() => user.value?.role === 'ADMIN')
 
 function intermediateTableRows(step) {
   if (!step?.columns?.length || !step?.rows?.length) return []
@@ -475,10 +498,44 @@ async function activateSession(id) {
   notifyChartsResize()
 }
 
+async function abortOngoingAsk() {
+  if (!loading.value) return
+  const tid = currentTraceId.value
+  try {
+    if (tid) {
+      try {
+        await postAskCancel(tid)
+      } catch {
+        /* 已结束则忽略，仍断开流 */
+      }
+    }
+    abortController.value?.abort()
+  } finally {
+    loading.value = false
+    cancelling.value = false
+    currentTraceId.value = null
+    abortController.value = null
+  }
+}
+
 async function onNewChat() {
-  const res = await createSession()
-  await loadSessions()
-  await activateSession(res.sessionId)
+  if (sessionBusy.value) return
+  sessionBusy.value = true
+  try {
+    await abortOngoingAsk()
+    const res = await createSession()
+    await loadSessions()
+    await activateSession(res.sessionId)
+  } catch (err) {
+    if (!pageReady.value) {
+      resetWelcomeMessages()
+    }
+    if (err?.code !== 'ERR_CANCELED') {
+      ElMessage.error(err?.message || '创建新对话失败，请稍后重试')
+    }
+  } finally {
+    sessionBusy.value = false
+  }
 }
 
 async function onSelectSession(id) {
@@ -543,21 +600,34 @@ onMounted(async () => {
     localStorage.setItem('userRole', res.user.role)
     boundSchools.value = res.user.boundSchools || []
     selectedSchId.value = res.user.activeSchId ?? boundSchools.value[0]?.schId ?? null
+    resetWelcomeMessages()
+    pageReady.value = true
 
-    await loadSessions()
-    const saved = localStorage.getItem('activeSessionId')
-    const owned = saved && sessions.value.some((s) => s.sessionId === saved)
-    if (owned) {
-      await activateSession(saved)
-    } else if (sessions.value.length) {
-      await activateSession(sessions.value[0].sessionId)
-    } else {
-      await onNewChat()
+    try {
+      await loadSessions()
+      const saved = localStorage.getItem('activeSessionId')
+      const owned = saved && sessions.value.some((s) => s.sessionId === saved)
+      if (owned) {
+        await activateSession(saved)
+      } else if (sessions.value.length) {
+        await activateSession(sessions.value[0].sessionId)
+      } else {
+        await onNewChat()
+      }
+    } catch {
+      ElMessage.error('加载对话列表失败，可点击「新对话」重试')
     }
   } catch {
     router.push('/login')
   }
 })
+
+function timelineSummary(timeline) {
+  if (!timeline?.length) return ''
+  const total = timelineTotalMs(timeline)
+  const totalText = total > 0 ? ` · ${formatDurationMs(total)}` : ''
+  return `执行详情（${timeline.length} 步${totalText}）`
+}
 
 async function onSwitchSchool(schId) {
   try {
@@ -574,16 +644,8 @@ async function onSwitchSchool(schId) {
 async function onCancelAsk() {
   if (!loading.value) return
   cancelling.value = true
-  const tid = currentTraceId.value
   try {
-    if (tid) {
-      try {
-        await postAskCancel(tid)
-      } catch {
-        /* 已结束则忽略，仍断开流 */
-      }
-    }
-    abortController.value?.abort()
+    await abortOngoingAsk()
   } finally {
     cancelling.value = false
   }
@@ -594,10 +656,7 @@ function applyCancelledMessage(msg, traceId) {
   msg.isError = true
   msg.meta = traceId ? `trace: ${traceId}` : undefined
   msg.traceId = traceId
-  msg.progress?.forEach((step) => {
-    step.active = false
-    step.done = false
-  })
+  finalizeTimeline(msg)
 }
 
 async function onAsk() {
@@ -614,42 +673,16 @@ async function onAsk() {
   abortController.value = new AbortController()
 
   const assistantIdx = messages.value.length
-  messages.value.push({
-    role: 'assistant',
-    text: '正在分析您的问题…',
-    thinking: '',
-    progress: [],
-    intermediateSteps: [],
-  })
+  messages.value.push(createAssistantStreamMessage())
 
-  try {
-    await postAskStream({
-      question: q,
-      sessionId: sessionId.value,
-      traceId,
-      signal: abortController.value.signal,
-      onProgress: ({ label, node, detail }) => {
+  const streamHandlers = {
+      onProgress: (evt) => {
         const msg = messages.value[assistantIdx]
-        if (!msg?.progress) return
-        msg.progress.forEach((step) => {
-          step.active = false
-          step.done = true
-        })
-        const existing = msg.progress.find((s) => s.label === label)
-        if (existing) {
-          existing.active = true
-          existing.done = false
-        } else {
-          msg.progress.push({ label, active: true, done: false })
+        if (!msg) return
+        applyProgressEvent(msg, evt)
+        if (evt.node === 'execute_plan_sql_step' && evt.detail) {
+          upsertIntermediateStep(msg, evt.detail)
         }
-        if (node === 'execute_plan_sql_step' && detail) {
-          upsertIntermediateStep(msg, detail)
-        }
-      },
-      onThinkingDelta: ({ delta }) => {
-        const msg = messages.value[assistantIdx]
-        if (!msg || !delta) return
-        msg.thinking = (msg.thinking || '') + delta
       },
       onTextDelta: ({ delta }) => {
         const msg = messages.value[assistantIdx]
@@ -688,10 +721,7 @@ async function onAsk() {
         }
         msg.chartSpec = res.chartSpec || undefined
         msg.intermediateSteps = mapIntermediateResults(res.intermediateResults) || msg.intermediateSteps
-        msg.progress?.forEach((step) => {
-          step.active = false
-          step.done = true
-        })
+        finalizeTimeline(msg)
         notifyChartsResize()
       },
       onError: (err) => {
@@ -699,7 +729,25 @@ async function onAsk() {
         msg.text = err.message || '问数失败，请稍后重试'
         msg.isError = true
         msg.meta = undefined
+        finalizeTimeline(msg)
       },
+    }
+
+  if (canShowThinking.value) {
+    streamHandlers.onThinkingDelta = ({ delta }) => {
+      const msg = messages.value[assistantIdx]
+      if (!msg || !delta) return
+      msg.thinking = (msg.thinking || '') + delta
+    }
+  }
+
+  try {
+    await postAskStream({
+      question: q,
+      sessionId: sessionId.value,
+      traceId,
+      signal: abortController.value.signal,
+      ...streamHandlers,
     })
   } catch (err) {
     const msg = messages.value[assistantIdx]
@@ -1017,57 +1065,26 @@ async function onMarkBadcase(msg) {
   font-family: monospace;
 }
 
-.progress-list {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  font-size: 12px;
-  color: #909399;
-}
-
-.thinking-panel {
-  margin-bottom: 10px;
+.progress-details {
+  margin-top: 12px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  background: #f8fafc;
+  background: #fff;
   overflow: hidden;
 }
 
-.thinking-panel summary {
+.progress-details summary {
   cursor: pointer;
   padding: 8px 12px;
   font-size: 12px;
   font-weight: 600;
   color: #64748b;
   user-select: none;
+  list-style-position: inside;
 }
 
-.thinking-text {
-  margin: 0;
-  padding: 10px 12px 12px;
-  max-height: 220px;
-  overflow: auto;
-  font-size: 12px;
-  line-height: 1.55;
-  color: #64748b;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: inherit;
-  background: transparent;
-  border-top: 1px solid #e2e8f0;
-}
-
-.progress-list li {
-  padding: 2px 0;
-}
-
-.progress-list li.done {
-  color: #67c23a;
-}
-
-.progress-list li.active {
-  color: #409eff;
-  font-weight: 500;
+.progress-details :deep(.ask-timeline) {
+  padding: 8px 10px 12px;
 }
 
 .feedback-bar {

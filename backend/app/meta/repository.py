@@ -86,6 +86,17 @@ class IndexableFieldValueRow:
 
 
 @dataclass
+class IndexableSqlExampleRow:
+    """ES L1 样例索引一行。"""
+
+    example_id: int
+    question_pattern: str
+    description: str | None
+    role_scope: str | None
+    meta_json: str | None
+
+
+@dataclass
 class RelationRow:
     """copilot_table_relation 一行。"""
 
@@ -156,6 +167,7 @@ class SqlExampleRow:
     meta_json: str | None
     role_scope: str | None
     degrade_priority: int
+    description: str | None = None
     source_trace_id: str | None = None
     review_status: int = 1
     reviewed_by: int | None = None
@@ -727,6 +739,29 @@ class MetaRepository:
             for r in result.mappings().all()
         ]
 
+    async def list_indexable_sql_examples(self) -> list[IndexableSqlExampleRow]:
+        """已发布 L1 样例，供 ES 向量索引（草稿在索引构建时过滤）。"""
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id AS example_id, question_pattern, description, role_scope, meta_json
+                FROM copilot_sql_example
+                WHERE deleted = 0 AND COALESCE(review_status, 1) = 1
+                ORDER BY id
+                """
+            )
+        )
+        return [
+            IndexableSqlExampleRow(
+                example_id=int(r["example_id"]),
+                question_pattern=str(r["question_pattern"]),
+                description=r.get("description"),
+                role_scope=r.get("role_scope"),
+                meta_json=r.get("meta_json"),
+            )
+            for r in result.mappings().all()
+        ]
+
     async def list_relations(self, *, from_table_id: int | None = None) -> list[RelationRow]:
         sql = """
             SELECT r.id, r.from_table_id, ft.table_name AS from_table_name,
@@ -1083,11 +1118,11 @@ class MetaRepository:
         result = await self._session.execute(
             text(
                 """
-                SELECT id, question_pattern, sql_text, meta_json, role_scope, degrade_priority,
+                SELECT id, question_pattern, sql_text, description, meta_json, role_scope, degrade_priority,
                        source_trace_id, review_status, reviewed_by, reviewed_at
                 FROM copilot_sql_example
                 WHERE deleted = 0
-                ORDER BY degrade_priority, id
+                ORDER BY id
                 """
             )
         )
@@ -1097,7 +1132,7 @@ class MetaRepository:
         result = await self._session.execute(
             text(
                 """
-                SELECT id, question_pattern, sql_text, meta_json, role_scope, degrade_priority,
+                SELECT id, question_pattern, sql_text, description, meta_json, role_scope, degrade_priority,
                        source_trace_id, review_status, reviewed_by, reviewed_at
                 FROM copilot_sql_example
                 WHERE id = :id AND deleted = 0
@@ -1108,11 +1143,33 @@ class MetaRepository:
         row = result.mappings().first()
         return _map_sql_example(row) if row else None
 
+    async def get_sql_examples_by_ids(self, example_ids: list[int]) -> list[SqlExampleRow]:
+        if not example_ids:
+            return []
+        placeholders = ", ".join(f":id{i}" for i in range(len(example_ids)))
+        params = {f"id{i}": eid for i, eid in enumerate(example_ids)}
+        result = await self._session.execute(
+            text(
+                f"""
+                SELECT id, question_pattern, sql_text, description, meta_json, role_scope, degrade_priority,
+                       source_trace_id, review_status, reviewed_by, reviewed_at
+                FROM copilot_sql_example
+                WHERE deleted = 0 AND id IN ({placeholders})
+                """
+            ),
+            params,
+        )
+        rows = [_map_sql_example(r) for r in result.mappings().all()]
+        order = {eid: idx for idx, eid in enumerate(example_ids)}
+        rows.sort(key=lambda r: order.get(r.id, 9999))
+        return rows
+
     async def insert_sql_example(
         self,
         *,
         question_pattern: str,
         sql_text: str,
+        description: str | None = None,
         meta_json: str | None = None,
         role_scope: str | None = None,
         degrade_priority: int = 100,
@@ -1123,10 +1180,10 @@ class MetaRepository:
             text(
                 """
                 INSERT INTO copilot_sql_example (
-                    question_pattern, sql_text, meta_json, role_scope, degrade_priority,
+                    question_pattern, sql_text, description, meta_json, role_scope, degrade_priority,
                     source_trace_id, review_status, deleted
                 ) VALUES (
-                    :question_pattern, :sql_text, :meta_json, :role_scope, :degrade_priority,
+                    :question_pattern, :sql_text, :description, :meta_json, :role_scope, :degrade_priority,
                     :source_trace_id, :review_status, 0
                 )
                 """
@@ -1134,6 +1191,7 @@ class MetaRepository:
             {
                 "question_pattern": question_pattern,
                 "sql_text": sql_text,
+                "description": description,
                 "meta_json": meta_json,
                 "role_scope": role_scope,
                 "degrade_priority": degrade_priority,
@@ -1214,6 +1272,7 @@ class MetaRepository:
         *,
         question_pattern: str | None = None,
         sql_text: str | None = None,
+        description: str | None = None,
         meta_json: str | None = None,
         role_scope: str | None = None,
         degrade_priority: int | None = None,
@@ -1224,6 +1283,7 @@ class MetaRepository:
                 UPDATE copilot_sql_example SET
                     question_pattern = COALESCE(:question_pattern, question_pattern),
                     sql_text = COALESCE(:sql_text, sql_text),
+                    description = COALESCE(:description, description),
                     meta_json = COALESCE(:meta_json, meta_json),
                     role_scope = COALESCE(:role_scope, role_scope),
                     degrade_priority = COALESCE(:degrade_priority, degrade_priority)
@@ -1234,6 +1294,7 @@ class MetaRepository:
                 "id": example_id,
                 "question_pattern": question_pattern,
                 "sql_text": sql_text,
+                "description": description,
                 "meta_json": meta_json,
                 "role_scope": role_scope,
                 "degrade_priority": degrade_priority,
@@ -1333,6 +1394,7 @@ def _map_sql_example(row) -> SqlExampleRow:
         id=int(row["id"]),
         question_pattern=str(row["question_pattern"]),
         sql_text=str(row["sql_text"]),
+        description=row.get("description"),
         meta_json=row.get("meta_json"),
         role_scope=row.get("role_scope"),
         degrade_priority=int(row["degrade_priority"]),

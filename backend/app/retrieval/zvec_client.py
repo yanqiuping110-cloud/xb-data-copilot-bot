@@ -21,6 +21,7 @@ _ID_FIELDS: dict[str, str] = {
     "metric": "metric_id",
     "value": "field_value_id",
     "code_artifact": "artifact_id",
+    "sql_example": "example_id",
 }
 
 
@@ -100,6 +101,14 @@ def _schema_for_suffix(suffix: str, dims: int) -> zvec.CollectionSchema:
             _string_field("title"),
             _string_field("summary_text"),
             _string_field("tables_json"),
+        ]
+    elif suffix == "sql_example":
+        fields = [
+            _fts_field(),
+            _int_field("example_id", indexed=True),
+            _string_field("question_pattern"),
+            _string_field("description"),
+            _string_field("role_scope"),
         ]
     elif suffix == "value":
         fields = [
@@ -223,6 +232,8 @@ class AskZvecClient:
                 col = zvec.open(str(path))
                 col.destroy()
             except Exception:
+                pass
+            if path.exists():
                 shutil.rmtree(path, ignore_errors=True)
 
         schema = _schema_for_suffix(suffix, dims or self._settings.embedding_dims)

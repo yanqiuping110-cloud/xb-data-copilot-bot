@@ -45,6 +45,10 @@ def get_engine():
             settings.copilot_database_url,
             pool_pre_ping=True,
             pool_recycle=3600,
+            # SSE 问数会长时间占用连接；适当放大池避免会话 API 排队挂起
+            pool_size=15,
+            max_overflow=15,
+            pool_timeout=30,
         )
         if not _guard_installed:
             _install_copilot_sql_guard(_engine)

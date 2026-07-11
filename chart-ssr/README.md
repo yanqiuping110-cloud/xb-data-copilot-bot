@@ -10,7 +10,11 @@ npm install
 node server.js
 ```
 
-默认监听 `:3001`。环境变量：
+默认监听 `:3001`。使用 **ECharts 5 SSR** 渲染，与前端 `chartAdapter.js` 同款 option（柱状/折线/饼图等）。
+
+**无需常驻侧车时**：Python 会自动调用 `node render-cli.js` 单次渲染（PDF 导出默认走此路径）。
+
+环境变量：
 
 | 变量 | 说明 |
 |------|------|

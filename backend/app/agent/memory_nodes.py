@@ -1,5 +1,5 @@
 """
-Agent Memory LangGraph 节点：会话槽位、用户偏好、指代消解。
+Agent Memory LangGraph 节点：会话槽位、用户偏好、LLM STAR 记忆上下文处理。
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ from langchain_core.runnables import RunnableConfig
 
 from app.agent.nodes import _span
 from app.agent.state import AskGraphState
-from app.memory.memory_service import MemoryService, build_memory_prompt_sections
-from app.memory.reference_resolver import resolve_references
+from app.memory.memory_llm import process_memory_context_llm
+from app.memory.memory_service import MemoryService
 from config.settings import Settings
 
 
@@ -62,40 +62,53 @@ async def load_user_preference(state: AskGraphState, config: RunnableConfig) -> 
     return {"user_preferences": prefs}
 
 
-async def resolve_references_node(state: AskGraphState, config: RunnableConfig) -> dict:
-    """P1 轻量指代消解：失败则原问句不变。"""
+async def process_memory_context_node(state: AskGraphState, config: RunnableConfig) -> dict:
+    """LLM STAR 记忆上下文：解析问句、决定注入内容，供召回/plan/SQL 使用。"""
     t0 = time.perf_counter()
     c = _cfg(config)
     settings: Settings = c["settings"]
     question = state.get("normalized_question") or state.get("question") or ""
     memory = state.get("session_memory")
 
-    resolved, hint, matched = resolve_references(question, memory)
-
-    # 拼装 memory prompt（在 build_llm_context / generate_sql 之前注入）
-    memory_text, mem_detail = build_memory_prompt_sections(
-        memory,
-        state.get("user_preferences") or [],
-        max_chars=settings.memory_prompt_max_chars,
-        inject_session=settings.session_memory_enabled,
-        boundary_enabled=settings.prompt_boundary_enabled,
+    result = await process_memory_context_llm(
+        settings=settings,
+        question=question,
+        memory=memory,
+        preferences=state.get("user_preferences") or [],
+        thinking_queue=c.get("thinking_delta_queue"),
     )
-    if hint:
-        memory_text = (memory_text + "\n【指代消解提示】\n" + hint).strip()
 
+    status = "degraded" if result.fallback else "success"
     detail = {
-        "reference_matched": matched,
-        "memory_chars": mem_detail.get("chars", 0),
-        "session_injected": mem_detail.get("session_injected"),
-        "preference_count": mem_detail.get("preference_count", 0),
-        "truncated": mem_detail.get("truncated", False),
+        "llm_input": result.llm_input,
+        "llm_output": result.llm_output_raw,
+        "star": result.star,
+        "reference_type": result.reference_type,
+        "inject": result.inject,
+        "inherit": result.inherit,
+        "resolved_question": result.resolved_question,
+        "recall_question": result.recall_question,
+        "memory_prompt_text": result.memory_prompt_text,
+        "memory_chars": len(result.memory_prompt_text or ""),
+        "token_in": result.token_in,
+        "token_out": result.token_out,
+        "fallback": result.fallback,
+        "fallback_reason": result.fallback_reason,
     }
-    await _span(config, "resolve_references", t0, "success" if matched else "fail", detail)
+    await _span(config, "process_memory_context", t0, status, detail)
 
-    result: dict[str, Any] = {
-        "memory_prompt_text": memory_text,
-        "reference_hint": hint,
+    out: dict[str, Any] = {
+        "memory_prompt_text": result.memory_prompt_text,
+        "memory_star": result.star,
+        "reference_type": result.reference_type,
+        "reference_hint": result.star.get("action"),
     }
-    if matched and resolved != question:
-        result["normalized_question"] = resolved
-    return result
+    if result.resolved_question and result.resolved_question != question:
+        out["normalized_question"] = result.resolved_question
+    if result.recall_question:
+        out["recall_question"] = result.recall_question
+    return out
+
+
+# 兼容旧图名 / 测试引用
+resolve_references_node = process_memory_context_node

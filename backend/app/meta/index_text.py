@@ -69,3 +69,11 @@ def build_field_value_search_text(row: IndexableFieldValueRow) -> str:
     if aliases:
         parts.append(" ".join(aliases))
     return " ".join(parts).strip()
+
+
+def build_sql_example_search_text(row) -> str:
+    """L1 样例向量索引文本：问句模式 + 详细描述（不含 SQL 正文）。"""
+    parts = [row.question_pattern]
+    if getattr(row, "description", None):
+        parts.append(str(row.description).strip())
+    return " ".join(p for p in parts if p).strip()

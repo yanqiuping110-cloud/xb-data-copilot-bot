@@ -1,7 +1,7 @@
 """
 问句规划节点 plan_question（§11.7.3 · 第 7 周雏形）。
 
-由 Plan LLM 判定 complexity / multi_sql；不再用问句关键词强制分步。
+由 Plan LLM 判定 complexity / multi_sql；L1 样例由 select_l1_examples 节点预先精选。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 
 from app.agent.context_builder import MergedRecallContext
+from app.agent.l1_nodes import _dicts_to_candidates
 from app.agent.plan_compare import (
     enrich_sql_steps_from_reference_sql,
     get_sql_execution_steps,
@@ -21,9 +22,7 @@ from app.agent.nodes import _cfg, _span
 from app.agent.chart_builder import infer_visualization_from_question, normalize_visualization_intent
 from app.agent.plan_llm import generate_plan_from_llm
 from app.agent.state import AskGraphState
-from app.ask.example_ranker import rank_curated_examples_for_prompt
-from app.ask.semantic_repository import SemanticRepository
-from app.sql.whitelist import get_allowed_tables
+from app.ask.l1_service import primary_l1_sql
 from config.settings import Settings
 
 
@@ -71,30 +70,6 @@ def _fallback_plan() -> dict[str, Any]:
     }
 
 
-async def _best_l1_match(
-    question: str,
-    ctx,
-    session,
-    settings: Settings,
-) -> tuple[int, str | None]:
-    """当前问句最高 L1 软参考得分及样例 SQL。"""
-    sem_repo = SemanticRepository(session)
-    examples = await sem_repo.list_sql_examples()
-    ranked = rank_curated_examples_for_prompt(
-        question,
-        ctx,
-        examples,
-        top_k=settings.curated_example_top_k,
-        min_score=0,
-        allowed_tables=get_allowed_tables(),
-    )
-    if not ranked:
-        return 0, None
-    ex, score = ranked[0]
-    sql = getattr(ex, "sql_text", None) or getattr(ex, "sql", None)
-    return score, sql
-
-
 def _ensure_plan_visualization(plan: dict[str, Any], question: str) -> dict[str, Any]:
     """补齐 plan.visualization；无 LLM 输出时用问句规则推断。"""
     if not plan.get("visualization"):
@@ -113,7 +88,12 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
     t0 = time.perf_counter()
     c = _cfg(config)
     settings: Settings = c["settings"]
-    question = state.get("normalized_question") or state.get("question") or ""
+    question = (
+        state.get("recall_question")
+        or state.get("normalized_question")
+        or state.get("question")
+        or ""
+    )
     merged: MergedRecallContext | None = state.get("merged_recall")
 
     if not settings.agent_plan_enabled:
@@ -121,7 +101,8 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         await _span(config, "plan_question", t0, "degraded", {"skipped": True, "reason": "disabled"})
         return {"plan_skipped": True, "plan": None, "visualization_intent": intent}
 
-    l1_score, l1_sql = await _best_l1_match(question, c["ctx"], c["copilot_session"], settings)
+    selected_l1 = _dicts_to_candidates(state.get("selected_l1_examples"))
+    l1_sql = primary_l1_sql(selected_l1)
     recall_summary = _seed_recall_summary(merged)
     context_text = state.get("context_text") or ""
 
@@ -130,8 +111,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         question=question,
         recall_summary=recall_summary,
         context_text=context_text,
-        l1_score=l1_score,
-        l1_sql_preview=l1_sql,
+        selected_l1_examples=selected_l1,
         thinking_queue=c.get("thinking_delta_queue"),
     )
     if plan is None:
@@ -142,6 +122,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
 
     sql_exec_count = len(get_sql_execution_steps(plan))
     multi_sql = plan_requires_multi_sql(plan)
+    l1_ids = [ex.id for ex in selected_l1]
 
     if plan.get("complexity") == "low" and not multi_sql and sql_exec_count <= 1:
         await _span(
@@ -152,7 +133,8 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
             {
                 "skipped": True,
                 "reason": "llm_low_single_sql",
-                "l1_score": l1_score,
+                "l1_selected_ids": l1_ids,
+                "l1_count": len(selected_l1),
                 "multi_sql": False,
                 "context_chars": len(context_text),
                 "plan": plan,
@@ -170,7 +152,8 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
             "complexity": plan.get("complexity"),
             "intent": plan.get("intent"),
             "multi_sql": multi_sql,
-            "l1_score": l1_score,
+            "l1_selected_ids": l1_ids,
+            "l1_count": len(selected_l1),
             "context_chars": len(context_text),
             "step_count": len(plan.get("steps") or []),
             "sql_exec_step_count": sql_exec_count,
@@ -229,3 +212,4 @@ def _inject_code_sources(plan: dict[str, Any], merged: MergedRecallContext | Non
         steps[-1]["needs_tool"] = needs
     plan["steps"] = steps
     return plan
+

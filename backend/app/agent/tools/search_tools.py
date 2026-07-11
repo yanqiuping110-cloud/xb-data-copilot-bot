@@ -1,5 +1,5 @@
 """
-检索类只读工具：指标 / 字段取值 / L1 样例（复用 HybridRetriever 与 example_ranker）。
+检索类只读工具：指标 / 字段取值 / L1 样例（知识库召回）。
 """
 
 from __future__ import annotations
@@ -8,11 +8,10 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ask.example_ranker import rank_curated_examples_for_prompt
-from app.ask.semantic_repository import SemanticRepository
+from app.ask.l1_service import candidates_from_rows, is_l1_visible
 from app.core.context import UserContext
+from app.meta.repository import MetaRepository
 from app.retrieval.hybrid import HybridRetriever
-from app.sql.whitelist import get_allowed_tables
 from config.settings import Settings
 
 
@@ -80,27 +79,28 @@ async def search_sql_examples(
     query: str,
     ctx: UserContext,
 ) -> dict[str, Any]:
-    """按问句召回相似 L1 SQL 样例（软参考，非硬命中）。"""
-    sem_repo = SemanticRepository(session)
-    examples = await sem_repo.list_sql_examples()
-    ranked = rank_curated_examples_for_prompt(
-        query,
-        ctx,
-        examples,
-        top_k=settings.curated_example_top_k,
-        min_score=0,
-        allowed_tables=get_allowed_tables(),
-    )
-    return {
-        "query": query,
-        "count": len(ranked),
-        "items": [
-            {
-                "id": ex.id,
-                "pattern": ex.question_pattern,
-                "score": score,
-                "sql_preview": (ex.sql_text or "")[:300],
-            }
-            for ex, score in ranked
-        ],
-    }
+    """按问句召回相似 L1 SQL 样例（知识库软参考）。"""
+    retriever = HybridRetriever(session, settings)
+    try:
+        recalled, _mode = await retriever.recall_sql_examples_only(query)
+        repo = MetaRepository(session)
+        ids = [item.example_id for item in recalled]
+        score_map = {item.example_id: item.score for item in recalled}
+        rows = [r for r in await repo.get_sql_examples_by_ids(ids) if is_l1_visible(r, ctx)]
+        candidates = candidates_from_rows(rows, scores=score_map)
+        return {
+            "query": query,
+            "count": len(candidates),
+            "items": [
+                {
+                    "id": ex.id,
+                    "pattern": ex.question_pattern,
+                    "description": ex.description,
+                    "score": round(ex.recall_score, 4),
+                    "sql_preview": ex.sql_text[:300],
+                }
+                for ex in candidates[: settings.l1_recall_top_k]
+            ],
+        }
+    finally:
+        await retriever.close()

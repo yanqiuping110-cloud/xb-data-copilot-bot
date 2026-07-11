@@ -137,6 +137,7 @@ def _sql_example_response(row) -> SqlExampleResponse:
         id=row.id,
         question_pattern=row.question_pattern,
         sql_text=row.sql_text,
+        description=row.description,
         meta_json=meta,
         role_scope=row.role_scope,
         degrade_priority=row.degrade_priority,
@@ -386,6 +387,7 @@ async def rebuild_search_index(
         metrics=result.metrics,
         field_values=result.field_values,
         embedding_dims=result.embedding_dims,
+        sql_examples=result.sql_examples,
     )
 
 
@@ -692,6 +694,7 @@ async def create_sql_example(
     eid = await repo.insert_sql_example(
         question_pattern=body.question_pattern,
         sql_text=body.sql_text,
+        description=body.description,
         meta_json=meta_json,
         role_scope=body.role_scope,
         degrade_priority=body.degrade_priority,
@@ -725,6 +728,7 @@ async def update_sql_example(
         example_id,
         question_pattern=body.question_pattern,
         sql_text=body.sql_text,
+        description=body.description,
         meta_json=meta_json,
         role_scope=body.role_scope,
         degrade_priority=body.degrade_priority,

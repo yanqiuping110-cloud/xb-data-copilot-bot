@@ -8,11 +8,6 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ask.example_ranker import (
-    format_curated_sql_example_lines,
-    rank_curated_examples_for_prompt,
-)
-from app.ask.semantic_repository import SemanticRepository
 from app.core.context import UserContext
 from app.meta.effective import effective_description
 from app.meta.glossary_repository import GlossaryRepository
@@ -55,26 +50,6 @@ def _effective_allowed_table_set(ctx: UserContext) -> frozenset[str]:
     if policy is not None and getattr(policy, "allowed_tables", None):
         return frozenset(policy.allowed_tables)
     return get_allowed_tables()
-
-
-async def load_ranked_sql_examples_for_prompt(
-    question: str,
-    ctx: UserContext,
-    copilot_session: AsyncSession,
-    settings: Settings | None = None,
-) -> list[tuple]:
-    """加载 L1 样例并按问句打分、白名单过滤。"""
-    cfg = settings or get_settings()
-    sem_repo = SemanticRepository(copilot_session)
-    examples = await sem_repo.list_sql_examples()
-    return rank_curated_examples_for_prompt(
-        question,
-        ctx,
-        examples,
-        top_k=cfg.curated_example_top_k,
-        min_score=cfg.curated_example_min_score,
-        allowed_tables=_effective_allowed_table_set(ctx),
-    )
 
 
 def _format_sql_literal(value_text: str) -> str:
@@ -531,11 +506,6 @@ async def build_llm_context_text(
             parts.append(f"- {fv.table_name}.{fv.column_name}：「{label}」→ {fv.value_text}")
         parts.append("")
 
-    ranked = await load_ranked_sql_examples_for_prompt(
-        question, ctx, copilot_session, settings=cfg
-    )
-    parts.extend(format_curated_sql_example_lines(ranked))
-
     parts.append("【生成约束】")
     parts.extend(build_llm_sql_generation_constraints(ctx, settings=cfg))
 
@@ -796,11 +766,6 @@ async def build_agent_context_text(
                 summary = (getattr(art, "summary_text", None) or art.search_text)[:180]
                 parts.append(f"- code:artifact:{art.artifact_id} {art.title}：{summary}")
         parts.append("")
-
-    ranked = await load_ranked_sql_examples_for_prompt(
-        question, ctx, copilot_session, settings=cfg
-    )
-    parts.extend(format_curated_sql_example_lines(ranked))
 
     if plan:
         parts.append("【问句规划 plan】")

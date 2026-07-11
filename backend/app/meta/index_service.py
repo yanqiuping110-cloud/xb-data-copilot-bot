@@ -14,6 +14,7 @@ from app.meta.index_text import (
     build_column_search_text,
     build_field_value_search_text,
     build_metric_search_text,
+    build_sql_example_search_text,
     build_table_search_text,
 )
 from app.meta.repository import MetaRepository
@@ -32,6 +33,7 @@ class RebuildIndexResult:
     field_values: int
     embedding_dims: int
     code_artifacts: int = 0
+    sql_examples: int = 0
 
 
 class MetaKnowledgeService:
@@ -144,12 +146,37 @@ class MetaKnowledgeService:
         ]
         value_count = await self._index.bulk_index(value_index, value_docs)
 
+        from app.ask.l1_service import is_indexable_l1_row
+
+        sql_examples = [
+            ex for ex in await self._repo.list_indexable_sql_examples() if is_indexable_l1_row(ex)
+        ]
+        sql_example_count = 0
+        if sql_examples:
+            sql_texts = [build_sql_example_search_text(ex) for ex in sql_examples]
+            sql_vectors = await self._embedding.embed_texts(sql_texts)
+            dims = self._embedding.dims or len(sql_vectors[0])
+            sql_index = await self._index.recreate_vector_index("sql_example", dims)
+            sql_docs = [
+                {
+                    "example_id": ex.example_id,
+                    "question_pattern": ex.question_pattern,
+                    "description": ex.description,
+                    "role_scope": ex.role_scope,
+                    "search_text": text,
+                    "embedding": vec,
+                }
+                for ex, text, vec in zip(sql_examples, sql_texts, sql_vectors, strict=True)
+            ]
+            sql_example_count = await self._index.bulk_index(sql_index, sql_docs)
+
         return RebuildIndexResult(
             tables=table_count,
             columns=column_count,
             metrics=metric_count,
             field_values=value_count,
             embedding_dims=dims,
+            sql_examples=sql_example_count,
         )
 
     async def rebuild_code_index(self) -> int:
@@ -194,6 +221,7 @@ class MetaKnowledgeService:
             field_values=base.field_values,
             embedding_dims=base.embedding_dims,
             code_artifacts=code_count,
+            sql_examples=base.sql_examples,
         )
 
     async def close(self) -> None:

@@ -32,6 +32,7 @@
             maxlength="500"
             show-word-limit
           />
+          <p v-if="promptTooShort" class="field-hint warn">请至少输入 10 个字，用于生成封面标题与章节文案</p>
         </el-form-item>
         <el-form-item label="汇报单位">
           <el-input v-model="org" placeholder="可选，如 XX区教育局" />
@@ -56,8 +57,9 @@
 
     <div v-show="step === 2" class="step-body step-preview">
       <div v-if="generating" class="gen-progress">
-        <p>{{ progressLabel || '正在生成报告…' }}</p>
-        <el-progress :percentage="progressPct" :stroke-width="10" />
+        <p class="gen-progress-label">{{ progressLabel || '正在生成报告…' }}</p>
+        <p v-if="progressDetail" class="gen-progress-detail">{{ progressDetail }}</p>
+        <el-progress :percentage="displayPct" :stroke-width="10" />
       </div>
       <PdfViewer
         v-if="pdfPreviewUrl"
@@ -94,7 +96,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   createBriefReportPdfObjectUrl,
@@ -131,18 +133,67 @@ const backgroundsLoadError = ref('')
 
 const generating = ref(false)
 const progressLabel = ref('')
-const progressPct = ref(0)
+const progressDetail = ref('')
+const targetPct = ref(0)
+const displayPct = ref(0)
 const reportId = ref('')
 const pageCount = ref(0)
 const fileSize = ref(0)
 const pdfObjectUrl = ref('')
 const abortController = ref(null)
+let progressTimer = null
+let lastProgressAt = 0
+
+function stopProgressAnimation() {
+  if (progressTimer) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
+}
+
+function startProgressAnimation() {
+  stopProgressAnimation()
+  lastProgressAt = Date.now()
+  progressTimer = setInterval(() => {
+    if (!generating.value) return
+    const now = Date.now()
+    const idleMs = now - lastProgressAt
+    if (displayPct.value < targetPct.value) {
+      const gap = targetPct.value - displayPct.value
+      displayPct.value += gap > 6 ? 2 : 1
+    } else if (idleMs > 1200 && targetPct.value < 94) {
+      targetPct.value = Math.min(94, targetPct.value + 1)
+      displayPct.value = Math.min(targetPct.value, displayPct.value + 1)
+    }
+    displayPct.value = Math.min(99, displayPct.value)
+  }, 180)
+}
+
+function applyProgress(payload = {}) {
+  const pct = typeof payload.percent === 'number'
+    ? payload.percent
+    : Math.min(90, (payload.step || 1) * 18)
+  targetPct.value = Math.max(targetPct.value, pct)
+  if (displayPct.value < targetPct.value - 8) {
+    displayPct.value = Math.max(0, targetPct.value - 8)
+  }
+  progressLabel.value = payload.label || progressLabel.value
+  progressDetail.value = payload.detail || payload.text || ''
+  lastProgressAt = Date.now()
+}
 
 const pdfPreviewUrl = computed(() => pdfObjectUrl.value)
 
+const PROMPT_MIN_LEN = 10
+
+const promptTooShort = computed(
+  () => step.value === 1 && (userPrompt.value || '').trim().length > 0
+    && (userPrompt.value || '').trim().length < PROMPT_MIN_LEN,
+)
+
 const canNext = computed(() => {
   if (step.value === 0) return selectedTraceIds.value.length > 0
-  if (step.value === 1) return (userPrompt.value || '').trim().length >= 10
+  if (step.value === 1) return (userPrompt.value || '').trim().length >= PROMPT_MIN_LEN
   return true
 })
 
@@ -150,13 +201,14 @@ const canGenerate = computed(
   () =>
     props.sessionId &&
     selectedTraceIds.value.length > 0 &&
-    (userPrompt.value || '').trim().length >= 10,
+    (userPrompt.value || '').trim().length >= PROMPT_MIN_LEN,
 )
 
 watch(visible, (v) => {
   if (!v) {
     abortController.value?.abort()
     generating.value = false
+    stopProgressAnimation()
     revokePdfUrl()
   }
 })
@@ -208,8 +260,10 @@ async function loadBackgrounds() {
 async function onOpen() {
   step.value = 0
   reportId.value = ''
-  progressPct.value = 0
+  targetPct.value = 0
+  displayPct.value = 0
   progressLabel.value = ''
+  progressDetail.value = ''
   await loadBackgrounds()
 }
 
@@ -222,8 +276,11 @@ watch(step, (n) => {
 async function onGenerate() {
   if (!canGenerate.value) return
   generating.value = true
-  progressPct.value = 5
+  targetPct.value = 4
+  displayPct.value = 0
   progressLabel.value = '准备生成…'
+  progressDetail.value = '初始化任务'
+  startProgressAnimation()
   reportId.value = ''
   abortController.value = new AbortController()
 
@@ -241,11 +298,11 @@ async function onGenerate() {
       signal: abortController.value.signal,
       onEvent: ({ type, payload }) => {
         if (type === 'progress') {
-          progressLabel.value = payload.label || ''
-          progressPct.value = Math.min(90, (payload.step || 1) * 18)
+          applyProgress(payload)
         }
         if (type === 'status') {
-          progressLabel.value = payload.text || progressLabel.value
+          if (payload.text) progressLabel.value = payload.text
+          if (payload.text && !payload.detail) progressDetail.value = payload.text
         }
       },
       onError: (err) => {
@@ -256,8 +313,10 @@ async function onGenerate() {
       reportId.value = result.reportId
       pageCount.value = result.pageCount || 0
       fileSize.value = result.fileSize || 0
-      progressPct.value = 100
+      targetPct.value = 100
+      displayPct.value = 100
       progressLabel.value = '生成完成'
+      progressDetail.value = `${pageCount.value || 0} 页 · PDF 已就绪`
       await loadPdfPreview(result.reportId)
       ElMessage.success('报告已生成')
     }
@@ -267,8 +326,14 @@ async function onGenerate() {
     }
   } finally {
     generating.value = false
+    stopProgressAnimation()
   }
 }
+
+onBeforeUnmount(() => {
+  stopProgressAnimation()
+  revokePdfUrl()
+})
 
 function openPdfNewTab() {
   if (pdfObjectUrl.value) {
@@ -318,10 +383,24 @@ function downloadPdf() {
 .gen-progress {
   margin-bottom: 16px;
 }
-.gen-progress p {
-  margin: 0 0 8px;
+.gen-progress-label {
+  margin: 0 0 4px;
   font-size: 13px;
-  color: #475569;
+  font-weight: 500;
+  color: #334155;
+}
+.gen-progress-detail {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+.field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+.field-hint.warn {
+  color: #d97706;
 }
 .footer-actions {
   display: flex;

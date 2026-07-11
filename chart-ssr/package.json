@@ -1,10 +1,15 @@
 {
   "name": "data-copilot-chart-ssr",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "ChartSpec SSR sidecar for Data Copilot",
+  "description": "ECharts SSR for Data Copilot PDF/charts",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "render": "node render-cli.js"
+  },
+  "dependencies": {
+    "echarts": "^5.6.0",
+    "sharp": "^0.33.5"
   }
 }

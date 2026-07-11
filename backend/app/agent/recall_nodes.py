@@ -40,7 +40,12 @@ def _get_merged(state: AskGraphState) -> MergedRecallContext | None:
 async def extract_keywords_node(state: AskGraphState, config: RunnableConfig) -> dict:
     """从问句抽取关键词，供混合召回使用。"""
     t0 = time.perf_counter()
-    question = state.get("normalized_question") or state.get("question") or ""
+    question = (
+        state.get("recall_question")
+        or state.get("normalized_question")
+        or state.get("question")
+        or ""
+    )
     keywords = extract_keywords(question)
     await _span(config, "extract_keywords", t0, "success", {"keywords": keywords, "count": len(keywords)})
     return {"keywords": keywords}
@@ -260,7 +265,12 @@ async def build_llm_context(state: AskGraphState, config: RunnableConfig) -> dic
     t0 = time.perf_counter()
     c = _cfg(config)
     settings: Settings = c["settings"]
-    question = state.get("normalized_question") or state.get("question") or ""
+    question = (
+        state.get("recall_question")
+        or state.get("normalized_question")
+        or state.get("question")
+        or ""
+    )
     merged = _get_merged(state)
 
     try:

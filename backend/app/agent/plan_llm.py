@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.chart_builder import normalize_visualization_intent
 from app.agent.llm_client import complete_messages
+from app.ask.l1_service import L1ExampleCandidate
 from config.settings import Settings
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
@@ -151,8 +152,7 @@ async def generate_plan_from_llm(
     question: str,
     recall_summary: str,
     context_text: str = "",
-    l1_score: int | None = None,
-    l1_sql_preview: str | None = None,
+    selected_l1_examples: list[L1ExampleCandidate] | None = None,
     thinking_queue: Any | None = None,
 ) -> dict[str, Any] | None:
     """
@@ -216,13 +216,18 @@ async def generate_plan_from_llm(
                 full_context,
             ]
         )
-    if l1_score is not None and l1_score > 0:
-        user_parts.append(f"\nL1 样例软参考得分：{l1_score}（仅供参考，仍以问句语义决定是否分步 SQL）")
-    if l1_sql_preview:
-        preview = l1_sql_preview.strip()
-        if len(preview) > 800:
-            preview = preview[:800] + "..."
-        user_parts.append(f"\nL1 参考 SQL（勿照搬；若 multi_sql=true 应拆成多条）：\n{preview}")
+    if selected_l1_examples:
+        user_parts.append("\n【已精选 L1 样例（软参考；勿照搬；multi_sql=true 时应拆成多条）】")
+        for ex in selected_l1_examples:
+            user_parts.append(f"- id={ex.id} 问法：{ex.question_pattern}")
+            if ex.description:
+                user_parts.append(f"  说明：{ex.description[:300]}")
+            if ex.select_reason:
+                user_parts.append(f"  选用理由：{ex.select_reason[:200]}")
+            preview = ex.sql_text.strip()
+            if len(preview) > 800:
+                preview = preview[:800] + "..."
+            user_parts.append(f"  SQL：{preview}")
     user_parts.extend(
         [
             "",

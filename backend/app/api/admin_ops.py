@@ -58,6 +58,7 @@ def _sql_example_response(row) -> SqlExampleResponse:
         id=row.id,
         question_pattern=row.question_pattern,
         sql_text=row.sql_text,
+        description=row.description,
         meta_json=meta,
         role_scope=row.role_scope,
         degrade_priority=row.degrade_priority,

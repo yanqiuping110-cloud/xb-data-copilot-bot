@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,7 @@ def build_brief_report_document(
     llm_plan: dict[str, Any] | None = None,
     work_dir: Path | None = None,
     settings: Settings | None = None,
+    progress_cb: Callable[[str, int], None] | None = None,
 ) -> dict[str, Any]:
     """将 turn 快照与 LLM 文案组装为 BriefReportDocument。"""
     cfg = settings or get_settings()
@@ -107,6 +109,10 @@ def build_brief_report_document(
     chapters: list[dict[str, Any]] = []
     toc: list[dict[str, Any]] = []
     max_rows = cfg.brief_report_table_max_rows
+    total = len(turns)
+
+    if progress_cb:
+        progress_cb("组装报告结构", 34)
 
     for i, turn in enumerate(turns, start=1):
         toc_item = _toc_item_for_index(toc_plan, i)
@@ -120,6 +126,10 @@ def build_brief_report_document(
         answer_text = turn.get("answer") or ""
         if is_empty_answer(answer_text):
             answer_text = ""
+
+        if progress_cb and total:
+            pct = 36 + int((i - 1) / total * 38)
+            progress_cb(f"渲染第 {i}/{total} 章图表", pct)
 
         chart_path = None
         if work_dir is not None:
@@ -160,6 +170,12 @@ def build_brief_report_document(
                 "summary": summary,
             }
         )
+        if progress_cb and total:
+            pct = 36 + int(i / total * 38)
+            progress_cb(f"已完成第 {i}/{total} 章", pct)
+
+    if progress_cb:
+        progress_cb("报告内容组装完成", 76)
 
     return {
         "meta": {

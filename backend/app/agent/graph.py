@@ -11,7 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from app.agent.memory_nodes import (
     load_session_memory,
     load_user_preference,
-    resolve_references_node,
+    process_memory_context_node,
 )
 from app.agent.nodes import (
     apply_policy,
@@ -24,6 +24,7 @@ from app.agent.nodes import (
     route_after_validate,
     validate_sql_node,
 )
+from app.agent.l1_nodes import recall_sql_examples_node, select_l1_examples_node
 from app.agent.plan_nodes import plan_question, route_after_plan
 from app.agent.agent_nodes import (
     agent_loop,
@@ -66,7 +67,7 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
     graph.add_node("normalize_question", normalize_question)  # 清洗问句、截断长度
     graph.add_node("load_session_memory", load_session_memory)  # 加载 L1 会话短期记忆
     graph.add_node("load_user_preference", load_user_preference)  # 加载 L2 用户显式偏好
-    graph.add_node("resolve_references", resolve_references_node)  # 指代消解（"它/上次"等），拼装 memory prompt
+    graph.add_node("process_memory_context", process_memory_context_node)  # LLM STAR 记忆上下文
     # --- 多阶段召回 ---
     graph.add_node("extract_keywords", extract_keywords_node)  # 从问句抽取关键词，供混合召回
     graph.add_node("do_recall_tables", recall_tables)  # 表级向量/关键词召回
@@ -80,7 +81,9 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
     graph.add_node("filter_tables", filter_tables_node)  # 筛选候选表并做关系扩展
     graph.add_node("filter_columns", filter_columns_node)  # 在候选表内筛选 Prompt 字段
     graph.add_node("filter_metrics", filter_metrics_node)  # 保留 Top 指标
+    graph.add_node("do_recall_sql_examples", recall_sql_examples_node)  # L1 样例知识库召回
     graph.add_node("build_llm_context", build_llm_context)  # 拼装结构化 Prompt 上下文
+    graph.add_node("select_l1_examples", select_l1_examples_node)  # LLM 精选 L1 样例
     # --- 规划与 Agent ---
     graph.add_node("plan_question", plan_question)  # LLM 判定复杂度并分解步骤，决定快/慢路径
     graph.add_node("agent_loop", agent_loop)  # ReAct 工具循环（查表/列/指标等）
@@ -102,8 +105,8 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
     graph.add_edge(START, "normalize_question")
     graph.add_edge("normalize_question", "load_session_memory")
     graph.add_edge("load_session_memory", "load_user_preference")
-    graph.add_edge("load_user_preference", "resolve_references")
-    graph.add_edge("resolve_references", "extract_keywords")
+    graph.add_edge("load_user_preference", "process_memory_context")
+    graph.add_edge("process_memory_context", "extract_keywords")
     graph.add_edge("extract_keywords", "do_recall_tables")
     if recall_columns_enabled:
         graph.add_edge("do_recall_tables", "do_recall_columns")
@@ -115,8 +118,10 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
     graph.add_edge("merge_retrieved_info", "filter_tables")
     graph.add_edge("filter_tables", "filter_columns")
     graph.add_edge("filter_columns", "filter_metrics")
-    graph.add_edge("filter_metrics", "build_llm_context")
-    graph.add_edge("build_llm_context", "plan_question")
+    graph.add_edge("filter_metrics", "do_recall_sql_examples")
+    graph.add_edge("do_recall_sql_examples", "build_llm_context")
+    graph.add_edge("build_llm_context", "select_l1_examples")
+    graph.add_edge("select_l1_examples", "plan_question")
     graph.add_conditional_edges(
         "plan_question",
         route_after_plan,

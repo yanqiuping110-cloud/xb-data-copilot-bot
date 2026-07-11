@@ -21,6 +21,9 @@ class AskGraphState(TypedDict, total=False):
     session_memory: SessionMemory | None
     user_preferences: list[UserPreferenceItem]
     memory_prompt_text: str
+    memory_star: dict | None
+    recall_question: str | None
+    reference_type: str | None
     reference_hint: str | None
     memory_skipped: bool
     keywords: list[str]
@@ -73,6 +76,10 @@ class AskGraphState(TypedDict, total=False):
     verify_attempts: int
     # 第 11～12 周代码召回
     recall_code_artifacts: list
+    # L1 样例（知识库召回 + LLM 精选）
+    l1_candidates: list[dict]
+    l1_recall_mode: str | None
+    selected_l1_examples: list[dict]
     # 图表展示
     visualization_intent: dict | None
     chart_spec: dict | None

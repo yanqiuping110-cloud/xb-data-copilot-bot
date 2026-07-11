@@ -213,7 +213,8 @@ async def stream_ask_graph(
                 if not first_progress_sent:
                     collector.mark_first_token(_elapsed_ms(t0))
                     first_progress_sent = True
-                yield progress_event(node_name, detail=detail)
+                duration_ms = collector.duration_for_node(node_name)
+                yield progress_event(node_name, detail=detail, duration_ms=duration_ms)
             for frame in _yield_pending():
                 yield frame
 
@@ -386,7 +387,8 @@ async def _prepare_ask_run(
     answer_delta_queue: asyncio.Queue[str] | None = asyncio.Queue() if stream else None
     thinking_delta_queue: asyncio.Queue[str] | None = None
     if stream and settings.llm_thinking_enabled and settings.llm_thinking_stream:
-        thinking_delta_queue = asyncio.Queue()
+        if not settings.llm_thinking_stream_admin_only or ctx.role == UserRole.ADMIN:
+            thinking_delta_queue = asyncio.Queue()
     config = {
         "recursion_limit": settings.graph_recursion_limit,
         "configurable": {
@@ -645,6 +647,11 @@ def _progress_detail(node_name: str, update: dict) -> dict | None:
         return {"count": len(update.get("recall_metrics") or [])}
     if node_name in ("do_recall_field_values", "recall_field_values"):
         return {"count": len(update.get("recall_field_values") or [])}
+    if node_name == "do_recall_sql_examples":
+        return {"count": len(update.get("l1_candidates") or [])}
+    if node_name == "select_l1_examples":
+        selected = update.get("selected_l1_examples") or []
+        return {"count": len(selected), "selectedIds": [s.get("id") for s in selected[:5]]}
     if node_name == "generate_sql":
         return {"hasSql": bool(update.get("raw_sql"))}
     if node_name == "execute_sql":

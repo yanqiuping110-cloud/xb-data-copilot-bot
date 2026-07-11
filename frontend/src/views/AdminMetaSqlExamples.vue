@@ -12,16 +12,20 @@
       <el-card>
         <div class="toolbar">
           <el-button type="primary" @click="openCreate">新增样例</el-button>
+          <el-button :loading="rebuilding" @click="onRebuildIndex">重建知识库索引</el-button>
         </div>
+        <p class="hint">
+          L1 样例通过知识库召回（问句模式 + 详细描述），由 LLM 结合 STAR 精选后注入规划/SQL。匹配规则与优先级字段已弃用。
+        </p>
         <el-table v-loading="loading" :data="examples" border style="margin-top: 16px">
-          <el-table-column prop="degradePriority" label="优先级" width="80" />
           <el-table-column label="审核" width="90">
             <template #default="{ row }">
               <el-tag v-if="row.reviewStatus === 0 || row.metaJson?.draft" type="warning" size="small">草稿</el-tag>
               <el-tag v-else type="success" size="small">已发布</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="questionPattern" label="问句模式" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="questionPattern" label="问句模式" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="description" label="详细描述" min-width="180" show-overflow-tooltip />
           <el-table-column prop="roleScope" label="角色" width="90">
             <template #default="{ row }">{{ row.roleScope || '全部' }}</template>
           </el-table-column>
@@ -49,35 +53,26 @@
     <el-dialog v-model="dialogVisible" :title="editId ? '编辑 L1 样例' : '新增 L1 样例'" width="720px" destroy-on-close>
       <el-form :model="form" label-width="100px">
         <el-form-item label="问句模式" required>
-          <el-input v-model="form.questionPattern" placeholder="示例问句或描述" />
+          <el-input v-model="form.questionPattern" placeholder="示例问句或典型问法" />
         </el-form-item>
-        <el-form-item label="SQL" required>
-          <el-input v-model="form.sqlText" type="textarea" :rows="4" />
-        </el-form-item>
-        <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="角色范围">
-              <el-select v-model="form.roleScope" clearable placeholder="全部" style="width: 100%">
-                <el-option label="全部" :value="null" />
-                <el-option label="渠道" value="SCHOOL" />
-                <el-option label="运营" value="OPERATOR" />
-                <el-option label="超管" value="ADMIN" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="L1 优先级">
-              <el-input-number v-model="form.degradePriority" :min="1" :max="999" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="匹配规则 JSON">
+        <el-form-item label="详细描述">
           <el-input
-            v-model="form.metaJsonText"
+            v-model="form.description"
             type="textarea"
-            :rows="6"
-            placeholder='{"matchAll":["参与人数"],"answerTemplate":"…","tables":["your_fact_table"]}'
+            :rows="3"
+            placeholder="业务口径、适用场景、涉及表/指标说明（用于知识库召回）"
           />
+        </el-form-item>
+        <el-form-item label="SQL 样例" required>
+          <el-input v-model="form.sqlText" type="textarea" :rows="6" />
+        </el-form-item>
+        <el-form-item label="角色范围">
+          <el-select v-model="form.roleScope" clearable placeholder="全部" style="width: 100%">
+            <el-option label="全部" :value="null" />
+            <el-option label="渠道" value="SCHOOL" />
+            <el-option label="运营" value="OPERATOR" />
+            <el-option label="超管" value="ADMIN" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -94,22 +89,22 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MetaAdminNav from '../components/MetaAdminNav.vue'
 import { fetchMe } from '../api/auth'
-import { createSqlExample, deleteSqlExample, listSqlExamples, updateSqlExample } from '../api/meta'
+import { createSqlExample, deleteSqlExample, listSqlExamples, rebuildMetaIndex, updateSqlExample } from '../api/meta'
 import { publishL1Example } from '../api/adminOps'
 
 const router = useRouter()
 const route = useRoute()
 const loading = ref(false)
 const saving = ref(false)
+const rebuilding = ref(false)
 const examples = ref([])
 const dialogVisible = ref(false)
 const editId = ref(null)
 const form = reactive({
   questionPattern: '',
+  description: '',
   sqlText: '',
   roleScope: null,
-  degradePriority: 100,
-  metaJsonText: '',
 })
 
 onMounted(async () => {
@@ -128,6 +123,7 @@ onMounted(async () => {
       openCreate()
       form.questionPattern = data.questionPattern || ''
       form.sqlText = data.sqlText || ''
+      form.description = data.description || ''
     } catch {
       /* ignore */
     }
@@ -162,10 +158,9 @@ function openCreate() {
   editId.value = null
   Object.assign(form, {
     questionPattern: '',
+    description: '',
     sqlText: '',
     roleScope: null,
-    degradePriority: 100,
-    metaJsonText: '{\n  "matchAll": [],\n  "answerTemplate": ""\n}',
   })
   dialogVisible.value = true
 }
@@ -174,34 +169,23 @@ function openEdit(row) {
   editId.value = row.id
   Object.assign(form, {
     questionPattern: row.questionPattern,
+    description: row.description || '',
     sqlText: row.sqlText,
     roleScope: row.roleScope,
-    degradePriority: row.degradePriority,
-    metaJsonText: row.metaJson ? JSON.stringify(row.metaJson, null, 2) : '',
   })
   dialogVisible.value = true
 }
 
 async function submit() {
   if (!form.questionPattern.trim() || !form.sqlText.trim()) {
-    ElMessage.warning('请填写问句与 SQL')
+    ElMessage.warning('请填写问句模式与 SQL 样例')
     return
-  }
-  let metaJson = null
-  if (form.metaJsonText.trim()) {
-    try {
-      metaJson = JSON.parse(form.metaJsonText)
-    } catch {
-      ElMessage.warning('匹配规则 JSON 格式不正确')
-      return
-    }
   }
   const body = {
     questionPattern: form.questionPattern.trim(),
+    description: form.description.trim() || null,
     sqlText: form.sqlText.trim(),
     roleScope: form.roleScope,
-    degradePriority: form.degradePriority,
-    metaJson,
   }
   saving.value = true
   try {
@@ -222,6 +206,40 @@ async function onPublish(row) {
   await publishL1Example(row.id)
   ElMessage.success('L1 样例已发布')
   await loadList()
+  try {
+    await ElMessageBox.confirm('样例已发布，是否立即重建知识库索引以使召回生效？', '重建知识库索引', {
+      confirmButtonText: '重建',
+      cancelButtonText: '稍后',
+      type: 'info',
+    })
+    await doRebuild()
+  } catch (err) {
+    if (err !== 'cancel' && err?.message !== 'cancel') {
+      /* 用户取消确认框，或 rebuild 失败（doRebuild 内已有提示） */
+    }
+  }
+}
+
+async function doRebuild() {
+  rebuilding.value = true
+  try {
+    const res = await rebuildMetaIndex()
+    const l1Count = res.sqlExamples ?? 0
+    ElMessage.success(
+      `索引重建完成：L1 样例 ${l1Count}、字段 ${res.columns}、指标 ${res.metrics}、取值 ${res.fieldValues}`,
+    )
+  } finally {
+    rebuilding.value = false
+  }
+}
+
+async function onRebuildIndex() {
+  await ElMessageBox.confirm(
+    '将全量重建表/字段/指标/取值/L1 样例检索索引，需 Embedding 服务可用。继续？',
+    '重建知识库索引',
+    { type: 'warning' },
+  )
+  await doRebuild()
 }
 
 async function onDelete(row) {
@@ -246,4 +264,6 @@ function logout() {
 }
 .title { font-weight: 600; font-size: 18px; }
 .main { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+.hint { margin: 12px 0 0; color: #606266; font-size: 13px; line-height: 1.5; }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
 </style>

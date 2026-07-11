@@ -63,6 +63,11 @@ class Settings(BaseSettings):
         alias="LLM_THINKING_STREAM",
         description="SSE 流式问数时推送 reasoning_content 给前端",
     )
+    llm_thinking_stream_admin_only: bool = Field(
+        default=True,
+        alias="LLM_THINKING_STREAM_ADMIN_ONLY",
+        description="为 true 时仅 ADMIN 接收 thinking_delta SSE",
+    )
     llm_reasoning_effort: str = Field(
         default="high",
         alias="LLM_REASONING_EFFORT",
@@ -171,12 +176,32 @@ class Settings(BaseSettings):
     curated_example_top_k: int = Field(
         default=1,
         alias="CURATED_EXAMPLE_TOP_K",
-        description="注入 LLM Prompt 的 L1 样例软参考最大条数（仅取得分最高的一条）",
+        description="（已弃用）旧 L1 关键词打分 Top-K，请使用 L1_RECALL_TOP_K / L1_SELECT_MAX",
     )
     curated_example_min_score: int = Field(
         default=1,
         alias="CURATED_EXAMPLE_MIN_SCORE",
-        description="L1 样例软参考最低相关性得分，低于此值不注入 Prompt",
+        description="（已弃用）旧 L1 最低得分",
+    )
+    l1_recall_top_k: int = Field(
+        default=10,
+        alias="L1_RECALL_TOP_K",
+        description="L1 样例知识库召回候选最大条数",
+    )
+    l1_select_max: int = Field(
+        default=3,
+        alias="L1_SELECT_MAX",
+        description="LLM 精选后进入后续流程的 L1 样例最大条数",
+    )
+    l1_select_llm_enabled: bool = Field(
+        default=True,
+        alias="L1_SELECT_LLM_ENABLED",
+        description="是否启用 LLM 精选 L1 样例；关闭时不注入任何 L1",
+    )
+    l1_select_context_max_chars: int = Field(
+        default=6000,
+        alias="L1_SELECT_CONTEXT_MAX_CHARS",
+        description="L1 精选 LLM 输入中 context_text 截断长度",
     )
 
     # ---------- Agent Plan + 工具（第 7 周 · §11.7）----------
@@ -262,6 +287,11 @@ class Settings(BaseSettings):
     user_preference_enabled: bool = Field(default=True, alias="USER_PREFERENCE_ENABLED")
     memory_prompt_max_chars: int = Field(default=2000, alias="MEMORY_PROMPT_MAX_CHARS")
     session_memory_max_turns: int = Field(default=3, alias="SESSION_MEMORY_MAX_TURNS")
+    memory_llm_enabled: bool = Field(
+        default=True,
+        alias="MEMORY_LLM_ENABLED",
+        description="是否用 LLM STAR 处理会话记忆与问句（替代规则指代消解）",
+    )
     session_max_per_user: int = Field(default=20, alias="SESSION_MAX_PER_USER")
     session_evict_policy: str = Field(default="oldest", alias="SESSION_EVICT_POLICY")
     session_ui_turn_limit: int = Field(default=30, alias="SESSION_UI_TURN_LIMIT")
@@ -342,7 +372,7 @@ class Settings(BaseSettings):
     chart_ssr_url: str = Field(default="http://127.0.0.1:3001", alias="CHART_SSR_URL")
     chart_ssr_timeout_ms: int = Field(default=5000, alias="CHART_SSR_TIMEOUT_MS")
     chart_ssr_width: int = Field(default=720, alias="CHART_SSR_WIDTH")
-    chart_ssr_height: int = Field(default=400, alias="CHART_SSR_HEIGHT")
+    chart_ssr_height: int = Field(default=360, alias="CHART_SSR_HEIGHT")
     chart_ssr_api_key: str = Field(default="", alias="CHART_SSR_API_KEY")
     chart_storage_dir: str = Field(default="storage/charts", alias="CHART_STORAGE_DIR")
 

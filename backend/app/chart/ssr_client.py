@@ -1,4 +1,4 @@
-"""ChartSpec → PNG：优先 SSR 服务，失败降级本地渲染。"""
+"""ChartSpec → PNG：ECharts SSR 优先，matplotlib 降级。"""
 
 from __future__ import annotations
 
@@ -6,22 +6,30 @@ import base64
 import hashlib
 import json
 import logging
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from app.chart.local_renderer import render_chart_local
-from config.settings import Settings, get_settings
+from config.settings import ROOT_DIR, Settings, get_settings
 
 logger = logging.getLogger("chart.ssr")
 
 _CACHE: dict[str, str] = {}
+_CACHE_VERSION = "v2-transparent"
+
+
+def _chart_ssr_cli_path() -> Path | None:
+    cli = ROOT_DIR.parent / "chart-ssr" / "render-cli.js"
+    return cli if cli.is_file() else None
 
 
 def _cache_key(spec: dict[str, Any], columns: list[str], rows: list[list[Any]]) -> str:
     payload = json.dumps(
-        {"spec": spec, "columns": columns, "rows": rows[:30]},
+        {"v": _CACHE_VERSION, "spec": spec, "columns": columns, "rows": rows[:30]},
         ensure_ascii=False,
         sort_keys=True,
         default=str,
@@ -45,6 +53,47 @@ def _decode_render_response(data: dict[str, Any]) -> bytes | None:
     if path and Path(path).is_file():
         return Path(path).read_bytes()
     return None
+
+
+def _render_via_node_cli(
+    *,
+    chart_spec: dict[str, Any],
+    columns: list[str],
+    rows: list[list[Any]],
+    title: str | None,
+    width: int,
+    height: int,
+    timeout_ms: int,
+) -> bytes | None:
+    cli = _chart_ssr_cli_path()
+    if not cli or not shutil.which("node"):
+        return None
+    body = {
+        "chartSpec": chart_spec,
+        "columns": columns,
+        "rows": rows[:50],
+        "title": title,
+        "width": width,
+        "height": height,
+        "format": "png",
+    }
+    try:
+        proc = subprocess.run(
+            ["node", str(cli)],
+            input=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            capture_output=True,
+            timeout=max(timeout_ms / 1000, 20),
+            check=False,
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or b"").decode("utf-8", errors="replace")[:300]
+            logger.warning("chart-ssr CLI failed (code=%s): %s", proc.returncode, err)
+            return None
+        data = json.loads(proc.stdout.decode("utf-8"))
+        return _decode_render_response(data)
+    except Exception as exc:
+        logger.warning("chart-ssr CLI error: %s", exc)
+        return None
 
 
 async def _render_via_http(
@@ -147,13 +196,28 @@ def render_chart_to_path_sync(
                 api_key=cfg.chart_ssr_api_key or None,
             )
         except Exception as exc:
-            logger.warning("Chart SSR failed: %s", exc)
+            logger.warning("Chart SSR HTTP failed: %s", exc)
             png = None
         if png:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(png)
             _CACHE[cache_key] = str(output_path)
             return str(output_path)
+
+    png = _render_via_node_cli(
+        chart_spec=spec,
+        columns=columns,
+        rows=rows,
+        title=title,
+        width=cfg.chart_ssr_width,
+        height=cfg.chart_ssr_height,
+        timeout_ms=cfg.chart_ssr_timeout_ms,
+    )
+    if png:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(png)
+        _CACHE[cache_key] = str(output_path)
+        return str(output_path)
 
     rendered = render_chart_local(
         chart_spec=spec,
@@ -205,7 +269,21 @@ async def render_chart_to_path(
                 output_path.write_bytes(png)
                 return str(output_path)
         except Exception as exc:
-            logger.warning("Chart SSR failed, fallback local: %s", exc)
+            logger.warning("Chart SSR HTTP failed, fallback CLI/local: %s", exc)
+
+    png = _render_via_node_cli(
+        chart_spec=spec,
+        columns=columns,
+        rows=rows,
+        title=title,
+        width=cfg.chart_ssr_width,
+        height=cfg.chart_ssr_height,
+        timeout_ms=cfg.chart_ssr_timeout_ms,
+    )
+    if png:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(png)
+        return str(output_path)
 
     return render_chart_local(
         chart_spec=spec,

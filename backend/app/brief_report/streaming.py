@@ -18,8 +18,19 @@ def status_event(text: str, *, phase: str | None = None) -> str:
     return format_sse("status", body)
 
 
-def progress_event(step: int, label: str) -> str:
-    return format_sse("progress", {"step": step, "label": label})
+def progress_event(
+    step: int,
+    label: str,
+    *,
+    percent: int | None = None,
+    detail: str | None = None,
+) -> str:
+    body: dict[str, Any] = {"step": step, "label": label}
+    if percent is not None:
+        body["percent"] = max(0, min(100, int(percent)))
+    if detail:
+        body["detail"] = detail
+    return format_sse("progress", body)
 
 
 def report_done_event(

@@ -21,6 +21,7 @@ def _example(**kwargs) -> CuratedSqlExample:
         "id": 1,
         "question_pattern": "test",
         "sql_text": f"SELECT COUNT(*) AS cnt FROM {_QZS} WHERE 1=1",
+        "description": None,
         "role_scope": None,
         "degrade_priority": 10,
         "meta": {},

@@ -234,6 +234,7 @@ def _draw_chapter(c: canvas.Canvas, ch: dict[str, Any], w: float, h: float) -> N
                 height=img_h,
                 preserveAspectRatio=True,
                 anchor="c",
+                mask="auto",
             )
             y -= img_h + 16 * mm
         except Exception:

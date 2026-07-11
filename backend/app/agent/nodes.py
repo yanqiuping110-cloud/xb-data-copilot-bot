@@ -44,17 +44,34 @@ def _append_plan_context(context_text: str, state: AskGraphState) -> str:
     """将 plan_question 产物（规划步骤 + 工具观察）追加进 generate_sql Prompt。"""
     plan = state.get("plan")
     observations = state.get("tool_observations") or []
-    if not plan and not observations:
+    memory_star = state.get("memory_star")
+    reference_type = state.get("reference_type")
+    if not plan and not observations and not memory_star:
         return context_text
 
-    parts = [context_text, "", "【问句规划 plan_question】"]
+    parts = [context_text, ""]
+    if memory_star or reference_type:
+        parts.append("【记忆 STAR 结论（process_memory_context）】")
+        if reference_type:
+            parts.append(f"- reference_type: {reference_type}")
+        for key in ("situation", "task", "action", "result"):
+            val = (memory_star or {}).get(key)
+            if val:
+                parts.append(f"- {key}: {val}")
+        parts.append("")
+    parts.append("【问句规划 plan_question】")
     if plan:
         parts.append(f"- complexity: {plan.get('complexity')}")
         parts.append(f"- intent: {plan.get('intent')}")
         for step in plan.get("steps") or []:
             goals = step.get("goal") or ""
             tools = ", ".join(step.get("needs_tool") or [])
-            parts.append(f"  步骤 {step.get('id')}: {goals}" + (f"（工具: {tools}）" if tools else ""))
+            entity = step.get("entity_label") or ""
+            entity_part = f"；粒度: {entity}" if entity else ""
+            parts.append(
+                f"  步骤 {step.get('id')}: {goals}{entity_part}"
+                + (f"（工具: {tools}）" if tools else "")
+            )
     if observations:
         parts.append("")
         parts.append("【Agent 工具观察】")

@@ -7,7 +7,7 @@ _NODE_STEP: dict[str, int] = {
     "normalize_question": 1,
     "load_session_memory": 1,
     "load_user_preference": 1,
-    "resolve_references": 1,
+    "process_memory_context": 1,
     "extract_keywords": 1,
     "do_recall_tables": 2,
     "do_recall_columns": 2,

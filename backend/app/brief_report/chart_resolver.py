@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -20,24 +19,15 @@ def resolve_chart_png(
     work_dir: Path,
     settings: Settings | None = None,
 ) -> str | None:
-    """
-    返回章节图表 PNG 绝对路径；失败返回 None。
-
-    优先复用 storage/charts/{trace_id}.png，否则在 work_dir 重渲染。
-    """
-    cfg = settings or get_settings()
-    cached = cfg.chart_storage_path / f"{trace_id}.png"
-    dest = work_dir / f"{trace_id}.png"
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    if cached.is_file():
-        shutil.copy2(cached, dest)
-        return str(dest)
-
+    """返回章节图表 PNG 绝对路径；使用 ECharts SSR 与页面同款样式。"""
     if not chart_spec or not columns or not rows:
         return None
 
-    rendered = render_chart_png(
+    cfg = settings or get_settings()
+    dest = work_dir / f"{trace_id}.png"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    return render_chart_png(
         chart_spec=chart_spec,
         columns=columns,
         rows=rows,
@@ -45,4 +35,3 @@ def resolve_chart_png(
         title=title,
         settings=cfg,
     )
-    return rendered

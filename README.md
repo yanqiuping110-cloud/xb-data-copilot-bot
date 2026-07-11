@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/images/showcase.png" alt="Data Copilot 智能问数平台 — 自然语言查数、自动图表与数据分析报告" width="920"/>
-</p>
-
 # Data Copilot · 企业级智能问数平台
 
 > **让业务人员用自然语言查数据，把固定报表开发周期从「周」缩短到「分钟」。**
@@ -9,6 +5,24 @@
 Data Copilot 是一套面向中大型业务系统的 **NL2SQL（自然语言转 SQL）** 子产品：产品、运营、业务域管理员无需写 SQL，即可在**动态数据权限**边界内自助查询核心业务指标。平台以 **元数据治理 + 混合召回 + LangGraph 多阶段推理 + SQL 安全网关 + Prompt Injection 纵深防御** 为核心，兼顾准确率、可审计性与企业落地成本。
 
 **当前里程碑（14 周 MVP）**：Agent Plan/Tool Loop、Git 代码知识图谱、配置驱动 **DataScope**、**Prompt 定界/召回清洗** 与注入攻击评测子集均已落地；详见 [docs/PROGRESS.md](docs/PROGRESS.md)。
+
+---
+
+## 产品一览
+
+问一句业务问题，系统自动完成 **记忆整理 → 知识库召回 → L1 样例精选 → SQL 规划与执行 → 图表生成与自然语言解读**，全程 SSE 流式可观测。
+
+<p align="center">
+  <img src="docs/images/ask-result.png" alt="问数结果：自然语言解读、SQL、图表与表格" width="920"/>
+</p>
+
+<p align="center"><em>问数结果 · 一句话解读 + SQL（ADMIN 可见）+ 自动图表/表格 + 反馈闭环</em></p>
+
+<p align="center">
+  <img src="docs/images/ask-pipeline.png" alt="执行详情：各节点耗时与合计" width="920"/>
+</p>
+
+<p align="center"><em>执行详情 · 每步进度与耗时（STAR 记忆、L1 召回/精选、混合检索等），合计耗时一目了然</em></p>
 
 ---
 
@@ -131,6 +145,7 @@ flowchart LR
         M[recall_metrics]
         F[recall_field_values]
         Merge[merge · filter · build_llm_context]
+        L1[select_l1_examples]
     end
 
     subgraph Phase3["③ 推理"]
@@ -148,8 +163,8 @@ flowchart LR
         FA[format_answer]
     end
 
-    N1 --> N2 --> K --> T --> C --> M --> F --> Merge
-    Merge --> P
+    N1 --> N2 --> K --> T --> C --> M --> F --> Merge --> L1
+    L1 --> P
     P -->|简单问句| GS
     P -->|复杂问句| AL --> GS
     GS --> V
@@ -181,8 +196,9 @@ sequenceDiagram
     Graph->>LLM: Plan / Agent 工具循环（System 拒令 + 不可信定界）
     LLM-->>Graph: SQL 草案
 
-    alt L1 样例命中
-        Graph->>Graph: 跳过 LLM，直接使用模板 SQL
+    opt L1 样例精选
+        Graph->>Zvec: 召回 Top-K L1 候选
+        Graph->>LLM: 精选 0~3 条注入规划 Prompt
     end
 
     Graph->>Guard: AST 解析 · 表白名单 · deny 列 · LIMIT
@@ -365,7 +381,7 @@ data-copilot-bot/
 ├── backend/
 │   ├── app/
 │   │   ├── agent/          # LangGraph 图、召回、Plan、Agent Loop
-│   │   ├── ask/            # 问数服务、L1 匹配
+│   │   ├── ask/            # 问数服务、L1 精选
 │   │   ├── auth/           # JWT、用户仓储
 │   │   ├── policy/         # EffectivePolicy、ScopeInjector、role_policy
 │   │   ├── security/       # Prompt 定界、召回清洗（prompt_boundary）

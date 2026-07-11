@@ -40,6 +40,15 @@ def sanitize_detail(detail: dict[str, Any] | None) -> dict[str, Any] | None:
                 out[key] = value
             else:
                 out[key] = value[:_MAX_CONTEXT_TEXT_LEN] + f"\n…（已截断，总长 {len(value)} 字符）"
+        elif key == "memory_prompt_text" and isinstance(value, str):
+            if len(value) <= _MAX_CONTEXT_TEXT_LEN:
+                out[key] = value
+            else:
+                out[key] = value[:_MAX_CONTEXT_TEXT_LEN] + f"\n…（已截断，总长 {len(value)} 字符）"
+        elif key == "llm_output" and isinstance(value, str):
+            out[key] = _truncate(value, _MAX_CONTEXT_TEXT_LEN)
+        elif key == "llm_input" and isinstance(value, dict):
+            out[key] = value
         elif key == "prompt_text" and isinstance(value, str):
             if len(value) <= _MAX_CONTEXT_TEXT_LEN:
                 out[key] = value
@@ -72,6 +81,14 @@ class TraceLogCollector:
         """流式模式下记录首 token（首条 SSE progress）耗时，仅记一次。"""
         if self.latency_ms_first_token is None:
             self.latency_ms_first_token = latency_ms
+
+    def duration_for_node(self, node: str) -> int | None:
+        """最近一次该节点 span 的耗时（供 SSE progress 展示）。"""
+        for entry in reversed(self._nodes):
+            if entry.get("node") == node:
+                raw = entry.get("duration_ms")
+                return int(raw) if raw is not None else None
+        return None
 
     def append_node(
         self,

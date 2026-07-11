@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.agent.log_utils import NODE_LABELS, get_node_label
+from app.agent.progress_payload import build_progress_body
 from app.schemas.ask import AskResponse
 
 
@@ -17,14 +17,15 @@ def format_sse(event: str, payload: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {data}\n\n"
 
 
-def progress_event(node: str, *, detail: dict[str, Any] | None = None) -> str:
-    """节点进度事件。"""
-    body: dict[str, Any] = {
-        "node": node,
-        "label": get_node_label(node),
-    }
-    if detail:
-        body["detail"] = detail
+def progress_event(
+    node: str,
+    *,
+    detail: dict[str, Any] | None = None,
+    status: str = "done",
+    duration_ms: int | None = None,
+) -> str:
+    """节点进度事件（含 phase / summary 脱敏字段）。"""
+    body = build_progress_body(node, detail=detail, status=status, duration_ms=duration_ms)
     return format_sse("progress", body)
 
 

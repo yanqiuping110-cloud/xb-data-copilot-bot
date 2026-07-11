@@ -15,12 +15,14 @@ from app.meta.index_text import (
     build_column_search_text,
     build_field_value_search_text,
     build_metric_search_text,
+    build_sql_example_search_text,
     build_table_search_text,
 )
 from app.meta.repository import (
     IndexableColumnRow,
     IndexableFieldValueRow,
     IndexableMetricRow,
+    IndexableSqlExampleRow,
     IndexableTableRow,
     MetaRepository,
     parse_alias_json,
@@ -97,6 +99,18 @@ class RecalledCodeArtifact:
     recall_mode: str
     summary_text: str | None = None
     tables: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RecalledSqlExample:
+    """L1 SQL 样例召回结果。"""
+
+    example_id: int
+    question_pattern: str
+    description: str | None
+    search_text: str
+    score: float
+    recall_mode: str
 
 
 @dataclass
@@ -246,6 +260,33 @@ def rank_field_values_by_keywords(
     ]
 
 
+def rank_sql_examples_by_keywords(
+    rows: list[IndexableSqlExampleRow],
+    keywords: list[str],
+    *,
+    top_k: int,
+) -> list[RecalledSqlExample]:
+    """内存关键词排序 L1 样例（ES 不可用时的降级）。"""
+    scored: list[tuple[float, IndexableSqlExampleRow]] = []
+    for row in rows:
+        text = build_sql_example_search_text(row)
+        score = _keyword_score(text, keywords)
+        if score > 0:
+            scored.append((score, row))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [
+        RecalledSqlExample(
+            example_id=row.example_id,
+            question_pattern=row.question_pattern,
+            description=row.description,
+            search_text=build_sql_example_search_text(row),
+            score=score,
+            recall_mode="keyword_fallback",
+        )
+        for score, row in scored[:top_k]
+    ]
+
+
 class HybridRetriever:
     """问句混合召回：向量 + 全文，检索后端不可用时 MySQL 关键词降级。"""
 
@@ -324,6 +365,20 @@ class HybridRetriever:
         kws = keywords if keywords is not None else extract_keywords(question)
         use_index = await self._index_available()
         return await self._recall_field_values(question, kws, use_index=use_index)
+
+    async def recall_sql_examples_only(
+        self,
+        question: str,
+        keywords: list[str] | None = None,
+    ) -> tuple[list[RecalledSqlExample], str]:
+        """L1 样例向量/关键词召回。"""
+        kws = keywords if keywords is not None else extract_keywords(question)
+        use_index = await self._index_available()
+        items = await self._recall_sql_examples(question, kws, use_index=use_index)
+        mode = "keyword_fallback" if items and items[0].recall_mode == "keyword_fallback" else "hybrid"
+        if not use_index and self._settings.recall_keyword_fallback:
+            mode = "keyword_fallback"
+        return items, mode
 
     async def recall_all(self, question: str, keywords: list[str] | None = None) -> HybridRecallResult:
         """执行表/字段/指标/取值召回并返回合并结果。"""
@@ -515,6 +570,53 @@ class HybridRetriever:
 
         rows = await self._repo.list_indexable_field_values()
         return rank_field_values_by_keywords(rows, keywords, top_k=top_k)
+
+    async def _recall_sql_examples(
+        self,
+        question: str,
+        keywords: list[str],
+        *,
+        use_index: bool,
+    ) -> list[RecalledSqlExample]:
+        from app.ask.l1_service import is_indexable_l1_row
+
+        top_k = self._settings.l1_recall_top_k
+        recall_mode = self._vector_recall_mode()
+        if use_index:
+            try:
+                query_text = " ".join(keywords) or question
+                vectors = await self._embedding.embed_texts([query_text])
+                if vectors:
+                    hits = await self._index.search_vector(
+                        "sql_example",
+                        vectors[0],
+                        top_k=top_k,
+                        query_text=query_text,
+                    )
+                    if hits:
+                        return [
+                            RecalledSqlExample(
+                                example_id=int(h["example_id"]),
+                                question_pattern=str(h.get("question_pattern") or ""),
+                                description=h.get("description"),
+                                search_text=str(h.get("search_text") or ""),
+                                score=float(h.get("_score") or 0.0),
+                                recall_mode=recall_mode,
+                            )
+                            for h in hits
+                        ]
+            except Exception:
+                use_index = False
+
+        if not self._settings.recall_keyword_fallback:
+            return []
+
+        rows = [
+            r
+            for r in await self._repo.list_indexable_sql_examples()
+            if is_indexable_l1_row(r)
+        ]
+        return rank_sql_examples_by_keywords(rows, keywords, top_k=top_k)
 
     async def recall_code_artifacts(
         self,

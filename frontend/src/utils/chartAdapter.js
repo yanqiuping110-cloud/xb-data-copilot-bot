@@ -3,6 +3,7 @@
  */
 
 const CHART_COLORS = ['#6366f1', '#22c55e', '#06b6d4', '#f59e0b', '#8b5cf6', '#ec4899']
+const CHART_BACKGROUND = 'transparent'
 
 function pickSpec(spec, ...keys) {
   for (const k of keys) {
@@ -66,6 +67,7 @@ export function buildEchartsOption({ chartSpec, columns, rows }) {
     const yCol = yCols[0]
     if (!xCol || !yCol) return null
     return {
+      backgroundColor: CHART_BACKGROUND,
       color: CHART_COLORS,
       tooltip: baseTooltip,
       legend: { bottom: 0, type: 'scroll', textStyle: { color: '#64748b' } },
@@ -89,6 +91,7 @@ export function buildEchartsOption({ chartSpec, columns, rows }) {
     const y = yCols[1]
     if (!x || !y) return null
     return {
+      backgroundColor: CHART_BACKGROUND,
       color: CHART_COLORS,
       tooltip: baseTooltip,
       grid: { left: 52, right: 24, top: 24, bottom: 48 },
@@ -138,6 +141,7 @@ export function buildEchartsOption({ chartSpec, columns, rows }) {
   )
 
   return {
+    backgroundColor: CHART_BACKGROUND,
     color: CHART_COLORS,
     tooltip: { ...baseTooltip, trigger: 'axis', axisPointer: { type: 'shadow' } },
     legend: yCols.length > 1

@@ -106,6 +106,7 @@ class RebuildIndexResponse(CamelModel):
     metrics: int
     field_values: int
     embedding_dims: int
+    sql_examples: int = 0
 
 
 class RelationResponse(CamelModel):
@@ -235,6 +236,7 @@ class SqlExampleResponse(CamelModel):
     id: int
     question_pattern: str
     sql_text: str
+    description: str | None = None
     meta_json: dict | None = None
     role_scope: str | None = None
     degrade_priority: int
@@ -246,6 +248,7 @@ class SqlExampleResponse(CamelModel):
 class CreateSqlExampleRequest(CamelModel):
     question_pattern: str
     sql_text: str
+    description: str | None = None
     meta_json: dict | None = None
     role_scope: str | None = None
     degrade_priority: int = 100
@@ -254,6 +257,7 @@ class CreateSqlExampleRequest(CamelModel):
 class UpdateSqlExampleRequest(CamelModel):
     question_pattern: str | None = None
     sql_text: str | None = None
+    description: str | None = None
     meta_json: dict | None = None
     role_scope: str | None = None
     degrade_priority: int | None = None

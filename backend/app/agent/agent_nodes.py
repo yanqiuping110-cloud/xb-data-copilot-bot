@@ -11,10 +11,12 @@ from langchain_core.runnables import RunnableConfig
 
 from app.agent.agent_llm import _fallback_action, decide_agent_action
 from app.agent.context_builder import build_agent_context_text
+from app.agent.l1_nodes import _dicts_to_candidates
 from app.agent.llm_sql import generate_sql_from_llm, generate_sql_step_from_llm
 from app.agent.nodes import _cfg, _span, generate_sql
 from app.agent.state import AskGraphState
 from app.agent.tools.executor import execute_tool_span
+from app.ask.l1_service import append_l1_to_context
 from config.settings import Settings
 
 
@@ -146,6 +148,8 @@ async def build_agent_context(state: AskGraphState, config: RunnableConfig) -> d
         settings=settings,
         memory_prompt_text=state.get("memory_prompt_text") or "",
     )
+    selected_l1 = _dicts_to_candidates(state.get("selected_l1_examples"))
+    context_text = append_l1_to_context(context_text, selected_l1)
 
     await _span(
         config,

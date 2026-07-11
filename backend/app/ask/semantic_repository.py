@@ -24,7 +24,7 @@ class MetricDefinition:
 
 @dataclass(frozen=True)
 class CuratedSqlExample:
-    """copilot_sql_example 一行，供 L1 匹配。"""
+    """copilot_sql_example 一行，供 L1 知识库召回后加载。"""
 
     id: int
     question_pattern: str
@@ -32,6 +32,7 @@ class CuratedSqlExample:
     role_scope: str | None
     degrade_priority: int
     meta: dict
+    description: str | None = None
     review_status: int = 1
 
 
@@ -69,7 +70,7 @@ class SemanticRepository:
         result = await self._session.execute(
             text(
                 """
-                SELECT id, question_pattern, sql_text, role_scope, degrade_priority, meta_json,
+                SELECT id, question_pattern, sql_text, description, role_scope, degrade_priority, meta_json,
                        review_status
                 FROM copilot_sql_example
                 WHERE deleted = 0 AND COALESCE(review_status, 1) = 1
@@ -85,6 +86,7 @@ class SemanticRepository:
                     id=int(row["id"]),
                     question_pattern=str(row["question_pattern"]),
                     sql_text=str(row["sql_text"]).strip(),
+                    description=row.get("description"),
                     role_scope=row.get("role_scope"),
                     degrade_priority=int(row["degrade_priority"]),
                     meta=meta,

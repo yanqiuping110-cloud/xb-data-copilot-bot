@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,57 @@ async def _validate_session(
         raise BriefReportError(exc.code, exc.message, exc.status_code) from exc
 
 
+async def _plan_copy_with_heartbeat(
+    *,
+    user_prompt: str,
+    turns: list[dict[str, Any]],
+    settings: Settings,
+    progress: Any,
+) -> dict[str, Any]:
+    """LLM 文案生成期间发送心跳进度，避免长时间停在同一百分比。"""
+    pulse_labels = [
+        "正在调用 AI…",
+        "分析章节要点…",
+        "构思封面标题…",
+        "撰写目录摘要…",
+        "润色结尾致辞…",
+    ]
+    stop = asyncio.Event()
+    pulse_pct = 12
+
+    async def pulse() -> None:
+        nonlocal pulse_pct
+        idx = 0
+        while not stop.is_set():
+            detail = pulse_labels[idx % len(pulse_labels)]
+            await progress(2, "生成封面与目录文案", percent=pulse_pct, detail=detail)
+            idx += 1
+            pulse_pct = min(30, pulse_pct + 2)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=1.6)
+            except asyncio.TimeoutError:
+                pass
+
+    pulse_task = asyncio.create_task(pulse())
+    try:
+        return await plan_brief_report_copy(
+            user_prompt=user_prompt,
+            turns=turns,
+            settings=settings,
+        )
+    finally:
+        stop.set()
+        pulse_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pulse_task
+        await progress(
+            2,
+            "封面与目录文案已生成",
+            percent=32,
+            detail=f"共 {len(turns)} 个章节",
+        )
+
+
 async def _run_pipeline(
     body: BriefReportRequest,
     ctx: UserContext,
@@ -103,12 +155,18 @@ async def _run_pipeline(
 
     await _validate_session(db, settings, session_id=body.session_id, user_id=ctx.user_id)
 
-    async def step(n: int, label: str) -> None:
+    async def progress(
+        n: int,
+        label: str,
+        *,
+        percent: int | None = None,
+        detail: str | None = None,
+    ) -> None:
         if emit:
-            await emit(sse.progress_event(n, label))
+            await emit(sse.progress_event(n, label, percent=percent, detail=detail))
             await emit(sse.status_event(label, phase=f"step_{n}"))
 
-    await step(1, "加载问数记录")
+    await progress(1, "加载问数记录", percent=6, detail=f"共 {len(trace_ids)} 条记录")
     try:
         turns = await load_turns(
             db,
@@ -119,11 +177,13 @@ async def _run_pipeline(
     except BriefReportLoadError as exc:
         raise BriefReportError(exc.code, exc.message, exc.status_code) from exc
 
-    await step(2, "生成封面与目录文案")
-    llm_plan = await plan_brief_report_copy(
+    await progress(1, "问数记录已加载", percent=10, detail=f"有效章节 {len(turns)} 个")
+
+    llm_plan = await _plan_copy_with_heartbeat(
         user_prompt=user_prompt,
         turns=turns,
         settings=settings,
+        progress=progress,
     )
 
     report_id = f"brpt-{uuid4().hex[:16]}"
@@ -142,7 +202,12 @@ async def _run_pipeline(
     await db.commit()
 
     try:
-        await step(3, "组装报告内容")
+        def sync_build_progress(label: str, percent: int) -> None:
+            asyncio.create_task(
+                progress(3, label, percent=percent, detail=label),
+            )
+
+        await progress(3, "组装报告内容", percent=32, detail="准备章节结构…")
         doc = build_brief_report_document(
             session_id=body.session_id,
             user_prompt=user_prompt,
@@ -151,13 +216,14 @@ async def _run_pipeline(
             llm_plan=llm_plan,
             work_dir=work_dir,
             settings=settings,
+            progress_cb=sync_build_progress if emit else None,
         )
         doc["meta"]["reportId"] = report_id
 
-        await step(4, "渲染图表")
-        await step(5, "导出 PDF")
+        await progress(5, "导出 PDF", percent=82, detail="排版与写入文件…")
         pdf_path = _storage_dir(settings) / f"{report_id}.pdf"
         page_count, file_size = export_brief_report_pdf(doc, pdf_path, settings=settings)
+        await progress(5, "PDF 导出完成", percent=96, detail=f"{page_count} 页")
 
         rel_path = str(Path(settings.brief_report_storage_dir) / f"{report_id}.pdf")
         await repo.mark_report_done(
