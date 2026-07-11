@@ -37,3 +37,13 @@ def done_event(response: AskResponse) -> str:
 def error_event(code: str, message: str) -> str:
     """流内业务错误（已开流后无法改 HTTP 状态码时使用）。"""
     return format_sse("error", {"code": code, "message": message})
+
+
+def text_delta_event(delta: str) -> str:
+    """回答文本增量（token/块级流式）。"""
+    return format_sse("text_delta", {"delta": delta})
+
+
+def thinking_delta_event(delta: str) -> str:
+    """思考过程增量（DeepSeek reasoning_content）。"""
+    return format_sse("thinking_delta", {"delta": delta})

@@ -17,7 +17,7 @@ from app.memory.session_service import SessionService
 from app.ask.column_labels import localize_result_columns
 from app.agent.log_utils import get_node_label, summarize_state_update
 from app.agent.state import AskGraphState
-from app.agent.streaming import done_event, error_event, progress_event
+from app.agent.streaming import done_event, error_event, progress_event, text_delta_event, thinking_delta_event
 from app.ask.exceptions import AskError
 from app.core.context import UserContext, UserRole
 from app.core.log_config import get_logger
@@ -159,10 +159,42 @@ async def stream_ask_graph(
     collector: TraceLogCollector = config["configurable"]["trace_log_collector"]
     accumulated: AskGraphState = dict(initial)
     first_progress_sent = False
+    answer_delta_queue: asyncio.Queue[str] | None = config["configurable"].get("answer_delta_queue")
+    thinking_delta_queue: asyncio.Queue[str] | None = config["configurable"].get(
+        "thinking_delta_queue"
+    )
     logger.info("[trace=%s] 问数开始 stream=true question=%r", trace_id, question)
+
+    stop_poller = asyncio.Event()
+    pending_sse: asyncio.Queue[str] = asyncio.Queue()
+
+    async def _delta_poller() -> None:
+        while not stop_poller.is_set():
+            for frame in _drain_thinking_delta_queue(thinking_delta_queue):
+                await pending_sse.put(frame)
+            for frame in _drain_answer_delta_queue(answer_delta_queue):
+                await pending_sse.put(frame)
+            await asyncio.sleep(0.05)
+        for frame in _drain_thinking_delta_queue(thinking_delta_queue):
+            await pending_sse.put(frame)
+        for frame in _drain_answer_delta_queue(answer_delta_queue):
+            await pending_sse.put(frame)
+
+    poller_task = asyncio.create_task(_delta_poller())
+
+    def _yield_pending() -> list[str]:
+        frames: list[str] = []
+        while not pending_sse.empty():
+            try:
+                frames.append(pending_sse.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return frames
 
     try:
         async for chunk in get_ask_graph().astream(initial, config, stream_mode="updates"):
+            for frame in _yield_pending():
+                yield frame
             if await tracer.get_turn_status(copilot_session, trace_id) == "cancelled":
                 logger.info("[trace=%s] 检测到用户中断，停止流水线", trace_id)
                 break
@@ -182,6 +214,11 @@ async def stream_ask_graph(
                     collector.mark_first_token(_elapsed_ms(t0))
                     first_progress_sent = True
                 yield progress_event(node_name, detail=detail)
+            for frame in _yield_pending():
+                yield frame
+
+        for frame in _yield_pending():
+            yield frame
 
         if await tracer.get_turn_status(copilot_session, trace_id) == "cancelled":
             yield done_event(_cancelled_response(trace_id, session_id, t0))
@@ -283,6 +320,9 @@ async def stream_ask_graph(
             error_message=str(exc),
         )
         yield error_event("STREAM_ERROR", str(exc))
+    finally:
+        stop_poller.set()
+        await poller_task
 
 
 async def _prepare_ask_run(
@@ -343,6 +383,10 @@ async def _prepare_ask_run(
     }
 
     collector = TraceLogCollector(trace_id, stream=stream)
+    answer_delta_queue: asyncio.Queue[str] | None = asyncio.Queue() if stream else None
+    thinking_delta_queue: asyncio.Queue[str] | None = None
+    if stream and settings.llm_thinking_enabled and settings.llm_thinking_stream:
+        thinking_delta_queue = asyncio.Queue()
     config = {
         "recursion_limit": settings.graph_recursion_limit,
         "configurable": {
@@ -352,9 +396,43 @@ async def _prepare_ask_run(
             "ctx": ctx,
             "settings": settings,
             "trace_log_collector": collector,
+            "answer_delta_queue": answer_delta_queue,
+            "thinking_delta_queue": thinking_delta_queue,
         }
     }
     return trace_id, question, session_id, initial, config, t0
+
+
+def _drain_answer_delta_queue(
+    queue: asyncio.Queue[str] | None,
+) -> list[str]:
+    frames: list[str] = []
+    if queue is None:
+        return frames
+    while not queue.empty():
+        try:
+            delta = queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        if delta:
+            frames.append(text_delta_event(delta))
+    return frames
+
+
+def _drain_thinking_delta_queue(
+    queue: asyncio.Queue[str] | None,
+) -> list[str]:
+    frames: list[str] = []
+    if queue is None:
+        return frames
+    while not queue.empty():
+        try:
+            delta = queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        if delta:
+            frames.append(thinking_delta_event(delta))
+    return frames
 
 
 async def _finalize_ask_run(
@@ -446,6 +524,8 @@ async def _finalize_ask_run(
             await mem_svc.update_session_summary(session_id, ctx.user_id, updated_memory)
             await copilot_session.commit()
 
+    chart_spec_obj = _chart_spec_from_state(final_state)
+
     return AskResponse(
         trace_id=trace_id,
         session_id=session_id,
@@ -465,7 +545,8 @@ async def _finalize_ask_run(
             final_state.get("intermediate_results"),
             include_sql=ctx.role == UserRole.ADMIN,
         ),
-        chart_spec=_chart_spec_from_state(final_state),
+        chart_spec=chart_spec_obj,
+        chart_image_url=None,
         visualization_intent=final_state.get("visualization_intent"),
     )
 

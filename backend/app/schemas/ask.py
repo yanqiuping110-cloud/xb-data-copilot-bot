@@ -62,4 +62,5 @@ class AskResponse(CamelModel):
     assembly_mode: str | None = None
     intermediate_results: list[IntermediateSqlResult] | None = None
     chart_spec: ChartSpec | None = None
+    chart_image_url: str | None = None
     visualization_intent: dict | None = None

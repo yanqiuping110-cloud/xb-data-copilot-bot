@@ -33,3 +33,19 @@ def test_verify_passes_when_plan_metrics_in_columns():
         plan=plan,
     )
     assert result["passed"] is True
+
+
+def test_verify_passes_when_ratio_metric_split_across_columns():
+    """plan「活动运动人数占比」可由「活动运动人数」+「占比」两列满足。"""
+    plan = {
+        "metrics": ["活动运动人数占比"],
+        "steps": [{"id": 1, "metrics": ["活动运动人数占比"]}],
+    }
+    result = verify_answer_heuristic(
+        "用图表展示 2026年每个月的活动运动人数 占比情况，用饼状图展示",
+        ["月份", "活动运动人数", "占比"],
+        [["2026-03", 1, 0.9804], ["2026-04", 6, 5.8824]],
+        plan=plan,
+    )
+    assert result["passed"] is True
+    assert result["reason"] == "ok"

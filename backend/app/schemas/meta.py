@@ -238,6 +238,9 @@ class SqlExampleResponse(CamelModel):
     meta_json: dict | None = None
     role_scope: str | None = None
     degrade_priority: int
+    source_trace_id: str | None = None
+    review_status: int = 1
+    reviewed_at: str | None = None
 
 
 class CreateSqlExampleRequest(CamelModel):
@@ -270,3 +273,53 @@ class BadcaseResponse(CamelModel):
 class BadcaseListResponse(CamelModel):
     items: list[BadcaseResponse]
     total: int
+
+
+class GlossaryTermResponse(CamelModel):
+    id: int
+    term: str
+    canonical_name: str
+    definition: str | None = None
+    ref_type: str = "concept"
+    ref_id: int | None = None
+    scope_role: str | None = None
+    status: int = 0
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class GlossaryListResponse(CamelModel):
+    items: list[GlossaryTermResponse]
+    total: int
+
+
+class CreateGlossaryRequest(CamelModel):
+    term: str
+    canonical_name: str
+    definition: str | None = None
+    ref_type: str = "concept"
+    ref_id: int | None = None
+    scope_role: str | None = None
+    status: int = 0
+
+
+class UpdateGlossaryRequest(CamelModel):
+    term: str | None = None
+    canonical_name: str | None = None
+    definition: str | None = None
+    ref_type: str | None = None
+    ref_id: int | None = None
+    scope_role: str | None = None
+    status: int | None = None
+
+
+class OpsStatsResponse(CamelModel):
+    badcase_count_7d: int
+    glossary_published_30d: int
+    l1_published_30d: int
+    l1_draft_count: int
+    glossary_draft_count: int
+
+
+class GlossarySuggestResponse(CamelModel):
+    items: list[dict]

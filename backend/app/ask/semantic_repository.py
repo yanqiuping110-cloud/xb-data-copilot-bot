@@ -32,6 +32,7 @@ class CuratedSqlExample:
     role_scope: str | None
     degrade_priority: int
     meta: dict
+    review_status: int = 1
 
 
 class SemanticRepository:
@@ -68,9 +69,10 @@ class SemanticRepository:
         result = await self._session.execute(
             text(
                 """
-                SELECT id, question_pattern, sql_text, role_scope, degrade_priority, meta_json
+                SELECT id, question_pattern, sql_text, role_scope, degrade_priority, meta_json,
+                       review_status
                 FROM copilot_sql_example
-                WHERE deleted = 0
+                WHERE deleted = 0 AND COALESCE(review_status, 1) = 1
                 ORDER BY degrade_priority ASC, id ASC
                 """
             )
@@ -86,6 +88,7 @@ class SemanticRepository:
                     role_scope=row.get("role_scope"),
                     degrade_priority=int(row["degrade_priority"]),
                     meta=meta,
+                    review_status=int(row.get("review_status") or 1),
                 )
             )
         return rows

@@ -550,7 +550,7 @@ erDiagram
 
 - **单元测试**：SQL Guard、DataScope、Prompt 定界/注入、元数据、LangGraph、Agent 工具等 **180+** 用例
 - **评测回归**：`replay_eval.py` 支持 `memory` / `agent` / **`injection`** 子集
-- **badcase 闭环**：运营修正 SQL → 沉淀 L1 → 同类问句直出
+- **badcase 闭环**：运营修正 SQL → 沉淀 L1 → 同类问句直出（Phase 2 将扩展为**术语库 + 审核发布台**，见 [PHASE2_ROADMAP.md](docs/PHASE2_ROADMAP.md)）
 - **安全回归**：`tests/test_prompt_injection.py` + `docs/eval/prompt_injection.json`
 
 ---
@@ -559,8 +559,9 @@ erDiagram
 
 | 文档 | 内容 |
 |------|------|
-| [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) | 完整架构、14 周里程碑、§11.6 DataScope、§11.9 Prompt Injection |
-| [docs/CHART_VISUALIZATION_PLAN.md](docs/CHART_VISUALIZATION_PLAN.md) | 图表展示：Plan 意图识别、chartSpec、历史回放、分 Sprint 交付 |
+| [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) | 完整架构、14 周里程碑、§14 Phase 2 backlog |
+| [docs/PHASE2_ROADMAP.md](docs/PHASE2_ROADMAP.md) | **Phase 2 三大优先级**：Chart SSR、运营闭环、MCP/iframe |
+| [docs/CHART_VISUALIZATION_PLAN.md](docs/CHART_VISUALIZATION_PLAN.md) | 图表展示：Plan 意图识别、chartSpec、历史回放；SSR 见 Phase 2 §P2-A |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 模块完成度与联调清单 |
 | [docs/EVAL_QUESTIONS.md](docs/EVAL_QUESTIONS.md) | 评测问句（含 inj-* 注入子集） |
 | [docs/PROMPT_SECURITY.md](docs/PROMPT_SECURITY.md) | 威胁模型、定界符约定、运营规范 |

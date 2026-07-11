@@ -130,6 +130,7 @@ async def execute_plan_sql_step(state: AskGraphState, config: RunnableConfig) ->
         context_text=context_text,
         step=step,
         prior_results_summary=prior_summary,
+        thinking_queue=c.get("thinking_delta_queue"),
     )
 
     if not raw_sql:

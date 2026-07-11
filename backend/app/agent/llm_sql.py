@@ -5,10 +5,12 @@ LLM 生成 SQL：OpenAI 兼容 API（本机 Ollama 等）。
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
+from app.agent.llm_client import thinking_request_body
 from app.policy.role_policy import LLM_JOIN_ALIAS_SYSTEM_HINT
 from app.security.prompt_boundary import build_sql_system_preamble, wrap_untrusted
 from config.settings import Settings
@@ -37,14 +39,18 @@ def _extract_sql(text: str) -> str | None:
 
 
 def build_llm(settings: Settings) -> ChatOpenAI:
-    """构造 ChatOpenAI 客户端（兼容 Ollama / 通义等）。"""
-    return ChatOpenAI(
-        base_url=settings.llm_api_base,
-        api_key=settings.llm_api_key or "ollama",
-        model=settings.llm_model,
-        temperature=0,
-        timeout=settings.llm_timeout_sec,
-    )
+    """构造 ChatOpenAI 客户端（兼容 Ollama / 通义 / DeepSeek 等）。"""
+    extra = thinking_request_body(settings)
+    kwargs: dict = {
+        "base_url": settings.llm_api_base,
+        "api_key": settings.llm_api_key or "ollama",
+        "model": settings.llm_model,
+        "temperature": 0,
+        "timeout": settings.llm_timeout_sec,
+    }
+    if extra:
+        kwargs["extra_body"] = extra
+    return ChatOpenAI(**kwargs)
 
 
 async def generate_sql_from_llm(
@@ -55,6 +61,7 @@ async def generate_sql_from_llm(
     compact: bool = False,
     correction_hint: str | None = None,
     previous_sql: str | None = None,
+    thinking_queue: Any | None = None,
 ) -> tuple[str | None, int | None, int | None]:
     """
     调用 LLM 生成 SQL。
@@ -62,7 +69,6 @@ async def generate_sql_from_llm(
     Returns:
         (sql, token_in, token_out)；失败时 sql 为 None。
     """
-    llm = build_llm(settings)
     system = (
         build_sql_system_preamble()
         + "你是企业问数系统的 SQL 生成助手，只为业务库生成只读查询。"
@@ -91,16 +97,14 @@ async def generate_sql_from_llm(
         user_parts.insert(0, "（精简模式：仅输出 SQL，不要注释）")
     messages = [SystemMessage(content=system), HumanMessage(content="\n".join(user_parts))]
 
-    response = await llm.ainvoke(messages)
-    content = response.content if isinstance(response.content, str) else str(response.content)
-    sql = _extract_sql(content)
+    from app.agent.llm_client import complete_messages
 
-    token_in = token_out = None
-    meta = getattr(response, "response_metadata", None) or {}
-    usage = meta.get("token_usage") or meta.get("usage") or {}
-    if usage:
-        token_in = usage.get("prompt_tokens") or usage.get("input_tokens")
-        token_out = usage.get("completion_tokens") or usage.get("output_tokens")
+    content, _reasoning, token_in, token_out = await complete_messages(
+        settings,
+        messages,
+        thinking_queue=thinking_queue,
+    )
+    sql = _extract_sql(content)
 
     return sql, token_in, token_out
 
@@ -111,6 +115,7 @@ async def generate_sql_step_from_llm(
     question: str,
     context_text: str,
     plan_steps: list[dict],
+    thinking_queue: Any | None = None,
 ) -> tuple[str | None, list[dict], int | None, int | None]:
     """
     按 plan 步骤生成分步 CTE SQL（§11.7.4 · 第 8 周）。
@@ -118,7 +123,6 @@ async def generate_sql_step_from_llm(
     Returns:
         (完整 SQL, sql_steps 元数据, token_in, token_out)
     """
-    llm = build_llm(settings)
     steps_text = "\n".join(
         f"  步骤 {s.get('id')}: {s.get('goal')}"
         + (f"（{s.get('aggregation')}）" if s.get("aggregation") else "")
@@ -140,8 +144,13 @@ async def generate_sql_step_from_llm(
         f"用户问题：{question}\n\n"
         "请直接输出一条完整 SQL（可用 WITH 或单条 SELECT），列别名优先中文。"
     )
-    response = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-    content = response.content if isinstance(response.content, str) else str(response.content)
+    from app.agent.llm_client import complete_messages
+
+    content, _reasoning, token_in, token_out = await complete_messages(
+        settings,
+        [SystemMessage(content=system), HumanMessage(content=user)],
+        thinking_queue=thinking_queue,
+    )
     sql = _extract_sql(content)
 
     sql_steps_meta = [
@@ -154,13 +163,6 @@ async def generate_sql_step_from_llm(
         for s in plan_steps
     ]
 
-    token_in = token_out = None
-    meta = getattr(response, "response_metadata", None) or {}
-    usage = meta.get("token_usage") or meta.get("usage") or {}
-    if usage:
-        token_in = usage.get("prompt_tokens") or usage.get("input_tokens")
-        token_out = usage.get("completion_tokens") or usage.get("output_tokens")
-
     return sql, sql_steps_meta, token_in, token_out
 
 
@@ -171,6 +173,7 @@ async def generate_sql_for_plan_step(
     context_text: str,
     step: dict,
     prior_results_summary: str,
+    thinking_queue: Any | None = None,
 ) -> tuple[str | None, int | None, int | None]:
     """
     为 plan 中单一步骤生成独立 SELECT（分步执行路径）。
@@ -178,7 +181,6 @@ async def generate_sql_for_plan_step(
     Returns:
         (sql, token_in, token_out)
     """
-    llm = build_llm(settings)
     step_id = step.get("id")
     goal = step.get("goal") or ""
     agg = step.get("aggregation") or ""
@@ -244,14 +246,12 @@ async def generate_sql_for_plan_step(
         user_parts.extend(["", "【本步硬性约束】", constraint_text])
     user_parts.extend(["", "请输出本步骤的一条 SELECT（列别名优先中文，须含对齐键列）。"])
     user = "\n".join(user_parts)
-    response = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-    content = response.content if isinstance(response.content, str) else str(response.content)
-    sql = _extract_sql(content)
+    from app.agent.llm_client import complete_messages
 
-    token_in = token_out = None
-    meta = getattr(response, "response_metadata", None) or {}
-    usage = meta.get("token_usage") or meta.get("usage") or {}
-    if usage:
-        token_in = usage.get("prompt_tokens") or usage.get("input_tokens")
-        token_out = usage.get("completion_tokens") or usage.get("output_tokens")
+    content, _reasoning, token_in, token_out = await complete_messages(
+        settings,
+        [SystemMessage(content=system), HumanMessage(content=user)],
+        thinking_queue=thinking_queue,
+    )
+    sql = _extract_sql(content)
     return sql, token_in, token_out

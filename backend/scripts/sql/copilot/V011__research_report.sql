@@ -1,0 +1,51 @@
+-- 深度分析报告（Insight Engine / DAR）
+CREATE TABLE IF NOT EXISTS copilot_research_report (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    report_id       VARCHAR(32) NOT NULL UNIQUE COMMENT 'rpt-{uuid16}',
+    user_id         BIGINT NOT NULL,
+    session_id      VARCHAR(32) NULL,
+    title           VARCHAR(256) NOT NULL,
+    request_text    TEXT NOT NULL,
+    template_code   VARCHAR(64) NULL,
+    plan_json       JSON NULL,
+    status          VARCHAR(16) NOT NULL DEFAULT 'pending'
+                    COMMENT 'pending|running|success|partial|fail|cancelled',
+    section_total   INT NOT NULL DEFAULT 0,
+    section_done    INT NOT NULL DEFAULT 0,
+    report_doc_json JSON NULL,
+    report_pdf_path VARCHAR(512) NULL COMMENT '本地或相对 storage 路径',
+    report_pdf_url  VARCHAR(512) NULL,
+    pdf_page_count  INT NULL,
+    pdf_file_size   BIGINT NULL,
+    pdf_generated_at DATETIME NULL,
+    error_code      VARCHAR(64) NULL,
+    error_message   VARCHAR(512) NULL,
+    latency_ms_total INT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted         TINYINT NOT NULL DEFAULT 0,
+    INDEX idx_user_updated (user_id, updated_at),
+    INDEX idx_status (status)
+) COMMENT='深度分析报告主表';
+
+CREATE TABLE IF NOT EXISTS copilot_research_section (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    report_id       VARCHAR(32) NOT NULL,
+    section_index   INT NOT NULL,
+    title           VARCHAR(256) NOT NULL,
+    question        TEXT NOT NULL,
+    intent          VARCHAR(32) NULL,
+    sub_trace_id    VARCHAR(32) NULL,
+    status          VARCHAR(16) NOT NULL DEFAULT 'pending',
+    answer          TEXT NULL,
+    columns_json    JSON NULL,
+    rows_json       JSON NULL,
+    chart_spec_json JSON NULL,
+    error_code      VARCHAR(64) NULL,
+    latency_ms      INT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted         TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_report_section (report_id, section_index),
+    INDEX idx_sub_trace (sub_trace_id)
+) COMMENT='深度分析报告章节';

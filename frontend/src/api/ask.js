@@ -25,6 +25,8 @@ export function postAskCancel(traceId) {
  * @param {(evt: { node: string, label: string, detail?: object }) => void} [params.onProgress]
  * @param {(result: object) => void} [params.onDone]
  * @param {(err: { code: string, message: string }) => void} [params.onError]
+ * @param {(evt: { delta: string }) => void} [params.onThinkingDelta]
+ * @param {(evt: { delta: string }) => void} [params.onTextDelta]
  * @param {AbortSignal} [params.signal]
  */
 export async function postAskStream({
@@ -34,6 +36,8 @@ export async function postAskStream({
   onProgress,
   onDone,
   onError,
+  onThinkingDelta,
+  onTextDelta,
   signal,
 }) {
   const token = localStorage.getItem('accessToken')
@@ -109,6 +113,10 @@ export async function postAskStream({
     }
     if (eventName === 'progress') {
       onProgress?.(payload)
+    } else if (eventName === 'thinking_delta') {
+      onThinkingDelta?.(payload)
+    } else if (eventName === 'text_delta') {
+      onTextDelta?.(payload)
     } else if (eventName === 'done') {
       onDone?.(payload)
     } else if (eventName === 'error') {

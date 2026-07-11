@@ -47,3 +47,7 @@ class UserContext(BaseModel):
         description="问数入口加载的 EffectivePolicy（运行时注入，非 JWT 字段）",
     )
     client_ip: Optional[str] = Field(default=None, description="客户端 IP，审计用")
+    token_scope: Optional[str] = Field(
+        default=None,
+        description="JWT scope；embed 模式禁止访问管理接口",
+    )

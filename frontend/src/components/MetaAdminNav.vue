@@ -7,6 +7,7 @@
     <el-menu-item index="/admin/meta/sql-examples">L1 样例</el-menu-item>
     <el-menu-item v-if="showScope" index="/admin/meta/scope">数据范围</el-menu-item>
     <el-menu-item index="/admin/meta/badcases">Badcase</el-menu-item>
+    <el-menu-item index="/admin/meta/ops">运营中心</el-menu-item>
     <el-menu-item v-if="showGitRepos" index="/admin/code/repos">Git 仓库</el-menu-item>
   </el-menu>
 </template>

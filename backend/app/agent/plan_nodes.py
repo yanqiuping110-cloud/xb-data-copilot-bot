@@ -132,6 +132,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         context_text=context_text,
         l1_score=l1_score,
         l1_sql_preview=l1_sql,
+        thinking_queue=c.get("thinking_delta_queue"),
     )
     if plan is None:
         plan = _fallback_plan()

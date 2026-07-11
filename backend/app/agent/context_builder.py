@@ -15,6 +15,8 @@ from app.ask.example_ranker import (
 from app.ask.semantic_repository import SemanticRepository
 from app.core.context import UserContext
 from app.meta.effective import effective_description
+from app.meta.glossary_repository import GlossaryRepository
+from app.meta.glossary_service import format_glossary_prompt_lines, recall_glossary_for_question
 from app.meta.repository import ColumnMetaRow, MetaRepository, RelationRow, TableMetaRow, parse_alias_json
 from app.policy.role_policy import build_llm_sql_generation_constraints, build_role_context_header
 from app.policy.effective_policy import build_scope_prompt_sections
@@ -390,6 +392,24 @@ async def build_llm_context_text(
     if memory_prompt_text:
         parts.append(memory_prompt_text)
         parts.append("")
+
+    if cfg.glossary_recall_enabled:
+        try:
+            glossary_repo = GlossaryRepository(copilot_session)
+            matched = await recall_glossary_for_question(
+                glossary_repo,
+                question,
+                scope_role=ctx.role.value if ctx.role else None,
+                top_k=cfg.glossary_recall_top_k,
+            )
+            parts.extend(
+                format_glossary_prompt_lines(
+                    matched,
+                    sanitize=cfg.prompt_sanitize_recall_enabled,
+                )
+            )
+        except Exception:
+            pass
 
     allowed = sorted(get_allowed_tables())
     if policy is not None:

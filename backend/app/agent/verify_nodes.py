@@ -15,7 +15,6 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from app.agent.llm_sql import build_llm
 from app.agent.nodes import _cfg, _span
 from app.agent.state import AskGraphState
 from config.settings import Settings, get_settings
@@ -42,6 +41,9 @@ _DIMENSION_HINTS = (
     "总计",
     "平均",
 )
+
+# plan 指标中的占比/比率类后缀；列可拆为「基指标 + 占比列」
+_RATIO_MARKERS = ("占比", "比例", "比率", "百分比")
 
 
 def _column_text(columns: list[str]) -> str:
@@ -76,17 +78,23 @@ def _expected_metrics_from_plan(plan: dict[str, Any] | None) -> list[str]:
 
 
 def _metric_reflected_in_columns(metric: str, columns: list[str]) -> bool:
-    """指标是否在列名中有体现（列名须包含指标的关键子串，避免「运动个数」误判覆盖分项指标）。"""
+    """
+    指标是否在列名中有体现。
+
+    支持：
+    - 列名包含完整指标或关键子串
+    - 复合占比指标拆列，如 plan「活动运动人数占比」← 列「活动运动人数」+「占比」
+    """
     m = metric.strip()
     if not m:
         return True
+    col_list = [str(c) for c in columns]
     m_lower = m.lower()
-    for col in columns:
-        c = str(col)
-        c_lower = c.lower()
+
+    for col in col_list:
+        c_lower = col.lower()
         if m_lower == c_lower or m_lower in c_lower:
             return True
-        # 去掉通用后缀后，关键片段须出现在列名中（长度≥2）
         core = (
             m_lower.replace("项目", "")
             .replace("个数", "")
@@ -96,6 +104,34 @@ def _metric_reflected_in_columns(metric: str, columns: list[str]) -> bool:
         )
         if len(core) >= 2 and core in c_lower:
             return True
+
+    # 「X占比」类：基指标列 + 占比/比例列 即视为满足
+    for marker in _RATIO_MARKERS:
+        if not m.endswith(marker) or len(m) <= len(marker):
+            continue
+        base = m[: -len(marker)]
+        ratio_in_cols = any(
+            marker in c or any(rm in c for rm in _RATIO_MARKERS if rm != marker)
+            for c in col_list
+        )
+        if not ratio_in_cols:
+            continue
+        if _metric_reflected_in_columns(base, col_list):
+            return True
+        base_lower = base.lower()
+        for col in col_list:
+            c = str(col)
+            c_lower = c.lower()
+            if marker in c:
+                continue
+            if base_lower in c_lower or c_lower in base_lower:
+                return True
+            if len(base_lower) >= 4 and (
+                base_lower[: max(2, len(base_lower) // 2)] in c_lower
+                or c_lower in base_lower
+            ):
+                return True
+
     return False
 
 
@@ -166,9 +202,11 @@ async def _verify_with_llm(
     columns: list[str],
     rows: list[list],
     heuristic: dict[str, Any],
+    thinking_queue: Any | None = None,
 ) -> dict[str, Any]:
     """LLM 轻量二次确认（可选 Flag 开启时）。"""
-    llm = build_llm(settings)
+    from app.agent.llm_client import complete_messages
+
     sample_rows = rows[:3]
     system = (
         "你是问数结果质检员。根据用户问句、结果列名与样例行，判断结果是否回答了问句。"
@@ -181,8 +219,11 @@ async def _verify_with_llm(
         f"规则预判：{heuristic.get('message')}"
     )
     try:
-        resp = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-        content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        content, _reasoning, _ti, _to = await complete_messages(
+            settings,
+            [SystemMessage(content=system), HumanMessage(content=user)],
+            thinking_queue=thinking_queue,
+        )
         match = re.search(r"\{[\s\S]*\}", content)
         if not match:
             return heuristic
@@ -226,7 +267,14 @@ async def verify_answer(state: AskGraphState, config: RunnableConfig) -> dict:
     )
     result = heuristic
     if settings.verify_answer_llm_enabled and not heuristic.get("passed"):
-        result = await _verify_with_llm(settings, question, columns, rows, heuristic)
+        result = await _verify_with_llm(
+            settings,
+            question,
+            columns,
+            rows,
+            heuristic,
+            thinking_queue=c.get("thinking_delta_queue"),
+        )
 
     passed = bool(result.get("passed"))
     status = "success" if passed else "fail"

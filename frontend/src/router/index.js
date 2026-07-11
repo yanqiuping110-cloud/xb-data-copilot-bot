@@ -21,6 +21,11 @@ const routes = [
     component: () => import('../views/Ask.vue'),
   },
   {
+    path: '/insight',
+    name: 'InsightEngine',
+    component: () => import('../views/InsightEngine.vue'),
+  },
+  {
     path: '/admin/users',
     name: 'AdminUsers',
     component: () => import('../views/AdminUsers.vue'),
@@ -81,10 +86,16 @@ const routes = [
     meta: { requiresMetaManager: true },
   },
   {
-    path: '/admin/meta/scope',
-    name: 'AdminMetaScope',
-    component: () => import('../views/AdminMetaScope.vue'),
-    meta: { requiresAdmin: true },
+    path: '/admin/meta/ops',
+    name: 'AdminOps',
+    component: () => import('../views/AdminOps.vue'),
+    meta: { requiresMetaManager: true },
+  },
+  {
+    path: '/embed/ask',
+    name: 'EmbedAsk',
+    component: () => import('../views/EmbedAsk.vue'),
+    meta: { public: true, embed: true },
   },
 ]
 
@@ -95,6 +106,10 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const token = localStorage.getItem('accessToken')
+  if (to.meta.embed && to.query.token) {
+    localStorage.setItem('accessToken', String(to.query.token))
+    return true
+  }
   if (!to.meta.public && !token) {
     return { name: 'Login' }
   }

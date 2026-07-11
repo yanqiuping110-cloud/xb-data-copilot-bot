@@ -1,0 +1,358 @@
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  color: #1e293b;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.page {
+  width: 210mm;
+  min-height: 297mm;
+  height: 297mm;
+  page-break-after: always;
+  position: relative;
+  overflow: hidden;
+}
+
+.page:last-child {
+  page-break-after: auto;
+}
+
+/* ========== 封面 ========== */
+.cover-page {
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+}
+
+.cover-fallback {
+  background: linear-gradient(145deg, #e8eef3 0%, #f8fafc 40%, #d1fae5 100%);
+}
+
+.cover-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.35) 45%,
+    rgba(255, 255, 255, 0.88) 72%,
+    rgba(255, 255, 255, 0.95) 100%
+  );
+}
+
+.cover-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 297mm;
+  padding: 28mm 20mm 22mm;
+}
+
+.cover-text-block {
+  margin-top: 52mm;
+  text-align: right;
+}
+
+.cover-title {
+  margin: 0;
+  font-size: 30pt;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #1e293b;
+  letter-spacing: 0.03em;
+}
+
+.cover-subtitle {
+  margin: 6mm 0 0;
+  font-size: 14pt;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.accent-line {
+  width: 52mm;
+  height: 4px;
+  margin: 9mm 0 0 auto;
+  background: #22c55e;
+  border-radius: 2px;
+}
+
+.cover-meta {
+  text-align: right;
+  color: #475569;
+}
+
+.cover-org,
+.cover-date {
+  margin: 0 0 3mm;
+  font-size: 13pt;
+  line-height: 1.5;
+}
+
+/* ========== 目录 ========== */
+.toc-page {
+  background: linear-gradient(135deg, #f8fafc 0%, #ffffff 55%, #f1f5f9 100%);
+  padding: 18mm 16mm 16mm;
+}
+
+.toc-deco {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 55%;
+  height: 45%;
+  background:
+    linear-gradient(135deg, transparent 40%, rgba(148, 163, 184, 0.08) 41%, transparent 42%),
+    linear-gradient(45deg, transparent 55%, rgba(148, 163, 184, 0.06) 56%, transparent 57%);
+  pointer-events: none;
+}
+
+.toc-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6mm;
+  margin-bottom: 12mm;
+  padding-bottom: 5mm;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.toc-title-cn {
+  margin: 0;
+  font-size: 32pt;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.toc-title-en {
+  font-size: 17pt;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: #94a3b8;
+}
+
+.toc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8mm 10mm;
+}
+
+.toc-card {
+  display: flex;
+  gap: 5mm;
+  align-items: flex-start;
+  padding: 4mm 0;
+}
+
+.toc-code {
+  flex-shrink: 0;
+  font-size: 24pt;
+  font-weight: 800;
+  color: #22c55e;
+  line-height: 1;
+  min-width: 14mm;
+}
+
+.toc-item-title {
+  margin: 0 0 2mm;
+  font-size: 13pt;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.4;
+}
+
+.toc-summary {
+  margin: 0;
+  font-size: 10.5pt;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+/* ========== 正文 ========== */
+.chapter-page {
+  background: #ffffff;
+  padding: 16mm 18mm 18mm;
+}
+
+.chapter-deco {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 50%;
+  height: 38%;
+  background:
+    linear-gradient(120deg, transparent 30%, rgba(226, 232, 240, 0.5) 31%, transparent 32%),
+    linear-gradient(60deg, transparent 50%, rgba(226, 232, 240, 0.35) 51%, transparent 52%);
+}
+
+.chapter-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 4mm;
+  margin-bottom: 10mm;
+  padding-bottom: 4mm;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.chapter-index {
+  flex-shrink: 0;
+  font-size: 20pt;
+  font-weight: 800;
+  color: #22c55e;
+  line-height: 1;
+  min-width: 12mm;
+}
+
+.chapter-title {
+  margin: 0;
+  font-size: 11pt;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+  flex: 1;
+}
+
+.chapter-section {
+  margin-bottom: 7mm;
+}
+
+.section-label {
+  margin: 0 0 3mm;
+  font-size: 11pt;
+  font-weight: 700;
+  color: #334155;
+}
+
+.section-label.accent {
+  color: #16a34a;
+}
+
+.question-box {
+  padding: 4mm 5mm;
+  background: #f8fafc;
+  border-left: 4px solid #22c55e;
+  font-size: 9.5pt;
+  line-height: 1.6;
+  color: #475569;
+}
+
+.answer-body p {
+  margin: 0 0 3.5mm;
+  font-size: 10pt;
+  line-height: 1.75;
+  color: #334155;
+  text-align: justify;
+}
+
+.chart-panel {
+  margin: 6mm 0;
+  padding: 4mm;
+  background: #fafbfc;
+  border: 1px solid #e2e8f0;
+  border-radius: 3mm;
+  text-align: center;
+}
+
+.chart-panel img {
+  max-width: 100%;
+  max-height: 85mm;
+  object-fit: contain;
+}
+
+.table-panel {
+  margin-top: 5mm;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8pt;
+}
+
+.data-table th {
+  background: #22c55e;
+  color: #ffffff;
+  font-weight: 600;
+  padding: 2.5mm 3mm;
+  text-align: left;
+  border: 1px solid #16a34a;
+}
+
+.data-table td {
+  padding: 2.2mm 3mm;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+}
+
+.data-table tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.table-note {
+  margin: 2mm 0 0;
+  font-size: 7.5pt;
+  color: #94a3b8;
+}
+
+/* ========== 结尾 ========== */
+.ending-page {
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+}
+
+.ending-fallback {
+  background: linear-gradient(180deg, #cbd5e1 0%, #f1f5f9 45%, #e2e8f0 100%);
+}
+
+.ending-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.25) 0%,
+    rgba(255, 255, 255, 0.45) 50%,
+    rgba(15, 23, 42, 0.15) 100%
+  );
+}
+
+.ending-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 297mm;
+  padding: 24mm;
+  text-align: center;
+}
+
+.ending-headline {
+  margin: 0 0 14mm;
+  font-size: 40pt;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.22em;
+}
+
+.ending-message {
+  margin: 0;
+  max-width: 155mm;
+  font-size: 14pt;
+  line-height: 1.9;
+  color: #334155;
+}

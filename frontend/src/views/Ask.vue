@@ -30,6 +30,9 @@
         >
           元数据管理
         </el-button>
+        <el-button link type="primary" @click="router.push('/insight')">
+          深度洞察
+        </el-button>
         <el-button link type="primary" @click="logout">退出</el-button>
       </div>
     </header>
@@ -99,6 +102,10 @@
 
               <!-- 助手消息 -->
               <div v-else class="response-card" :class="{ error: msg.isError }">
+                <details v-if="msg.thinking" class="thinking-panel" open>
+                  <summary>思考过程</summary>
+                  <pre class="thinking-text">{{ msg.thinking }}</pre>
+                </details>
                 <div class="answer-line">{{ msg.text }}</div>
 
                 <ul v-if="msg.progress?.length" class="progress-list">
@@ -174,7 +181,7 @@
                       :loading="feedbackLoadingId === msg.traceId"
                       @click="onFeedback(msg, 'up')"
                     >
-                      👍 有用
+                      有用
                     </el-button>
                     <el-button
                       size="small"
@@ -183,7 +190,7 @@
                       :loading="feedbackLoadingId === msg.traceId"
                       @click="onFeedback(msg, 'down')"
                     >
-                      👎 不准
+                      不准
                     </el-button>
                     <el-button
                       size="small"
@@ -201,12 +208,28 @@
             </div>
           </div>
 
+          <div v-if="sessionId" class="chat-toolbar">
+            <div class="toolbar-left">
+              <el-button
+                type="success"
+                class="toolbar-report-btn"
+                @click="briefReportDrawerVisible = true"
+              >
+                报告分析
+              </el-button>
+              <span v-if="briefReportTurnCount" class="toolbar-meta">
+                本对话 {{ briefReportTurnCount }} 条可纳入报告
+              </span>
+            </div>
+            <span class="toolbar-hint">勾选问数记录，生成 A4 竖版汇报 PDF</span>
+          </div>
+
           <div class="input-panel">
             <el-form class="input-row" @submit.prevent="onAsk">
               <el-input
                 v-model="question"
                 type="textarea"
-                :autosize="{ minRows: 1, maxRows: 4 }"
+                :autosize="{ minRows: 2, maxRows: 6 }"
                 placeholder="例如：本校本月跳绳参与人数 / 最近7天每日趋势"
                 :disabled="loading || needSelectSchool"
                 @keydown.enter.exact.prevent="onAsk"
@@ -243,6 +266,12 @@
         </div>
       </div>
     </main>
+
+    <BriefReportDrawer
+      v-model="briefReportDrawerVisible"
+      :session-id="sessionId"
+      :messages="messages"
+    />
   </div>
 </template>
 
@@ -263,6 +292,8 @@ import {
   updatePreferences,
 } from '../api/sessions'
 import ResultPanel from '../components/ResultPanel.vue'
+import BriefReportDrawer from '../components/brief-report/BriefReportDrawer.vue'
+import { countReportableMessages } from '../utils/briefReportTurn.js'
 
 const router = useRouter()
 const user = ref(null)
@@ -289,6 +320,9 @@ const prefForm = ref({
   preferredGrain: null,
   answerStyle: null,
 })
+const briefReportDrawerVisible = ref(false)
+
+const briefReportTurnCount = computed(() => countReportableMessages(messages.value))
 
 const needSelectSchool = computed(
   () => user.value?.role === 'SCHOOL' && boundSchools.value.length > 1 && !selectedSchId.value,
@@ -363,6 +397,8 @@ function notifyChartsResize() {
   nextTick(() => {
     requestAnimationFrame(() => {
       window.dispatchEvent(new Event('resize'))
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 120)
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 400)
     })
   })
 }
@@ -581,6 +617,7 @@ async function onAsk() {
   messages.value.push({
     role: 'assistant',
     text: '正在分析您的问题…',
+    thinking: '',
     progress: [],
     intermediateSteps: [],
   })
@@ -607,6 +644,20 @@ async function onAsk() {
         }
         if (node === 'execute_plan_sql_step' && detail) {
           upsertIntermediateStep(msg, detail)
+        }
+      },
+      onThinkingDelta: ({ delta }) => {
+        const msg = messages.value[assistantIdx]
+        if (!msg || !delta) return
+        msg.thinking = (msg.thinking || '') + delta
+      },
+      onTextDelta: ({ delta }) => {
+        const msg = messages.value[assistantIdx]
+        if (!msg || !delta) return
+        if (msg.text === '正在分析您的问题…') {
+          msg.text = delta
+        } else {
+          msg.text = (msg.text || '') + delta
         }
       },
       onDone: (res) => {
@@ -641,6 +692,7 @@ async function onAsk() {
           step.active = false
           step.done = true
         })
+        notifyChartsResize()
       },
       onError: (err) => {
         const msg = messages.value[assistantIdx]
@@ -732,7 +784,10 @@ async function onMarkBadcase(msg) {
 .user-area {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: calc(100% - 120px);
 }
 
 .user-label {
@@ -970,6 +1025,38 @@ async function onMarkBadcase(msg) {
   color: #909399;
 }
 
+.thinking-panel {
+  margin-bottom: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+.thinking-panel summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  user-select: none;
+}
+
+.thinking-text {
+  margin: 0;
+  padding: 10px 12px 12px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #64748b;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  background: transparent;
+  border-top: 1px solid #e2e8f0;
+}
+
 .progress-list li {
   padding: 2px 0;
 }
@@ -1006,9 +1093,47 @@ async function onMarkBadcase(msg) {
 
 .input-panel {
   flex-shrink: 0;
-  padding: 16px 20px 20px;
+  padding: 12px 20px 20px;
   border-top: 1px solid #eef0f4;
   background: #fafbfc;
+}
+
+.chat-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 20px;
+  border-top: 1px solid #eef0f4;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.toolbar-report-btn {
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 22px;
+  height: auto;
+  border-radius: 8px;
+}
+
+.toolbar-meta {
+  font-size: 13px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.toolbar-hint {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
 }
 
 .input-row {
@@ -1019,17 +1144,18 @@ async function onMarkBadcase(msg) {
 
 .input-row :deep(.el-textarea__inner) {
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 12px 14px;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
+  min-height: 56px;
   resize: none;
   box-shadow: none;
 }
 
 .ask-btn {
   flex-shrink: 0;
-  height: 40px;
-  padding: 0 24px;
+  height: 56px;
+  padding: 0 28px;
   border-radius: 10px;
 }
 
@@ -1046,6 +1172,15 @@ async function onMarkBadcase(msg) {
   .session-sidebar {
     width: 100%;
     max-height: 160px;
+  }
+
+  .chat-toolbar {
+    flex-wrap: wrap;
+    padding: 8px 14px;
+  }
+
+  .toolbar-hint {
+    display: none;
   }
 
   .response-card {

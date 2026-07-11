@@ -11,7 +11,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.chart_builder import normalize_visualization_intent
-from app.agent.llm_sql import build_llm
+from app.agent.llm_client import complete_messages
 from config.settings import Settings
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
@@ -153,6 +153,7 @@ async def generate_plan_from_llm(
     context_text: str = "",
     l1_score: int | None = None,
     l1_sql_preview: str | None = None,
+    thinking_queue: Any | None = None,
 ) -> dict[str, Any] | None:
     """
     调用 LLM 生成问句分解 plan。
@@ -163,7 +164,6 @@ async def generate_plan_from_llm(
     Returns:
         规范化后的 plan dict；解析失败返回 None。
     """
-    llm = build_llm(settings)
     system = (
         "你是企业问数系统的查询规划助手。根据用户问句与种子召回，输出 JSON 计划（仅 JSON）。\n"
         "字段说明：\n"
@@ -243,8 +243,11 @@ async def generate_plan_from_llm(
     )
     user = "\n".join(user_parts)
     try:
-        resp = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-        content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        content, _reasoning, _ti, _to = await complete_messages(
+            settings,
+            [SystemMessage(content=system), HumanMessage(content=user)],
+            thinking_queue=thinking_queue,
+        )
         parsed = _extract_json(content)
         if parsed:
             return _normalize_plan(parsed)

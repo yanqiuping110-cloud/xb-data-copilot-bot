@@ -80,6 +80,7 @@ async def get_current_user(
         active_sch_id=active_sch_id,
         bound_sch_ids=bound,
         client_ip=client_ip,
+        token_scope=payload.get("scope"),
     )
 
 
@@ -87,6 +88,8 @@ async def require_admin(
     ctx: Annotated[UserContext, Depends(get_current_user)],
 ) -> UserContext:
     """超管专用依赖：非 ADMIN 返回 403。"""
+    if ctx.token_scope == "embed":
+        raise AuthError("FORBIDDEN", "embed token 无权访问管理接口", 403)
     if ctx.role != UserRole.ADMIN:
         raise AuthError("FORBIDDEN", "需要管理员权限", 403)
     return ctx
@@ -96,6 +99,8 @@ async def require_meta_manager(
     ctx: Annotated[UserContext, Depends(get_current_user)],
 ) -> UserContext:
     """元数据管理：ADMIN 或 OPERATOR。"""
+    if ctx.token_scope == "embed":
+        raise AuthError("FORBIDDEN", "embed token 无权访问管理接口", 403)
     if ctx.role not in (UserRole.ADMIN, UserRole.OPERATOR):
         raise AuthError("FORBIDDEN", "需要管理员或运营权限", 403)
     return ctx

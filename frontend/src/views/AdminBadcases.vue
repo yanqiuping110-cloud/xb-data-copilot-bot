@@ -27,12 +27,13 @@
           <el-table-column label="SQL" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">{{ row.finalSql || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="280" fixed="right">
+          <el-table-column label="操作" width="380" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openCorrect(row)">修正 SQL</el-button>
               <el-button link type="primary" :loading="draftingId === row.traceId" @click="onDraftL1(row)">
                 转 L1 草稿
               </el-button>
+              <el-button link type="success" @click="onPromoteGlossary(row)">抽术语</el-button>
               <el-button link type="primary" @click="goAddExample(row)">手动补样例</el-button>
             </template>
           </el-table-column>
@@ -58,6 +59,7 @@ import { ElMessage } from 'element-plus'
 import MetaAdminNav from '../components/MetaAdminNav.vue'
 import { fetchMe } from '../api/auth'
 import { draftSqlExampleFromBadcase, listBadcases, postFeedback } from '../api/feedback'
+import { promoteGlossaryFromBadcase } from '../api/adminOps'
 
 const router = useRouter()
 const loading = ref(false)
@@ -152,6 +154,16 @@ function goAddExample(row) {
     }),
   )
   router.push('/admin/meta/sql-examples')
+}
+
+async function onPromoteGlossary(row) {
+  try {
+    const res = await promoteGlossaryFromBadcase(row.traceId)
+    ElMessage.success(`已生成 ${res.items.length} 条术语草稿，请到运营中心审核发布`)
+    router.push('/admin/meta/ops')
+  } catch {
+    /* request 拦截器已提示 */
+  }
 }
 
 function logout() {

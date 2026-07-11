@@ -1,0 +1,17 @@
+templateCode: default
+cover:
+  gradient: ["#312e81", "#6366f1"]
+  useSvg: true
+body:
+  pageBackground: "#ffffff"
+  summaryBackground: "#f8fafc"
+  fontFamily: "STSong-Light"
+accentByIntent:
+  trend: "#6366f1"
+  compare: "#8b5cf6"
+  rank: "#64748b"
+  share: "#6366f1"
+  anomaly: "#d97706"
+  open_query: "#6366f1"
+appendix:
+  watermarkOpacity: 0.05

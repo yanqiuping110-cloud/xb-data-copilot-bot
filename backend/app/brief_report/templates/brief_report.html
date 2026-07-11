@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>{{ doc.cover.title }}</title>
+  <style>{{ report_css }}</style>
+</head>
+<body>
+  {# 封面 #}
+  <section class="page cover-page{% if not doc.cover.backgroundDataUri and not doc.cover.backgroundPath %} cover-fallback{% endif %}"
+    {% if doc.cover.backgroundDataUri %}
+    style="background-image: url('{{ doc.cover.backgroundDataUri }}');"
+    {% elif doc.cover.backgroundPath %}
+    style="background-image: url('file:///{{ doc.cover.backgroundPath | replace('\\', '/') }}');"
+    {% endif %}>
+    <div class="cover-shade"></div>
+    <div class="cover-inner">
+      <div class="cover-text-block">
+        <h1 class="cover-title">{{ doc.cover.title }}</h1>
+        {% if doc.cover.subtitle %}
+        <p class="cover-subtitle">{{ doc.cover.subtitle }}</p>
+        {% endif %}
+        <div class="accent-line"></div>
+      </div>
+      <div class="cover-meta">
+        {% if doc.cover.org %}
+        <p class="cover-org">汇报单位：{{ doc.cover.org }}</p>
+        {% endif %}
+        <p class="cover-date">汇报时间：{{ doc.cover.date }}</p>
+      </div>
+    </div>
+  </section>
+
+  {# 目录 #}
+  <section class="page toc-page">
+    <div class="toc-deco"></div>
+    <header class="toc-header">
+      <h2 class="toc-title-cn">目录</h2>
+      <span class="toc-title-en">CONTENTS</span>
+    </header>
+    <div class="toc-grid">
+      {% for item in doc.toc %}
+      <article class="toc-card">
+        <span class="toc-code">{{ item.code }}</span>
+        <div class="toc-body">
+          <h3 class="toc-item-title">{{ item.title }}</h3>
+          <p class="toc-summary">{{ item.summary }}</p>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  {# 正文 #}
+  {% for ch in doc.chapters %}
+  <section class="page chapter-page">
+    <div class="chapter-deco"></div>
+    <header class="chapter-head">
+      <span class="chapter-index">{{ '%02d' | format(ch.index) }}</span>
+      <h2 class="chapter-title">{{ ch.title or ch.question }}</h2>
+    </header>
+    <div class="chapter-section">
+      <h3 class="section-label accent">数据洞察</h3>
+      <div class="answer-body">
+        {% for para in ch.answer.split('\n') %}
+          {% if para.strip() %}
+          <p>{{ para.strip() }}</p>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% if ch.chartDataUri or ch.chartPngPath %}
+    <figure class="chart-panel">
+      {% if ch.chartDataUri %}
+      <img src="{{ ch.chartDataUri }}" alt="图表" />
+      {% else %}
+      <img src="file:///{{ ch.chartPngPath | replace('\\', '/') }}" alt="图表" />
+      {% endif %}
+    </figure>
+    {% endif %}
+    {% if ch.table and ch.table.columns %}
+    <div class="table-panel">
+      <h3 class="section-label">数据明细</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            {% for col in ch.table.columns %}
+            <th>{{ col }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in ch.table.rows %}
+          <tr>
+            {% for cell in row %}
+            <td>{{ cell }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if ch.table.truncated %}
+      <p class="table-note">共 {{ ch.table.totalRows }} 行，展示前 {{ ch.table.rows | length }} 行</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  {# 结尾 #}
+  <section class="page ending-page{% if not doc.ending.backgroundDataUri and not doc.ending.backgroundPath %} ending-fallback{% endif %}"
+    {% if doc.ending.backgroundDataUri %}
+    style="background-image: url('{{ doc.ending.backgroundDataUri }}');"
+    {% elif doc.ending.backgroundPath %}
+    style="background-image: url('file:///{{ doc.ending.backgroundPath | replace('\\', '/') }}');"
+    {% endif %}>
+    <div class="ending-shade"></div>
+    <div class="ending-inner">
+      <h2 class="ending-headline">{{ doc.ending.headline }}</h2>
+      <p class="ending-message">{{ doc.ending.message }}</p>
+    </div>
+  </section>
+</body>
+</html>

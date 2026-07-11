@@ -349,3 +349,21 @@ python scripts/build_search_index.py
 8. ~~**第 14 周**：全量 MVP 评测与文档~~ ✅  
 
 **不做**：Codegraph、SQLite；代码权威存 **MySQL copilot**，检索用 **ES**。
+
+---
+
+## Phase 2 规划（2026-07 起 · 详见 [PHASE2_ROADMAP.md](./PHASE2_ROADMAP.md)）
+
+| 代号 | 主题 | 状态 | 目标里程碑 |
+|------|------|------|------------|
+| **P2-A** | Chart SSR 统一渲染（Ask + Insight PDF） | ⬜ 未开始 | M2.1 · +3 周 |
+| **P2-B** | Badcase → L1/术语 运营闭环 | ⬜ 未开始 | M2.2 · +3 周 |
+| **P2-C** | MCP / iframe 对外集成 | ⬜ 未开始 | M2.3 · +5 周 |
+
+**已有基础（P2-B 可复用）**：
+
+- `app/memory/badcase_l1.py` — badcase → L1 草稿  
+- `copilot_sql_example` + Admin badcase/L1 页  
+- 问数页 down 反馈 → badcase 标记  
+
+**Phase 2 总体验收**：嵌入页问数 + SSR 图表 + badcase 沉淀 + 同类 L1 命中（见路线图 §5）。

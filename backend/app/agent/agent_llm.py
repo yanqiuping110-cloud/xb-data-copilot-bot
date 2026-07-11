@@ -11,7 +11,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.context_builder import _normalize_meta_table_name, _pick_candidate_tables
-from app.agent.llm_sql import build_llm
+from app.agent.llm_client import complete_messages
 from app.agent.plan_llm import _extract_json
 from app.security.prompt_boundary import build_agent_system_preamble, wrap_untrusted
 from config.settings import Settings
@@ -179,6 +179,7 @@ async def decide_agent_action(
     plan: dict[str, Any] | None,
     observations: list[dict],
     default_tables: list[str],
+    thinking_queue: Any | None = None,
 ) -> dict[str, Any]:
     """
     决定 Agent 下一步：调用 tool 或结束 loop。
@@ -187,7 +188,6 @@ async def decide_agent_action(
         {"action": "tool"|"finish", "tool": str?, "args": dict?}
     """
     fallback = _fallback_action(plan, observations, default_tables=default_tables, question=question)
-    llm = build_llm(settings)
     plan_text = json.dumps(plan or {}, ensure_ascii=False)[:2000]
     obs_text = _format_observations(observations)
     system = (
@@ -211,8 +211,11 @@ async def decide_agent_action(
         "请输出下一步 JSON。"
     )
     try:
-        resp = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-        content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        content, _reasoning, _ti, _to = await complete_messages(
+            settings,
+            [SystemMessage(content=system), HumanMessage(content=user)],
+            thinking_queue=thinking_queue,
+        )
         parsed = _extract_json(content)
         if not parsed:
             return fallback

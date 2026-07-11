@@ -1,0 +1,20 @@
+# 报告分析 · 默认主题（A4 竖版）
+templateCode: presentation
+page:
+  layout: a4-portrait
+  widthMm: 210
+  heightMm: 297
+  # 背景图推荐像素（@300 DPI）
+  widthPx: 2480
+  heightPx: 3508
+backgrounds:
+  defaultCover: cover/cover-sport-01.png
+  defaultEnding: ending/ending-light-01.png
+typography:
+  titleFont: "Noto Sans SC"
+  titleColor: "#1e293b"
+  subtitleColor: "#475569"
+  accentColor: "#22c55e"
+body:
+  pageBackground: "#ffffff"
+  marginMm: 18

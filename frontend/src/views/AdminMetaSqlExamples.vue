@@ -15,6 +15,12 @@
         </div>
         <el-table v-loading="loading" :data="examples" border style="margin-top: 16px">
           <el-table-column prop="degradePriority" label="优先级" width="80" />
+          <el-table-column label="审核" width="90">
+            <template #default="{ row }">
+              <el-tag v-if="row.reviewStatus === 0 || row.metaJson?.draft" type="warning" size="small">草稿</el-tag>
+              <el-tag v-else type="success" size="small">已发布</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="questionPattern" label="问句模式" min-width="180" show-overflow-tooltip />
           <el-table-column prop="roleScope" label="角色" width="90">
             <template #default="{ row }">{{ row.roleScope || '全部' }}</template>
@@ -22,9 +28,17 @@
           <el-table-column label="SQL" min-width="200" show-overflow-tooltip>
             <template #default="{ row }">{{ row.sqlText }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="140" fixed="right">
+          <el-table-column label="操作" width="200" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button
+                v-if="row.reviewStatus === 0 || row.metaJson?.draft"
+                link
+                type="success"
+                @click="onPublish(row)"
+              >
+                发布
+              </el-button>
               <el-button link type="danger" @click="onDelete(row)">删除</el-button>
             </template>
           </el-table-column>
@@ -81,6 +95,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import MetaAdminNav from '../components/MetaAdminNav.vue'
 import { fetchMe } from '../api/auth'
 import { createSqlExample, deleteSqlExample, listSqlExamples, updateSqlExample } from '../api/meta'
+import { publishL1Example } from '../api/adminOps'
 
 const router = useRouter()
 const route = useRoute()
@@ -201,6 +216,12 @@ async function submit() {
   } finally {
     saving.value = false
   }
+}
+
+async function onPublish(row) {
+  await publishL1Example(row.id)
+  ElMessage.success('L1 样例已发布')
+  await loadList()
 }
 
 async function onDelete(row) {

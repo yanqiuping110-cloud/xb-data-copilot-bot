@@ -156,6 +156,10 @@ class SqlExampleRow:
     meta_json: str | None
     role_scope: str | None
     degrade_priority: int
+    source_trace_id: str | None = None
+    review_status: int = 1
+    reviewed_by: int | None = None
+    reviewed_at: datetime | None = None
 
 
 @dataclass
@@ -1079,7 +1083,8 @@ class MetaRepository:
         result = await self._session.execute(
             text(
                 """
-                SELECT id, question_pattern, sql_text, meta_json, role_scope, degrade_priority
+                SELECT id, question_pattern, sql_text, meta_json, role_scope, degrade_priority,
+                       source_trace_id, review_status, reviewed_by, reviewed_at
                 FROM copilot_sql_example
                 WHERE deleted = 0
                 ORDER BY degrade_priority, id
@@ -1092,7 +1097,8 @@ class MetaRepository:
         result = await self._session.execute(
             text(
                 """
-                SELECT id, question_pattern, sql_text, meta_json, role_scope, degrade_priority
+                SELECT id, question_pattern, sql_text, meta_json, role_scope, degrade_priority,
+                       source_trace_id, review_status, reviewed_by, reviewed_at
                 FROM copilot_sql_example
                 WHERE id = :id AND deleted = 0
                 """
@@ -1110,14 +1116,18 @@ class MetaRepository:
         meta_json: str | None = None,
         role_scope: str | None = None,
         degrade_priority: int = 100,
+        source_trace_id: str | None = None,
+        review_status: int = 1,
     ) -> int:
         result = await self._session.execute(
             text(
                 """
                 INSERT INTO copilot_sql_example (
-                    question_pattern, sql_text, meta_json, role_scope, degrade_priority, deleted
+                    question_pattern, sql_text, meta_json, role_scope, degrade_priority,
+                    source_trace_id, review_status, deleted
                 ) VALUES (
-                    :question_pattern, :sql_text, :meta_json, :role_scope, :degrade_priority, 0
+                    :question_pattern, :sql_text, :meta_json, :role_scope, :degrade_priority,
+                    :source_trace_id, :review_status, 0
                 )
                 """
             ),
@@ -1127,9 +1137,76 @@ class MetaRepository:
                 "meta_json": meta_json,
                 "role_scope": role_scope,
                 "degrade_priority": degrade_priority,
+                "source_trace_id": source_trace_id,
+                "review_status": review_status,
             },
         )
         return int(result.lastrowid)
+
+    async def publish_sql_example(self, example_id: int, *, reviewed_by: int) -> None:
+        """L1 草稿发布：review_status=1，meta_json 去掉 draft。"""
+        import json
+
+        row = await self.get_sql_example(example_id)
+        if row is None:
+            raise ValueError("样例不存在")
+        meta: dict = {}
+        if row.meta_json:
+            try:
+                meta = json.loads(row.meta_json)
+                if not isinstance(meta, dict):
+                    meta = {}
+            except json.JSONDecodeError:
+                meta = {}
+        meta.pop("draft", None)
+        await self._session.execute(
+            text(
+                """
+                UPDATE copilot_sql_example SET
+                    meta_json = :meta_json,
+                    review_status = 1,
+                    reviewed_by = :reviewed_by,
+                    reviewed_at = NOW()
+                WHERE id = :id AND deleted = 0
+                """
+            ),
+            {
+                "id": example_id,
+                "meta_json": json.dumps(meta, ensure_ascii=False),
+                "reviewed_by": reviewed_by,
+            },
+        )
+
+    async def count_ops_stats(self) -> dict[str, int]:
+        """运营看板只读统计。"""
+        result = await self._session.execute(
+            text(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM copilot_ask_turn
+                     WHERE deleted = 0 AND (is_badcase = 1 OR user_feedback = 'down')
+                       AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) AS badcase_7d,
+                    (SELECT COUNT(*) FROM copilot_glossary_term
+                     WHERE deleted = 0 AND status = 1
+                       AND updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS glossary_pub_30d,
+                    (SELECT COUNT(*) FROM copilot_sql_example
+                     WHERE deleted = 0 AND review_status = 1
+                       AND reviewed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS l1_pub_30d,
+                    (SELECT COUNT(*) FROM copilot_sql_example
+                     WHERE deleted = 0 AND review_status = 0) AS l1_draft,
+                    (SELECT COUNT(*) FROM copilot_glossary_term
+                     WHERE deleted = 0 AND status = 0) AS glossary_draft
+                """
+            )
+        )
+        row = result.mappings().first() or {}
+        return {
+            "badcase_count_7d": int(row.get("badcase_7d") or 0),
+            "glossary_published_30d": int(row.get("glossary_pub_30d") or 0),
+            "l1_published_30d": int(row.get("l1_pub_30d") or 0),
+            "l1_draft_count": int(row.get("l1_draft") or 0),
+            "glossary_draft_count": int(row.get("glossary_draft") or 0),
+        }
 
     async def update_sql_example(
         self,
@@ -1259,6 +1336,10 @@ def _map_sql_example(row) -> SqlExampleRow:
         meta_json=row.get("meta_json"),
         role_scope=row.get("role_scope"),
         degrade_priority=int(row["degrade_priority"]),
+        source_trace_id=row.get("source_trace_id"),
+        review_status=int(row.get("review_status") or 1),
+        reviewed_by=int(row["reviewed_by"]) if row.get("reviewed_by") is not None else None,
+        reviewed_at=row.get("reviewed_at"),
     )
 
 

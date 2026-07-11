@@ -25,6 +25,7 @@ CASE_FILES = {
     "memory": REPO_ROOT / "docs" / "eval" / "memory_multiturn.json",
     "agent": REPO_ROOT / "docs" / "eval" / "agent_complex_report.json",
     "injection": REPO_ROOT / "docs" / "eval" / "prompt_injection.json",
+    "research": REPO_ROOT / "docs" / "eval" / "research_report.json",
 }
 
 
@@ -54,6 +55,57 @@ def _check_expect(result: dict, expect: dict) -> list[str]:
         if int(dl) > int(expect["degrade_level_lte"]):
             errors.append(f"degrade_level {dl} > {expect['degrade_level_lte']}")
     return errors
+
+
+def run_research_case(client: httpx.Client, case: dict) -> dict:
+    """执行单个深度分析报告用例（JSON 模式）。"""
+    case_id = case.get("id", "?")
+    errors: list[str] = []
+    expect = case.get("expect", {})
+    payload = {
+        "requestText": case.get("requestText") or case.get("request_text", ""),
+        "templateCode": case.get("templateCode") or case.get("template_code", "monthly_ops"),
+        "options": {"stream": False},
+    }
+    resp = client.post("/api/v1/research/report", json=payload, timeout=600.0)
+    if resp.status_code >= 500:
+        return {
+            "id": case_id,
+            "passed": False,
+            "errors": [f"HTTP {resp.status_code}"],
+            "result": {"http_status": resp.status_code},
+        }
+    if resp.status_code == 503:
+        return {
+            "id": case_id,
+            "passed": False,
+            "errors": ["RESEARCH_DISABLED"],
+            "result": resp.json(),
+        }
+    body = resp.json()
+    status = body.get("status")
+    if "status_in" in expect and status not in expect["status_in"]:
+        errors.append(f"status 期望 ∈ {expect['status_in']} 实际 {status}")
+    if expect.get("no_server_error") and status is None:
+        errors.append("响应无 status")
+    sections = body.get("sections") or []
+    if "min_sections" in expect and len(sections) < int(expect["min_sections"]):
+        errors.append(f"sections {len(sections)} < {expect['min_sections']}")
+    pdf_pages = body.get("pdfPageCount") or body.get("pdf_page_count")
+    if "min_pdf_pages" in expect and (pdf_pages or 0) < int(expect["min_pdf_pages"]):
+        errors.append(f"pdf pages {pdf_pages} < {expect['min_pdf_pages']}")
+    return {
+        "id": case_id,
+        "passed": len(errors) == 0,
+        "errors": errors,
+        "result": {
+            "reportId": body.get("reportId"),
+            "status": status,
+            "sectionTotal": body.get("sectionTotal"),
+            "pdfPageCount": pdf_pages,
+            "latencyMs": body.get("latencyMs"),
+        },
+    }
 
 
 def run_case(client: httpx.Client, case: dict) -> dict:
@@ -104,7 +156,7 @@ def run_case(client: httpx.Client, case: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="问数评测回放")
-    parser.add_argument("--subset", default="memory", help="评测子集（memory / agent / injection）")
+    parser.add_argument("--subset", default="memory", help="评测子集（memory / agent / injection / research）")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--token", required=True, help="Bearer JWT")
     args = parser.parse_args()
@@ -116,7 +168,10 @@ def main() -> int:
 
     with httpx.Client(base_url=args.base_url.rstrip("/"), headers=headers) as client:
         for case in cases:
-            report = run_case(client, case)
+            if args.subset == "research":
+                report = run_research_case(client, case)
+            else:
+                report = run_case(client, case)
             reports.append(report)
             if report["passed"]:
                 passed += 1

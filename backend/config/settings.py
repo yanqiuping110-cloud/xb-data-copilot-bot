@@ -53,6 +53,21 @@ class Settings(BaseSettings):
     llm_api_key: str = Field(default="ollama", alias="LLM_API_KEY")
     llm_model: str = Field(default="qwen2.5-coder:7b", alias="LLM_MODEL")
     llm_timeout_sec: int = Field(default=120, alias="LLM_TIMEOUT_SEC")
+    llm_thinking_enabled: bool = Field(
+        default=False,
+        alias="LLM_THINKING_ENABLED",
+        description="DeepSeek 思考模式（thinking.type=enabled）",
+    )
+    llm_thinking_stream: bool = Field(
+        default=True,
+        alias="LLM_THINKING_STREAM",
+        description="SSE 流式问数时推送 reasoning_content 给前端",
+    )
+    llm_reasoning_effort: str = Field(
+        default="high",
+        alias="LLM_REASONING_EFFORT",
+        description="思考力度：high | max（DeepSeek V4）",
+    )
 
     # ---------- Embedding（OpenAI 兼容，本机多为 Ollama，与 LLM 可同 base）----------
     embedding_api_base: str = Field(
@@ -88,7 +103,7 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(alias="JWT_SECRET")
     jwt_expire_hours: int = Field(default=24, alias="JWT_EXPIRE_HOURS")
     seed_admin_username: str = Field(default="admin", alias="SEED_ADMIN_USERNAME")
-    seed_admin_password: str = Field(default="change-me", alias="SEED_ADMIN_PASSWORD")
+    seed_admin_password: str = Field(default="123456", alias="SEED_ADMIN_PASSWORD")
 
     # ---------- SQL 执行安全（问数链路使用）----------
     sql_dialect: str = Field(default="mysql", alias="SQL_DIALECT")
@@ -276,6 +291,88 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="REDIS_URL")
     minio_endpoint: str = Field(default="http://127.0.0.1:9000", alias="MINIO_ENDPOINT")
 
+    # ---------- Insight Engine · 深度分析报告 ----------
+    research_enabled: bool = Field(default=True, alias="RESEARCH_ENABLED")
+    research_max_sections: int = Field(default=12, alias="RESEARCH_MAX_SECTIONS")
+    research_target_pages: int = Field(default=30, alias="RESEARCH_TARGET_PAGES")
+    research_max_pages: int = Field(default=80, alias="RESEARCH_MAX_PAGES")
+    research_section_timeout_sec: int = Field(default=90, alias="RESEARCH_SECTION_TIMEOUT_SEC")
+    research_total_timeout_sec: int = Field(default=300, alias="RESEARCH_TOTAL_TIMEOUT_SEC")
+    research_max_concurrent_per_user: int = Field(default=1, alias="RESEARCH_MAX_CONCURRENT")
+    research_export_pdf_enabled: bool = Field(default=True, alias="RESEARCH_EXPORT_PDF")
+    research_pdf_theme: str = Field(default="default", alias="RESEARCH_PDF_THEME")
+    research_storage_dir: str = Field(default="storage/reports", alias="RESEARCH_STORAGE_DIR")
+    research_pdf_url_prefix: str = Field(
+        default="/api/v1/research/report",
+        alias="RESEARCH_PDF_URL_PREFIX",
+    )
+    research_demo_pace: str = Field(default="normal", alias="RESEARCH_DEMO_PACE")
+    research_heartbeat_interval_sec: int = Field(default=2, alias="RESEARCH_HEARTBEAT_INTERVAL_SEC")
+    research_stream_text_delta: bool = Field(default=True, alias="RESEARCH_STREAM_TEXT_DELTA")
+    research_keep_html_debug: bool = Field(default=False, alias="RESEARCH_KEEP_HTML_DEBUG")
+    research_llm_planner_enabled: bool = Field(default=True, alias="RESEARCH_LLM_PLANNER_ENABLED")
+    research_synthesizer_llm_enabled: bool = Field(
+        default=True, alias="RESEARCH_SYNTHESIZER_LLM_ENABLED"
+    )
+    research_pdf_engine: str = Field(default="auto", alias="RESEARCH_PDF_ENGINE")
+
+    # ---------- 问数 · 报告分析（Brief Report）----------
+    brief_report_enabled: bool = Field(default=False, alias="BRIEF_REPORT_ENABLED")
+    brief_report_storage_dir: str = Field(
+        default="storage/brief-reports",
+        alias="BRIEF_REPORT_STORAGE_DIR",
+    )
+    brief_report_backgrounds_dir: str = Field(
+        default="app/brief_report/assets/backgrounds",
+        alias="BRIEF_REPORT_BACKGROUNDS_DIR",
+    )
+    brief_report_theme: str = Field(default="presentation", alias="BRIEF_REPORT_THEME")
+    brief_report_page_layout: str = Field(default="a4-portrait", alias="BRIEF_REPORT_PAGE_LAYOUT")
+    brief_report_max_chapters: int = Field(default=12, alias="BRIEF_REPORT_MAX_CHAPTERS")
+    brief_report_llm_enabled: bool = Field(default=True, alias="BRIEF_REPORT_LLM_ENABLED")
+    brief_report_pdf_engine: str = Field(default="auto", alias="BRIEF_REPORT_PDF_ENGINE")
+    brief_report_table_max_rows: int = Field(default=15, alias="BRIEF_REPORT_TABLE_MAX_ROWS")
+    brief_report_pdf_url_prefix: str = Field(
+        default="/api/v1/ask/brief-report",
+        alias="BRIEF_REPORT_PDF_URL_PREFIX",
+    )
+
+    # ---------- Phase 2 · Chart PNG（仅 PDF 导出等服务端场景；问数对话页用前端 ECharts）----------
+    chart_ssr_enabled: bool = Field(default=False, alias="CHART_SSR_ENABLED")
+    chart_ssr_url: str = Field(default="http://127.0.0.1:3001", alias="CHART_SSR_URL")
+    chart_ssr_timeout_ms: int = Field(default=5000, alias="CHART_SSR_TIMEOUT_MS")
+    chart_ssr_width: int = Field(default=720, alias="CHART_SSR_WIDTH")
+    chart_ssr_height: int = Field(default=400, alias="CHART_SSR_HEIGHT")
+    chart_ssr_api_key: str = Field(default="", alias="CHART_SSR_API_KEY")
+    chart_storage_dir: str = Field(default="storage/charts", alias="CHART_STORAGE_DIR")
+
+    # ---------- Phase 2 · 术语库召回 ----------
+    glossary_recall_enabled: bool = Field(default=True, alias="GLOSSARY_RECALL_ENABLED")
+    glossary_recall_top_k: int = Field(default=5, alias="GLOSSARY_RECALL_TOP_K")
+
+    # ---------- Phase 2 · Embed / MCP ----------
+    embed_enabled: bool = Field(default=False, alias="EMBED_ENABLED")
+    embed_allowed_origins: str = Field(
+        default="http://localhost:5173",
+        alias="EMBED_ALLOWED_ORIGINS",
+        description="iframe 嵌入允许的 postMessage 来源，逗号分隔",
+    )
+    embed_token_ttl_sec: int = Field(default=3600, alias="EMBED_TOKEN_TTL_SEC")
+    embed_app_id: str = Field(default="", alias="EMBED_APP_ID")
+    embed_app_secret: str = Field(default="", alias="EMBED_APP_SECRET")
+    embed_frame_ancestors: str = Field(
+        default="'self'",
+        alias="EMBED_FRAME_ANCESTORS",
+        description="CSP frame-ancestors 值",
+    )
+    mcp_enabled: bool = Field(default=False, alias="MCP_ENABLED")
+    mcp_api_key: str = Field(default="", alias="MCP_API_KEY")
+    mcp_api_base: str = Field(
+        default="http://127.0.0.1:8000",
+        alias="MCP_API_BASE",
+        description="MCP 侧车调用 REST 的 base URL",
+    )
+
     @property
     def zvec_data_path(self) -> Path:
         """Zvec 数据目录绝对路径。"""
@@ -288,6 +385,27 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> list[str]:
         """CORS 白名单列表。"""
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def embed_origin_list(self) -> list[str]:
+        """Embed postMessage 白名单。"""
+        return [o.strip() for o in self.embed_allowed_origins.split(",") if o.strip()]
+
+    @property
+    def chart_storage_path(self) -> Path:
+        """Chart PNG 缓存目录。"""
+        path = Path(self.chart_storage_dir)
+        if path.is_absolute():
+            return path
+        return ROOT_DIR / path
+
+    @property
+    def brief_report_storage_path(self) -> Path:
+        """Brief Report PDF 输出目录。"""
+        path = Path(self.brief_report_storage_dir)
+        if path.is_absolute():
+            return path
+        return ROOT_DIR / path
 
     @property
     def copilot_database_url(self) -> str:

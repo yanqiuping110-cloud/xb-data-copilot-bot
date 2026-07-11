@@ -24,6 +24,7 @@ const chartEl = ref(null)
 let chartInstance = null
 let resizeObserver = null
 let intersectionObserver = null
+let resizeTimers = []
 
 const note = computed(() => props.chartSpec?.options?.note || null)
 
@@ -81,11 +82,31 @@ function renderChart() {
   instance.resize()
 }
 
+function clearResizeTimers() {
+  resizeTimers.forEach((id) => clearTimeout(id))
+  resizeTimers = []
+}
+
+function scheduleResizeBurst() {
+  clearResizeTimers()
+  ;[0, 80, 200, 500].forEach((ms) => {
+    resizeTimers.push(
+      setTimeout(() => {
+        if (isInstanceValid()) chartInstance.resize()
+        else scheduleRender()
+      }, ms),
+    )
+  })
+}
+
 function scheduleRender() {
   nextTick(() => {
     requestAnimationFrame(() => {
       renderChart()
-      requestAnimationFrame(() => chartInstance?.resize())
+      requestAnimationFrame(() => {
+        chartInstance?.resize()
+        scheduleResizeBurst()
+      })
     })
   })
 }
@@ -104,6 +125,8 @@ function setupResizeObserver() {
   resizeObserver?.disconnect()
   resizeObserver = new ResizeObserver(() => onResize())
   resizeObserver.observe(chartEl.value)
+  const panel = chartEl.value.closest('.result-panel')
+  if (panel) resizeObserver.observe(panel)
 }
 
 function setupIntersectionObserver() {
@@ -126,6 +149,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearResizeTimers()
   window.removeEventListener('resize', onResize)
   resizeObserver?.disconnect()
   resizeObserver = null
@@ -161,8 +185,8 @@ watch(chartEl, (el) => {
 
 .chart-canvas {
   width: 100%;
-  height: 320px;
-  min-height: 240px;
+  height: 340px;
+  min-height: 280px;
 }
 
 .chart-hint {

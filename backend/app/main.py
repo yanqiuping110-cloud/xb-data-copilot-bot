@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin_code, admin_meta, admin_scope, admin_users, ask, auth, errors, feedback, health, memory_prefs, sessions
+from app.api import admin_code, admin_meta, admin_ops, admin_scope, admin_users, ask, auth, brief_report, chart, embed, errors, feedback, health, memory_prefs, research, sessions
 from app.ask.exceptions import AskError
 from app.auth import jwt_tokens
 from app.auth.service import AuthError
@@ -62,21 +62,26 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(admin_users.router)
     app.include_router(admin_meta.router)
+    app.include_router(admin_ops.router)
     app.include_router(admin_scope.router)
     app.include_router(admin_code.router)
     app.include_router(ask.router)
+    app.include_router(brief_report.router)
     app.include_router(sessions.router)
     app.include_router(memory_prefs.router)
     app.include_router(feedback.router)
+    app.include_router(research.router)
+    app.include_router(chart.router)
+    app.include_router(embed.router)
 
     @app.middleware("http")
     async def log_http_requests(request, call_next):
         """每个 API 请求在终端打一行，便于确认流量是否打到当前进程。"""
         path = request.url.path
-        if path.startswith("/api/v1/ask"):
+        if path.startswith("/api/v1/ask") or path.startswith("/api/v1/research"):
             http_logger.info(">>> %s %s", request.method, path)
         response = await call_next(request)
-        if path.startswith("/api/v1/ask"):
+        if path.startswith("/api/v1/ask") or path.startswith("/api/v1/research"):
             http_logger.info("<<< %s %s status=%s", request.method, path, response.status_code)
         return response
 

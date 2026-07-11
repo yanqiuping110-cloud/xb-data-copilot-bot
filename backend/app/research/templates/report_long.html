@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <title>{{ doc.meta.title }}</title>
+  <style>{{ report_css | safe }}</style>
+</head>
+<body>
+  <section class="cover">
+    {% if cover_svg %}<div class="cover-bg">{{ cover_svg | safe }}</div>{% endif %}
+    <div class="cover-inner">
+      <p class="cover-brand">Insight Engine</p>
+      <h1>{{ doc.meta.title }}</h1>
+      <p class="cover-meta">{{ doc.meta.generatedAt[:10] }} · {{ doc.meta.scopeSummary }}</p>
+      <p class="cover-id">{{ doc.meta.reportId }}</p>
+    </div>
+  </section>
+
+  <section class="toc page-break">
+    <h2>目录</h2>
+    <ul>
+      <li>执行摘要</li>
+      {% for ch in doc.chapters %}
+      <li>第 {{ ch.index }} 章 {{ ch.title }}</li>
+      {% endfor %}
+      <li>关键发现</li>
+      <li>建议与行动</li>
+      <li>附录</li>
+    </ul>
+  </section>
+
+  <section class="summary-block page-break">
+    <h2>执行摘要</h2>
+    {% for p in doc.executiveSummary.paragraphs %}
+    <p>{{ p }}</p>
+    {% endfor %}
+  </section>
+
+  {% for ch in doc.chapters %}
+  <section class="chapter page-break chapter-{{ ch.intent }}">
+    <div class="chapter-head" style="border-left-color: {{ ch.accent }}">
+      <h2>第 {{ ch.index }} 章 {{ ch.title }}</h2>
+    </div>
+    <p class="narrative">{{ ch.narrative }}</p>
+    {% if ch.bullets %}
+    <h3>本章要点</h3>
+    <ul>{% for b in ch.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% for chart in ch.charts %}
+    {% if chart.pngPath %}
+    <figure class="chart-figure">
+      <img src="file://{{ chart.pngPath }}" alt="{{ chart.caption or '图表' }}"/>
+      <figcaption>{{ chart.caption or '图表' }}</figcaption>
+    </figure>
+    {% endif %}
+    {% endfor %}
+    {% for t in ch.tables %}
+    <h3>{{ t.caption }}</h3>
+    {% if t.truncated %}<p class="hint">共 {{ t.totalRows }} 行，以下展示前 50 行</p>{% endif %}
+    <table>
+      <thead><tr>{% for c in t.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in t.rows %}
+        <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endfor %}
+  </section>
+  {% endfor %}
+
+  <section class="findings page-break">
+    <h2>关键发现</h2>
+    <ul>
+      {% for f in doc.findings %}
+      <li class="finding-{{ f.type }}">{{ f.text }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="recommendations page-break">
+    <h2>建议与后续行动</h2>
+    <ol>
+      {% for r in doc.recommendations %}
+      <li>{{ r }}</li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <section class="appendix page-break">
+    <h2>附录</h2>
+    <p>数据范围：{{ doc.meta.scopeSummary }}</p>
+    <table class="trace-table">
+      <thead><tr><th>章节</th><th>Trace</th><th>状态</th><th>耗时(ms)</th></tr></thead>
+      <tbody>
+        {% for tr in doc.appendix.traces %}
+        <tr>
+          <td>{{ tr.chapterIndex }}</td>
+          <td>{{ tr.traceId or '-' }}</td>
+          <td>{{ tr.status }}</td>
+          <td>{{ tr.latencyMs or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>

@@ -1,0 +1,64 @@
+.insight-theme {
+  --insight-accent: #6366f1;
+  --insight-bg: #f8fafc;
+  --insight-card: #ffffff;
+  --insight-border: #e2e8f0;
+  --insight-text: #0f172a;
+  --insight-muted: #64748b;
+  --insight-success: #16a34a;
+  --insight-warn: #d97706;
+}
+
+.insight-theme .status-line {
+  padding: 10px 14px;
+  background: var(--insight-card);
+  border-radius: 8px;
+  border: 1px solid var(--insight-border);
+  font-size: 14px;
+  color: var(--insight-text);
+}
+
+.insight-theme .activity-feed {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--insight-card);
+  border-radius: 8px;
+  border: 1px solid var(--insight-border);
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.insight-theme .feed-item.success { color: var(--insight-success); }
+.insight-theme .feed-item.warn { color: var(--insight-warn); }
+
+.insight-theme .elapsed-badge {
+  font-size: 12px;
+  color: var(--insight-muted);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+}
+
+.insight-theme .task-item.running { color: #2563eb; }
+.insight-theme .task-item.done { color: var(--insight-success); }
+.insight-theme .task-item.fail { color: #dc2626; }
+
+@keyframes insight-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(99, 102, 241, 0); }
+}
+
+.insight-theme .task-item.running .idx {
+  animation: insight-pulse 1.5s infinite;
+}
+
+.insight-theme .stream-cursor::after {
+  content: '▌';
+  animation: insight-blink 1s step-end infinite;
+  color: var(--insight-accent);
+}
+
+@keyframes insight-blink {
+  50% { opacity: 0; }
+}

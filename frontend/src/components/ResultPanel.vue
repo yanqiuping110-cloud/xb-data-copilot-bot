@@ -4,7 +4,6 @@
     <el-tabs v-model="activeTab" class="result-tabs" @tab-change="onTabChange">
       <el-tab-pane label="图表与表格" name="both">
         <ResultChart
-          v-show="activeTab === 'both'"
           :chart-spec="chartSpec"
           :columns="columns"
           :rows="rows"

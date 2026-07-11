@@ -60,6 +60,7 @@ async def agent_loop(state: AskGraphState, config: RunnableConfig) -> dict:
         plan=plan,
         observations=observations,
         default_tables=default_tables,
+        thinking_queue=c.get("thinking_delta_queue"),
     )
 
     if action.get("action") == "finish" and not observations and plan:
@@ -177,11 +178,13 @@ async def generate_sql_step(state: AskGraphState, config: RunnableConfig) -> dic
     if not plan_steps:
         return await generate_sql(state, config)
 
+    thinking_queue = c.get("thinking_delta_queue")
     sql, sql_steps_meta, token_in, token_out = await generate_sql_step_from_llm(
         settings=settings,
         question=question,
         context_text=context_text,
         plan_steps=plan_steps,
+        thinking_queue=thinking_queue,
     )
     gen_ms = int((time.perf_counter() - t0) * 1000)
     retry_count = state.get("retry_count") or 0
@@ -194,6 +197,7 @@ async def generate_sql_step(state: AskGraphState, config: RunnableConfig) -> dic
             question=question,
             context_text=context_text,
             compact=True,
+            thinking_queue=thinking_queue,
         )
         retry_count += 1
         token_in = (token_in or 0) + (token_in2 or 0) if token_in2 else token_in

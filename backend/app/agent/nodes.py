@@ -130,12 +130,14 @@ async def generate_sql(state: AskGraphState, config: RunnableConfig) -> dict:
     context_text = _append_plan_context(context_text, state)
     retry_count = state.get("retry_count") or 0
     l2_retry = False
+    thinking_queue = c.get("thinking_delta_queue")
 
     sql, token_in, token_out = await generate_sql_from_llm(
         settings=settings,
         question=question,
         context_text=context_text,
         compact=False,
+        thinking_queue=thinking_queue,
     )
     gen_ms = int((time.perf_counter() - t0) * 1000)
 
@@ -147,6 +149,7 @@ async def generate_sql(state: AskGraphState, config: RunnableConfig) -> dict:
             question=question,
             context_text=context_text,
             compact=True,
+            thinking_queue=thinking_queue,
         )
         gen_ms += int((time.perf_counter() - t2) * 1000)
         retry_count += 1
@@ -470,22 +473,36 @@ async def format_answer(state: AskGraphState, config: RunnableConfig) -> dict:
     use_agent = state.get("use_agent_path") and not state.get("plan_skipped")
     columns = state.get("columns") or []
     rows = state.get("rows") or []
+    delta_queue = c.get("answer_delta_queue")
+    thinking_queue = c.get("thinking_delta_queue")
 
-    if (
-        settings.format_answer_llm_enabled
-        and use_agent
-        and rows
-        and len(columns) > 1
-    ):
-        llm_answer = await _format_answer_with_llm(
-            settings,
-            question=state.get("normalized_question") or "",
-            columns=columns,
-            rows=rows,
-            fallback=answer,
-        )
+    llm_eligible = settings.format_answer_llm_enabled and rows and (
+        use_agent or delta_queue is not None
+    )
+    if llm_eligible and len(columns) > 0:
+        if delta_queue is not None:
+            llm_answer = await _format_answer_with_llm(
+                settings,
+                question=state.get("normalized_question") or "",
+                columns=columns,
+                rows=rows,
+                fallback=answer,
+                delta_queue=delta_queue,
+                thinking_queue=thinking_queue,
+                detailed=delta_queue is not None,
+            )
+        else:
+            llm_answer = await _format_answer_with_llm(
+                settings,
+                question=state.get("normalized_question") or "",
+                columns=columns,
+                rows=rows,
+                fallback=answer,
+            )
         if llm_answer:
             answer = llm_answer
+    elif delta_queue is not None and answer:
+        await _emit_answer_deltas(answer, delta_queue)
 
     chart_spec = state.get("chart_spec") or {}
     vis_intent = state.get("visualization_intent") or {}
@@ -508,6 +525,13 @@ async def format_answer(state: AskGraphState, config: RunnableConfig) -> dict:
     return {"answer": answer, "status": "success"}
 
 
+async def _emit_answer_deltas(text: str, delta_queue: Any) -> None:
+    """将完整回答拆块写入流式队列。"""
+    chunk_size = 6
+    for i in range(0, len(text), chunk_size):
+        await delta_queue.put(text[i : i + chunk_size])
+
+
 async def _format_answer_with_llm(
     settings: Settings,
     *,
@@ -515,25 +539,38 @@ async def _format_answer_with_llm(
     columns: list[str],
     rows: list[list],
     fallback: str,
+    delta_queue: Any | None = None,
+    thinking_queue: Any | None = None,
+    detailed: bool = False,
 ) -> str | None:
     """复杂多维结果：LLM 生成可读摘要（失败时回退模板）。"""
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    from app.agent.llm_sql import build_llm
+    from app.agent.llm_client import complete_messages
 
-    llm = build_llm(settings)
-    sample = rows[:5]
-    system = (
-        "你是数据解读助手。根据问句、列名与样例行，用一两句中文总结查询结果。"
-        "若列为动态透视（多项目列），说明主要数值；不要编造不存在的数据。"
-    )
+    sample = rows[:8]
+    if detailed:
+        system = (
+            "你是数据分析报告撰写助手。根据问句、列名与样例行，用 3～6 句中文详细解读查询结果。"
+            "需包含：核心指标数值、同比/环比或排名变化（若有）、异常点与业务含义。"
+            "不要编造不存在的数据；数据不足时如实说明。"
+        )
+    else:
+        system = (
+            "你是数据解读助手。根据问句、列名与样例行，用一两句中文总结查询结果。"
+            "若列为动态透视（多项目列），说明主要数值；不要编造不存在的数据。"
+        )
     user = (
         f"问句：{question}\n列名：{columns}\n"
-        f"样例行（最多5行）：{sample}\n总行数：{len(rows)}"
+        f"样例行（最多8行）：{sample}\n总行数：{len(rows)}"
     )
     try:
-        resp = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-        content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        content, _reasoning, _ti, _to = await complete_messages(
+            settings,
+            [SystemMessage(content=system), HumanMessage(content=user)],
+            content_queue=delta_queue,
+            thinking_queue=thinking_queue,
+        )
         text = content.strip()
         return text if len(text) > 4 else None
     except Exception:
@@ -573,6 +610,7 @@ async def correct_sql(state: AskGraphState, config: RunnableConfig) -> dict:
         compact=False,
         correction_hint=error_msg,
         previous_sql=previous_sql,
+        thinking_queue=c.get("thinking_delta_queue"),
     )
 
     await _span(

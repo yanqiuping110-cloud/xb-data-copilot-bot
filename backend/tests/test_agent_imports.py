@@ -17,13 +17,13 @@ def _module_public_callables(module_name: str) -> list[str]:
     return names
 
 
-def test_plan_llm_build_llm_resolves():
+def test_plan_llm_complete_messages_resolves():
     import app.agent.plan_llm as plan_llm
 
-    assert hasattr(plan_llm, "build_llm")
-    from app.agent.llm_sql import build_llm
+    assert hasattr(plan_llm, "complete_messages")
+    from app.agent.llm_client import complete_messages
 
-    assert plan_llm.build_llm is build_llm
+    assert plan_llm.complete_messages is complete_messages
 
 
 def test_plan_nodes_generate_plan_resolves():

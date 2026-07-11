@@ -1,0 +1,30 @@
+{
+  "subset": "research",
+  "cases": [
+    {
+      "id": "rpt-01",
+      "role": "OPERATOR",
+      "requestText": "本月核心指标趋势、按产品线对比、给出3条建议",
+      "templateCode": "monthly_ops_long",
+      "expect": {
+        "statusIn": ["success", "partial"],
+        "minSections": 8,
+        "minPdfPages": 15,
+        "pdfTheme": "default",
+        "noServerError": true
+      }
+    },
+    {
+      "id": "rpt-02",
+      "role": "ADMIN",
+      "requestText": "生成本月运营深度分析报告",
+      "templateCode": "monthly_ops",
+      "expect": {
+        "statusIn": ["success", "partial"],
+        "minSections": 3,
+        "minPdfPages": 10,
+        "noServerError": true
+      }
+    }
+  ]
+}

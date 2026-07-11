@@ -49,8 +49,10 @@ def meta_rules_fully_match(question: str, meta: dict) -> bool:
 
 
 def is_example_visible_to_user(example: CuratedSqlExample, ctx: UserContext) -> bool:
-    """草稿、角色不符、学校账户不可见的 admin 样例不参与软参考。"""
+    """草稿、未发布、角色不符、学校账户不可见的 admin 样例不参与软参考。"""
     if example.meta.get("draft"):
+        return False
+    if getattr(example, "review_status", 1) == 0:
         return False
     if example.role_scope and ctx.role.value != example.role_scope:
         return False

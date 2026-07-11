@@ -162,6 +162,8 @@ async def badcase_to_sql_example_draft(
         meta_json=draft["meta_json"],
         role_scope=draft.get("role_scope"),
         degrade_priority=draft["degrade_priority"],
+        source_trace_id=trace_id,
+        review_status=0,
     )
     await session.commit()
     created = await repo.get_sql_example(example_id)

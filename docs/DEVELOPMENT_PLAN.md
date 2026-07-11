@@ -1997,15 +1997,28 @@ app/policy/effective_policy.py
 
 ## 14. Phase 2 backlog（MVP 之后）
 
+> **Phase 2 三大优先级**（Chart SSR、运营闭环、对外集成）详见 **[PHASE2_ROADMAP.md](./PHASE2_ROADMAP.md)**（v1.0，借鉴 [SQLBot](https://github.com/dataease/SQLBot) 产品化思路）。
+
+| 代号 | 主题 | 文档章节 |
+|------|------|----------|
+| **P2-A** | Chart SSR 统一渲染（Ask + Insight PDF） | [PHASE2_ROADMAP §2](./PHASE2_ROADMAP.md#2-p2-a--chart-ssr-统一渲染) |
+| **P2-B** | Badcase → L1/术语 运营闭环（越问越准） | [PHASE2_ROADMAP §3](./PHASE2_ROADMAP.md#3-p2-b--badcase--l1术语-运营闭环) |
+| **P2-C** | MCP / iframe 问数嵌入 | [PHASE2_ROADMAP §4](./PHASE2_ROADMAP.md#4-p2-c--mcp--iframe-对外集成) |
+
+**排期（估）**：约 6～8 周；P2-A 与 P2-B 可并行，P2-C 建议滞后 1～2 周。
+
+### 14.1 其他 Phase 2 项（延续原 backlog）
+
 - 对接体育后台 SSO  
 - 渠道商租户模型（新增 dimension，如 `channel_id`）  
 - **Git 业务仓库同步 + 代码知识图谱深化**（更多语言/parser、自动 suggestion 写 relation/metric）  
-- **SSE 流式**问数进度（对标 shopkeeper `/api/query`）  
+- ~~**SSE 流式**问数进度~~（MVP 已实现）  
 - Langfuse / OpenTelemetry  
-- **图表展示**（AntV / ECharts；详见 [CHART_VISUALIZATION_PLAN.md](./CHART_VISUALIZATION_PLAN.md)）  
+- **图表展示前端 AntV**（在线交互；SSR 见 P2-A，详见 [CHART_VISUALIZATION_PLAN.md](./CHART_VISUALIZATION_PLAN.md)）  
 - 可选 Qdrant 替代 ES 向量（大规模字段时）  
 - **P4 向量 episodic Memory**（全量对话 embedding 召回；须独立评测、合规与 **Prompt Injection** 评审）  
 - RAGFlow 文档问答与问数并列（仍与 meta 库解耦）  
+- Insight Engine Phase 2（邮件定时报告、Word 导出等，见 [DEEP_ANALYTICS_REPORT_PLAN.md](./DEEP_ANALYTICS_REPORT_PLAN.md)）
 
 ---
 
@@ -2192,7 +2205,7 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 
 ---
 
-**文档版本**：v2.8  
+**文档版本**：v2.9  
 **变更（v2.0）**：明确问数核心路线为 **元数据知识库 + 语义库（前端可配置）+ 向量/全文混合召回 + 多阶段 LangGraph**；计划由 4 周扩展为 **6 周**（第 3～6 周详述）；新增 §9  meta/语义库、§10.6 管理 API、§6.1 多阶段节点。  
 **变更（v2.1）**：§9.2 区分 **自动读取**（`table_comment_auto` / `column_comment_auto` / `data_type`）与 **人工定义**（`description_manual`）；人工非空优先；新增 `GET /introspect/tables/{tableName}` 与前端表名录入向导。  
 **变更（v2.2）**：计划扩展为 **7 周**；新增 **§11.5 Agent Memory**（P0～P3）；原评测周后移。  
@@ -2201,7 +2214,8 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 **变更（v2.6）**：总周期 **11 周**；**§11.7** Cursor 式 Agent（MySQL 工具）；sch_id 暂停；DataScope/评测顺延。  
 **变更（v2.7）**：总周期 **14 周**；新增 **§11.8 Git 业务代码知识图谱**（MySQL 图 + ES + 与 meta 融合，**不用 Codegraph/SQLite**）；**第 10～12 周**代码索引与 Agent 代码工具；DataScope → **第 13 周**，MVP → **第 14 周**；DDL 编号 `V009` 代码知识、`V010` DataScope。  
 **变更（v2.8）**：新增 **§11.9 Prompt Injection 防护**（威胁模型、Prompt 定界/召回清洗、与 DataScope/Memory 协同）；**第 13 周**并行落地 `app/security/` 与 LLM 触点改造；**第 14 周**增 `inj-*` 评测子集、`PROMPT_SECURITY.md`、阻断率 100% 验收。  
-**维护**：随 meta、Memory、Agent、Code、DataScope、**Prompt Security** 更新同步改第 2.6、6、9、11.5～11.9、12、15 节；每完成里程碑更新 [PROGRESS.md](./PROGRESS.md)。
+**变更（v2.9）**：新增 **Phase 2 三大优先级** — [PHASE2_ROADMAP.md](./PHASE2_ROADMAP.md)：**P2-A Chart SSR**、**P2-B Badcase/L1/术语运营闭环**、**P2-C MCP/iframe 嵌入**；§14 重组为优先级表 + 原 backlog §14.1。  
+**维护**：随 meta、Memory、Agent、Code、DataScope、**Prompt Security**、**Phase 2 路线图** 更新同步改第 2.6、6、9、11.5～11.9、12、14、15 节；每完成里程碑更新 [PROGRESS.md](./PROGRESS.md)。
 
 ---
 

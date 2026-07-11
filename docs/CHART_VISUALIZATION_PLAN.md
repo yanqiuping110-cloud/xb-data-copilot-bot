@@ -415,4 +415,16 @@ runner._finish_turn
 
 ---
 
-*最后更新：2026-06-27*
+## 7. Phase 2 · Chart SSR（P2-A）
+
+在线 `ChartSpec` + 前端 AntV/ECharts 已实现（本文 §1～6）。**Phase 2** 将新增 **Chart SSR 统一渲染**（借鉴 [SQLBot g2-ssr](https://github.com/dataease/SQLBot) 思路）：
+
+- `ChartSpec` → Node SSR 服务 → PNG/SVG  
+- **Ask**、**Insight PDF**、长报告 HTML **共用同一出图链路**  
+- 替代/降级现有 `matplotlib`（`chart_png.py`），解决中文与样式不一致  
+
+详见 **[PHASE2_ROADMAP.md §2](./PHASE2_ROADMAP.md#2-p2-a--chart-ssr-统一渲染)**。
+
+---
+
+*最后更新：2026-07-11*

@@ -1,0 +1,10 @@
+{
+  "name": "data-copilot-chart-ssr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ChartSpec SSR sidecar for Data Copilot",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

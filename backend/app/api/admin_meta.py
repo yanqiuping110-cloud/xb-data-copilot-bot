@@ -140,6 +140,9 @@ def _sql_example_response(row) -> SqlExampleResponse:
         meta_json=meta,
         role_scope=row.role_scope,
         degrade_priority=row.degrade_priority,
+        source_trace_id=row.source_trace_id,
+        review_status=row.review_status,
+        reviewed_at=row.reviewed_at.isoformat() if row.reviewed_at else None,
     )
 
 
