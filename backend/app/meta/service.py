@@ -9,7 +9,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.meta.effective import effective_description
+from app.meta.table_description import table_default_where, table_effective_description
 from app.meta.exceptions import MetaError
 from app.meta.introspector import BusinessSchemaIntrospector, IntrospectedTable
 from app.meta.repository import ColumnMetaRow, MetaRepository, TableMetaRow, dump_alias_json
@@ -146,9 +146,8 @@ def table_to_dict(table: TableMetaRow) -> dict:
         "bizDomain": table.biz_domain,
         "tableCommentAuto": table.table_comment_auto,
         "descriptionManual": table.description_manual,
-        "effectiveDescription": effective_description(
-            table.description_manual, table.table_comment_auto
-        ),
+        "effectiveDescription": table_effective_description(table),
+        "defaultWhere": table_default_where(table),
         "grain": table.grain,
         "schIdColumn": table.sch_id_column,
         "lastIntrospectedAt": table.last_introspected_at.isoformat()

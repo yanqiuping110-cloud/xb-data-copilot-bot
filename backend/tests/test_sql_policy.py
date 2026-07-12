@@ -29,6 +29,21 @@ def test_business_allows_select():
     assert_business_readonly_sql("SELECT 1")
 
 
+def test_business_allows_with_select():
+    assert_business_readonly_sql(
+        "WITH daily AS (SELECT DATE(created_at) AS d FROM sport_order GROUP BY 1) "
+        "SELECT * FROM daily"
+    )
+
+
+def test_business_rejects_with_insert_cte():
+    with pytest.raises(BusinessWriteForbiddenError) as exc:
+        assert_business_readonly_sql(
+            "WITH x AS (INSERT INTO t VALUES (1)) SELECT 1"
+        )
+    assert exc.value.code == "BUSINESS_DML_FORBIDDEN"
+
+
 def test_copilot_rejects_create_table():
     with pytest.raises(CopilotDdlForbiddenError) as exc:
         assert_copilot_no_ddl("CREATE TABLE x (id INT)")

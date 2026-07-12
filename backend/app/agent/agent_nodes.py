@@ -188,6 +188,7 @@ async def generate_sql_step(state: AskGraphState, config: RunnableConfig) -> dic
         question=question,
         context_text=context_text,
         plan_steps=plan_steps,
+        plan=plan,
         thinking_queue=thinking_queue,
     )
     gen_ms = int((time.perf_counter() - t0) * 1000)

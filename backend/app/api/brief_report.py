@@ -5,11 +5,12 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.brief_report.backgrounds import list_backgrounds, resolve_background_path
 from app.brief_report import repository as repo
+from app.brief_report.excel_service import content_disposition, handle_brief_report_excel
 from app.brief_report.service import (
     BriefReportError,
     handle_brief_report,
@@ -21,7 +22,12 @@ from app.brief_report.service import (
 from app.core.context import UserContext
 from app.core.security import get_current_user
 from app.db.copilot import get_copilot_session
-from app.schemas.brief_report import BriefReportListItem, BriefReportRequest, BriefReportResponse
+from app.schemas.brief_report import (
+    BriefReportExcelRequest,
+    BriefReportListItem,
+    BriefReportRequest,
+    BriefReportResponse,
+)
 from config.settings import Settings, get_settings
 
 router = APIRouter(prefix="/api/v1/ask/brief-report", tags=["brief-report"])
@@ -83,6 +89,29 @@ async def create_brief_report(
             status_code=exc.status_code,
             detail={"error": {"code": exc.code, "message": exc.message}},
         ) from exc
+
+
+@router.post("/export-excel")
+async def export_brief_report_excel(
+    body: BriefReportExcelRequest,
+    ctx: Annotated[UserContext, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_copilot_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+):
+    """将勾选的问数记录导出为多 Sheet Excel。"""
+    _ensure_enabled(settings)
+    try:
+        data, filename = await handle_brief_report_excel(body, ctx, session, settings)
+    except BriefReportError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"error": {"code": exc.code, "message": exc.message}},
+        ) from exc
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": content_disposition(filename)},
+    )
 
 
 @router.get("", response_model=list[BriefReportListItem], response_model_by_alias=True)

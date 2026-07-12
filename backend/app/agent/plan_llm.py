@@ -86,6 +86,35 @@ def _normalize_plan(raw: dict[str, Any]) -> dict[str, Any]:
     if join_key is not None:
         join_key = str(join_key).strip() or None
 
+    query_shape = raw.get("query_shape")
+    if query_shape is not None:
+        query_shape = str(query_shape).strip() or None
+    aggregate_strategy = raw.get("aggregate_strategy")
+    if aggregate_strategy is not None:
+        aggregate_strategy = str(aggregate_strategy).strip() or None
+    anchor_table = raw.get("anchor_table")
+    if anchor_table is not None:
+        anchor_table = str(anchor_table).strip() or None
+    structure_reason = raw.get("structure_reason")
+    if structure_reason is not None:
+        structure_reason = str(structure_reason).strip() or None
+
+    metric_groups_raw = raw.get("metric_groups")
+    metric_groups: list[dict[str, Any]] = []
+    if isinstance(metric_groups_raw, list):
+        for g in metric_groups_raw[:8]:
+            if not isinstance(g, dict):
+                continue
+            metric_groups.append(
+                {
+                    "source_tables": g.get("source_tables")
+                    if isinstance(g.get("source_tables"), list)
+                    else [],
+                    "anchor_table": g.get("anchor_table"),
+                    "biz_domain": g.get("biz_domain"),
+                }
+            )
+
     steps = raw.get("steps") or []
     if not isinstance(steps, list):
         steps = []
@@ -140,6 +169,16 @@ def _normalize_plan(raw: dict[str, Any]) -> dict[str, Any]:
         plan["assembly_mode"] = assembly_mode
     if join_key:
         plan["join_key"] = join_key
+    if query_shape:
+        plan["query_shape"] = query_shape
+    if aggregate_strategy:
+        plan["aggregate_strategy"] = aggregate_strategy
+    if anchor_table:
+        plan["anchor_table"] = anchor_table
+    if structure_reason:
+        plan["structure_reason"] = structure_reason
+    if metric_groups:
+        plan["metric_groups"] = metric_groups
     vis_raw = raw.get("visualization")
     if vis_raw is not None:
         plan["visualization"] = normalize_visualization_intent(vis_raw)
@@ -172,7 +211,15 @@ async def generate_plan_from_llm(
         "- multi_sql: boolean，是否必须「分步执行多条独立 SQL，再由程序组装结果」\n"
         "  · true：多个实体各自一条 SQL（禁止单条 SQL 用 IN 查多个活动再 GROUP BY），"
         "每步 sql_step=true，assembly_mode 填 join_by_date 或 pivot\n"
-        "  · false：一条 SQL 即可（可用 WITH/CTE），走常规生成\n"
+        "  · false：一条 SQL 即可，走常规生成\n"
+        "- aggregate_strategy: 聚合策略（可选）\n"
+        "  · single_sql：单条 JOIN/GROUP BY 即可\n"
+        "  · subquery_per_branch：多来源表无直连、仅经同一汇聚表关联时，"
+        "用标量子查询分路聚合（MySQL 5.7 优先，禁止多来源表同时 JOIN 再 SUM）\n"
+        "  · multi_sql_per_metric_group：按指标簇分步 SQL，程序组装\n"
+        "- query_shape: 可选，如 multi_branch_aggregate（多路经同一汇聚表、来源表彼此无表关系）\n"
+        "- anchor_table: 汇聚表名（如活动主表）\n"
+        "- metric_groups: 可选，每路来源 [{source_tables, anchor_table, biz_domain}]\n"
         "- assembly_mode: multi_sql=true 时填 join_by_date | pivot | join\n"
         "- join_key: 组装对齐键，中文别名如「日期」\n"
         "- metrics: 问句要求的全部指标/输出列（中文），如参与人数、各项目运动个数\n"
@@ -190,6 +237,12 @@ async def generate_plan_from_llm(
         "· 多实体对比且需按日对齐宽表 → multi_sql=true，每实体一步 sql_step\n"
         "· 问句含多个指标或多个分项 → metrics 与每步 goal 须全部列出，"
         "SQL 阶段需 JOIN/过滤维度，禁止用一个未分项的总聚合代替分项\n"
+        "· 若问句指标涉及多个来源表，且这些来源表在表关系元数据中彼此无直连，"
+        "仅通过同一汇聚表（如活动主表）关联："
+        "→ query_shape=multi_branch_aggregate，"
+        "aggregate_strategy=subquery_per_branch，multi_sql=false；"
+        "禁止将多来源表同时 JOIN 到汇聚表再 SUM/COUNT；"
+        "MySQL 5.7 用标量子查询分路聚合\n"
         "· 复杂多维但一条 SQL 可完成 → multi_sql=false, complexity=high, needs_tool 探索\n"
         "- visualization: 图表展示意图（必填）\n"
         "  · enabled: boolean，是否尝试生成图表（明细/列表/单值汇总 → false）\n"

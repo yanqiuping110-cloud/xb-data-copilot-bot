@@ -10,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import UserContext
 from app.meta.effective import effective_description
+from app.meta.table_description import (
+    table_default_where,
+    table_effective_description,
+)
 from app.meta.glossary_repository import GlossaryRepository
 from app.meta.glossary_service import format_glossary_prompt_lines, recall_glossary_for_question
 from app.meta.repository import ColumnMetaRow, MetaRepository, RelationRow, TableMetaRow, parse_alias_json
@@ -83,15 +87,16 @@ async def _collect_default_filter_hints(
     table_names: list[str],
 ) -> list[str]:
     """
-    收集候选表上 filter 角色字段的默认过滤说明。
-
-    运营在 description_manual 中维护「默认 status=1」等口径时，此处单独注入 Prompt。
+    收集候选表默认过滤说明：表级 default_where + filter 角色字段描述。
     """
     hints: list[str] = []
     for table_name in table_names:
         table = await repo.find_table_by_name(table_name)
         if not table:
             continue
+        where = table_default_where(table)
+        if where:
+            hints.append(f"- 使用 {table_name} 时必须附加 WHERE 条件：{where}")
         cols = await repo.list_columns(table.id)
         for col in cols:
             if col.status != 1 or col.column_role != "filter":
@@ -101,6 +106,113 @@ async def _collect_default_filter_hints(
                 continue
             hints.append(f"- 使用 {table_name} 时：{col.column_name} — {desc}")
     return hints
+
+
+def format_memory_reference_prompt(memory_prompt_text: str) -> str:
+    """会话记忆降为参考信息，置于 Prompt 末尾且不得覆盖元数据口径。"""
+    text = (memory_prompt_text or "").strip()
+    if not text:
+        return ""
+    return (
+        "【会话记忆（仅供参考，权重低于知识库召回与元数据 default_where；"
+        "不得据此省略表默认过滤或编造用户未提及的条件）】\n"
+        f"{text}"
+    )
+
+
+def apply_kb_recall_limits(
+    merged: MergedRecallContext,
+    settings: Settings,
+) -> MergedRecallContext:
+    """知识库直出：按召回分排序取 Top 表，不做二次加权筛选。"""
+    max_tables = settings.recall_top_k_table
+    table_names: list[str] = []
+    for t in sorted(merged.recalled_tables, key=lambda x: x.score, reverse=True):
+        if not _is_allowed_table(t.table_name):
+            continue
+        if t.table_name in table_names:
+            continue
+        table_names.append(t.table_name)
+        if len(table_names) >= max_tables:
+            break
+    merged.table_names = table_names
+    allowed_set = set(table_names)
+    merged.recalled_tables = [
+        t for t in merged.recalled_tables if t.table_name in allowed_set
+    ][:max_tables]
+    merged.columns = merged.columns[: settings.recall_top_k_column]
+    merged.metrics = merged.metrics[: settings.recall_top_k_metric]
+    merged.field_values = merged.field_values[: settings.recall_top_k_value]
+    return merged
+
+
+async def build_prompt_columns_from_kb_recall(
+    merged: MergedRecallContext,
+    repo: MetaRepository,
+    settings: Settings,
+) -> dict[str, list[str]]:
+    """从知识库字段召回 + 元数据必留列组装 Prompt 字段清单。"""
+    table_names = merged.table_names
+    prompt_columns: dict[str, list[str]] = {name: [] for name in table_names}
+    recalled_by_table: dict[str, list[str]] = {}
+    for col in merged.columns:
+        if col.table_name not in prompt_columns:
+            continue
+        recalled_by_table.setdefault(col.table_name, []).append(col.column_name)
+
+    rels = await repo.list_relations()
+    join_keys = _join_key_columns(rels, set(table_names))
+
+    for table_name in table_names:
+        table = await repo.find_table_by_name(table_name)
+        if not table or table.status != 1:
+            prompt_columns[table_name] = recalled_by_table.get(table_name, [])
+            continue
+        cols = await repo.list_columns(table.id)
+        must_include: list[str] = []
+        scored_names: list[str] = []
+        for col in cols:
+            if col.status != 1:
+                continue
+            is_join = (table_name, col.column_name) in join_keys
+            is_must = (
+                is_join
+                or col.column_role in ("filter", "pk", "fk", "time")
+                or col.column_name == table.sch_id_column
+            )
+            if is_must:
+                must_include.append(col.column_name)
+            elif col.recall_enabled == 1:
+                scored_names.append(col.column_name)
+
+        selected: list[str] = []
+        seen: set[str] = set()
+        for name in must_include + recalled_by_table.get(table_name, []) + scored_names:
+            if name in seen:
+                continue
+            seen.add(name)
+            selected.append(name)
+            if len(selected) >= settings.max_columns_per_table:
+                break
+        prompt_columns[table_name] = selected
+
+    return prompt_columns
+
+
+async def finalize_kb_recall(
+    merged: MergedRecallContext,
+    repo: MetaRepository,
+    settings: Settings,
+) -> MergedRecallContext:
+    """合并召回后定稿：限流 + 字段清单（替代 filter_tables/columns/metrics 节点）。"""
+    merged = apply_kb_recall_limits(merged, settings)
+    merged.prompt_columns = await build_prompt_columns_from_kb_recall(merged, repo, settings)
+    if merged.code_artifacts:
+        merged.recalled_tables = boost_tables_by_code_artifacts(
+            merged.recalled_tables,
+            merged.code_artifacts,
+        )
+    return merged
 
 
 def merge_retrieved_info(recall: HybridRecallResult) -> MergedRecallContext:
@@ -364,9 +476,7 @@ async def build_llm_context_text(
     scope_block = build_scope_prompt_sections(policy)
     if scope_block:
         parts.extend([scope_block, ""])
-    if memory_prompt_text:
-        parts.append(memory_prompt_text)
-        parts.append("")
+    memory_block = format_memory_reference_prompt(memory_prompt_text)
 
     if cfg.glossary_recall_enabled:
         try:
@@ -404,12 +514,15 @@ async def build_llm_context_text(
     if merged.tables:
         parts.append("【候选表说明（表级召回）】")
         for table in merged.tables:
-            desc = effective_description(table.description_manual, table.table_comment_auto)
+            desc = table_effective_description(table)
             if desc and cfg.prompt_sanitize_recall_enabled:
                 desc, _ = sanitize_recall_text(desc, enabled=True)
             line = f"- {table.table_name}"
             if desc:
                 line += f"：{desc}"
+            default_where = table_default_where(table)
+            if default_where:
+                line += f"；默认条件：{default_where}"
             if table.grain:
                 line += f"；粒度：{table.grain}"
             line += f"；学校字段：{table.sch_id_column}"
@@ -504,6 +617,10 @@ async def build_llm_context_text(
         for fv in merged.field_values[:10]:
             label = fv.display_label or fv.value_text
             parts.append(f"- {fv.table_name}.{fv.column_name}：「{label}」→ {fv.value_text}")
+        parts.append("")
+
+    if memory_block:
+        parts.append(memory_block)
         parts.append("")
 
     parts.append("【生成约束】")
@@ -713,8 +830,7 @@ async def build_agent_context_text(
         build_role_context_header(ctx, settings=cfg),
         "",
     ]
-    if memory_prompt_text:
-        parts.extend([memory_prompt_text, ""])
+    memory_block = format_memory_reference_prompt(memory_prompt_text)
 
     parts.extend(
         [
@@ -771,6 +887,14 @@ async def build_agent_context_text(
         parts.append("【问句规划 plan】")
         parts.append(f"- complexity: {plan.get('complexity')}")
         parts.append(f"- intent: {plan.get('intent')}")
+        if plan.get("query_shape"):
+            parts.append(f"- query_shape: {plan.get('query_shape')}")
+        if plan.get("aggregate_strategy"):
+            parts.append(f"- aggregate_strategy: {plan.get('aggregate_strategy')}")
+        if plan.get("anchor_table"):
+            parts.append(f"- anchor_table: {plan.get('anchor_table')}")
+        if plan.get("structure_reason"):
+            parts.append(f"- structure_reason: {plan.get('structure_reason')}")
         for step in plan.get("steps") or []:
             goals = step.get("goal") or ""
             tools = ", ".join(step.get("needs_tool") or [])
@@ -793,6 +917,9 @@ async def build_agent_context_text(
 
     parts.append(f"【用户问句】{question}")
     parts.append("")
+    if memory_block:
+        parts.append(memory_block)
+        parts.append("")
     parts.append("【生成约束】")
     parts.extend(build_llm_sql_generation_constraints(ctx, settings=cfg))
     return "\n".join(parts)

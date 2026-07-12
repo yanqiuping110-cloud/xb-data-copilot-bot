@@ -227,11 +227,19 @@
               >
                 报告分析
               </el-button>
+              <el-button
+                type="primary"
+                plain
+                class="toolbar-excel-btn"
+                @click="excelExportDrawerVisible = true"
+              >
+                导出 Excel
+              </el-button>
               <span v-if="briefReportTurnCount" class="toolbar-meta">
                 本对话 {{ briefReportTurnCount }} 条可纳入报告
               </span>
             </div>
-            <span class="toolbar-hint">勾选问数记录，生成 A4 竖版汇报 PDF</span>
+            <span class="toolbar-hint">勾选问数记录，生成 PDF 报告或导出 Excel 数据表</span>
           </div>
 
           <div class="input-panel">
@@ -282,6 +290,11 @@
       :session-id="sessionId"
       :messages="messages"
     />
+    <ExcelExportDrawer
+      v-model="excelExportDrawerVisible"
+      :session-id="sessionId"
+      :messages="messages"
+    />
   </div>
 </template>
 
@@ -306,6 +319,7 @@ import AskPipelineHeader from '../components/ask/AskPipelineHeader.vue'
 import AskThinkingPanel from '../components/ask/AskThinkingPanel.vue'
 import AskTimeline from '../components/ask/AskTimeline.vue'
 import BriefReportDrawer from '../components/brief-report/BriefReportDrawer.vue'
+import ExcelExportDrawer from '../components/brief-report/ExcelExportDrawer.vue'
 import { countReportableMessages } from '../utils/briefReportTurn.js'
 import {
   applyProgressEvent,
@@ -343,6 +357,7 @@ const prefForm = ref({
   answerStyle: null,
 })
 const briefReportDrawerVisible = ref(false)
+const excelExportDrawerVisible = ref(false)
 
 const briefReportTurnCount = computed(() => countReportableMessages(messages.value))
 
@@ -1137,6 +1152,14 @@ async function onMarkBadcase(msg) {
   font-weight: 600;
   font-size: 14px;
   padding: 10px 22px;
+  height: auto;
+  border-radius: 8px;
+}
+
+.toolbar-excel-btn {
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 18px;
   height: auto;
   border-radius: 8px;
 }

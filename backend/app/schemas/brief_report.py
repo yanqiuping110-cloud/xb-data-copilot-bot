@@ -47,3 +47,8 @@ class BriefReportListItem(CamelModel):
     pdf_page_count: int | None = None
     pdf_file_size: int | None = None
     created_at: str | None = None
+
+
+class BriefReportExcelRequest(CamelModel):
+    session_id: str
+    trace_ids: list[str]

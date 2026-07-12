@@ -23,14 +23,38 @@ def _policy_to_guard(exc: BusinessWriteForbiddenError) -> SqlGuardError:
     return SqlGuardError(exc.code, exc.message)
 
 
+def _cte_alias_names(parsed: exp.Expression) -> set[str]:
+    """CTE 别名不应计入物理表白名单。"""
+    names: set[str] = set()
+    for cte in parsed.find_all(exp.CTE):
+        alias = cte.alias_or_name
+        if alias:
+            names.add(str(alias).lower())
+    return names
+
+
 def _extract_tables(parsed: exp.Expression) -> set[str]:
-    """从 AST 提取物理表名（小写）。"""
+    """从 AST 提取物理表名（小写），排除 CTE 别名。"""
+    cte_names = _cte_alias_names(parsed)
     tables: set[str] = set()
     for node in parsed.find_all(exp.Table):
         name = node.name
-        if name:
+        if name and name.lower() not in cte_names:
             tables.add(name.lower())
     return tables
+
+
+def _outer_select(parsed: exp.Expression) -> exp.Select | None:
+    """取最外层 SELECT（含 WITH ... SELECT）。"""
+    if isinstance(parsed, exp.Select):
+        return parsed
+    if isinstance(parsed, exp.With) and isinstance(parsed.this, exp.Select):
+        return parsed.this
+    return None
+
+
+def _is_readonly_query(parsed: exp.Expression) -> bool:
+    return _outer_select(parsed) is not None
 
 
 def validate_sql(
@@ -59,8 +83,11 @@ def validate_sql(
     except Exception as exc:
         raise SqlGuardError("PARSE_ERROR", f"SQL 解析失败: {exc}") from exc
 
-    if not isinstance(parsed, exp.Select):
+    if not _is_readonly_query(parsed):
         raise SqlGuardError("NOT_SELECT", "仅允许 SELECT 查询")
+
+    outer = _outer_select(parsed)
+    assert outer is not None
 
     tables = _extract_tables(parsed)
     if not tables:
@@ -92,17 +119,29 @@ def validate_sql(
                 f"学校账户查询必须包含 {SCH_ID_COLUMN} 条件",
             )
 
-    if parsed.args.get("limit") is None:
-        parsed = parsed.limit(max_rows)
+    if outer.args.get("limit") is None:
+        limited = outer.limit(max_rows)
+        if isinstance(parsed, exp.With):
+            parsed.set("this", limited)
+        else:
+            parsed = limited
     else:
-        limit_node = parsed.args["limit"]
+        limit_node = outer.args["limit"]
         if isinstance(limit_node, exp.Limit):
             try:
                 val = int(limit_node.expression.this)
                 if val > max_rows:
-                    parsed = parsed.limit(max_rows)
+                    limited = outer.limit(max_rows)
+                    if isinstance(parsed, exp.With):
+                        parsed.set("this", limited)
+                    else:
+                        parsed = limited
             except (TypeError, ValueError, AttributeError):
-                parsed = parsed.limit(max_rows)
+                limited = outer.limit(max_rows)
+                if isinstance(parsed, exp.With):
+                    parsed.set("this", limited)
+                else:
+                    parsed = limited
 
     return parsed.sql(dialect="mysql")
 

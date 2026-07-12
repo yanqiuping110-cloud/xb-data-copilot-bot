@@ -1,5 +1,5 @@
 """
-LangGraph 多阶段召回节点：关键词 → 表/字段/指标召回 → 合并过滤 → 构建 LLM 上下文。
+LangGraph 多阶段召回节点：关键词 → 表/字段/指标召回 → 合并定稿 → 构建 LLM 上下文。
 """
 
 from __future__ import annotations
@@ -12,9 +12,7 @@ from app.agent.context_builder import (
     MergedRecallContext,
     build_llm_context_text,
     enrich_tables_from_mysql,
-    filter_columns_for_prompt,
-    filter_metrics,
-    filter_tables,
+    finalize_kb_recall,
     merge_retrieved_info,
     span_detail_from_merged,
 )
@@ -184,6 +182,8 @@ async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig
         recall_mode=state.get("recall_mode") or "hybrid",
     )
     merged = merge_retrieved_info(recall)
+    repo = MetaRepository(c["copilot_session"])
+    merged = await finalize_kb_recall(merged, repo, settings)
     await _span(
         config,
         "merge_retrieved_info",
@@ -196,68 +196,11 @@ async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig
             "value_count": len(merged.field_values),
             "code_recall_count": len(code_items),
             "code_recall_mode": code_mode,
+            "table_names": merged.table_names,
+            "prompt_column_counts": {k: len(v) for k, v in merged.prompt_columns.items()},
         },
     )
     return {"merged_recall": merged, "recall_code_artifacts": code_items}
-
-
-async def filter_tables_node(state: AskGraphState, config: RunnableConfig) -> dict:
-    """表级召回为主筛选候选表，并做关系扩展。"""
-    t0 = time.perf_counter()
-    c = _cfg(config)
-    settings: Settings = c["settings"]
-    merged = _get_merged(state)
-    if merged is None:
-        await _span(config, "filter_tables", t0, "empty")
-        return {}
-
-    repo = MetaRepository(c["copilot_session"])
-    relations = await repo.list_relations()
-    merged = filter_tables(merged, settings, relations=relations)
-    await _span(
-        config,
-        "filter_tables",
-        t0,
-        "success",
-        {"table_names": merged.table_names, "count": len(merged.table_names)},
-    )
-    return {"merged_recall": merged}
-
-
-async def filter_columns_node(state: AskGraphState, config: RunnableConfig) -> dict:
-    """在候选表内筛选 Prompt 字段。"""
-    t0 = time.perf_counter()
-    c = _cfg(config)
-    settings: Settings = c["settings"]
-    merged = _get_merged(state)
-    if merged is None:
-        await _span(config, "filter_columns", t0, "empty")
-        return {}
-
-    repo = MetaRepository(c["copilot_session"])
-    relations = await repo.list_relations()
-    merged = await filter_columns_for_prompt(merged, repo, settings, relations=relations)
-    await _span(
-        config,
-        "filter_columns",
-        t0,
-        "success",
-        {"prompt_column_counts": {k: len(v) for k, v in merged.prompt_columns.items()}},
-    )
-    return {"merged_recall": merged}
-
-
-async def filter_metrics_node(state: AskGraphState, config: RunnableConfig) -> dict:
-    """筛选 Top 指标。"""
-    t0 = time.perf_counter()
-    merged = _get_merged(state)
-    if merged is None:
-        await _span(config, "filter_metrics", t0, "empty")
-        return {}
-
-    merged = filter_metrics(merged, top_n=5)
-    await _span(config, "filter_metrics", t0, "success", {"metric_count": len(merged.metrics)})
-    return {"merged_recall": merged}
 
 
 async def build_llm_context(state: AskGraphState, config: RunnableConfig) -> dict:

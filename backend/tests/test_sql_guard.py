@@ -3,6 +3,7 @@
 import pytest
 
 from app.core.context import UserContext, UserRole
+from app.policy.effective_policy import EffectivePolicy
 from app.sql.guard import SqlGuardError, validate_sql
 from config.settings import Settings
 
@@ -72,3 +73,29 @@ def test_school_with_sch_id_ok():
         settings=_settings_sch_on(),
     )
     assert "sch_id" in sql.lower()
+
+
+def test_validate_with_cte_ok():
+    """WITH ... SELECT 应通过校验并在外层追加 LIMIT。"""
+    policy = EffectivePolicy(
+        is_admin_bypass=True,
+        allowed_tables={"sport_activity_new", "sport_activity_qzs_time"},
+    )
+    sql = validate_sql(
+        """
+        WITH punch AS (
+            SELECT activity_id, COUNT(*) AS cnt
+            FROM sport_activity_qzs_time
+            GROUP BY activity_id
+        )
+        SELECT an.activity_name, p.cnt
+        FROM sport_activity_new AS an
+        LEFT JOIN punch AS p ON an.id = p.activity_id
+        WHERE an.status = 1
+        """,
+        _ctx(UserRole.ADMIN),
+        max_rows=5000,
+        policy=policy,
+    )
+    assert "WITH" in sql.upper()
+    assert "LIMIT" in sql.upper()

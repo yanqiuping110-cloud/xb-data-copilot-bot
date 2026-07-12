@@ -59,6 +59,12 @@ def _normalize_sql(sql: str) -> str:
     return sql.strip().rstrip(";")
 
 
+def _is_select_or_with_query(sql: str) -> bool:
+    """业务库只读：允许 SELECT 或 WITH ... SELECT（CTE）。"""
+    upper = _normalize_sql(sql).upper().lstrip()
+    return upper.startswith("SELECT") or upper.startswith("WITH")
+
+
 def is_dml_statement(sql: str) -> bool:
     """是否为改数据的 DML。"""
     return bool(_FORBIDDEN_DML.search(_normalize_sql(sql)))
@@ -92,7 +98,7 @@ def assert_business_readonly_sql(sql: str) -> None:
         )
     if _FORBIDDEN_PRIVILEGE.search(stripped):
         raise BusinessWriteForbiddenError("BUSINESS_PRIVILEGE_FORBIDDEN", "业务库禁止权限变更语句")
-    if not stripped.upper().lstrip().startswith("SELECT"):
+    if not _is_select_or_with_query(stripped):
         raise BusinessWriteForbiddenError("BUSINESS_SELECT_ONLY", "业务库仅允许 SELECT 查询")
 
 

@@ -177,3 +177,51 @@ export async function downloadBriefReportPdf(reportId) {
   a.remove()
   URL.revokeObjectURL(objectUrl)
 }
+
+function parseFilenameFromDisposition(header) {
+  if (!header) return null
+  const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8?.[1]) {
+    try {
+      return decodeURIComponent(utf8[1].trim())
+    } catch {
+      /* ignore */
+    }
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i)
+  return plain?.[1] || null
+}
+
+export async function downloadBriefReportExcel({ sessionId, traceIds }) {
+  const token = localStorage.getItem('accessToken')
+  const headers = { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const url = `${API_BASE}/api/v1/ask/brief-report/export-excel`
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ sessionId, traceIds }),
+  })
+  if (!resp.ok) {
+    let message = 'Excel 导出失败'
+    try {
+      const data = await resp.json()
+      message = data?.error?.message || data?.detail?.error?.message || message
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message)
+  }
+  const blob = await resp.blob()
+  const filename =
+    parseFilenameFromDisposition(resp.headers.get('Content-Disposition')) || 'ask-export.xlsx'
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objectUrl)
+}

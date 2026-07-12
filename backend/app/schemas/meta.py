@@ -71,6 +71,7 @@ class TableMetaResponse(CamelModel):
     table_comment_auto: str | None = None
     description_manual: str | None = None
     effective_description: str | None = None
+    default_where: str | None = None
     grain: str | None = None
     sch_id_column: str
     last_introspected_at: str | None = None

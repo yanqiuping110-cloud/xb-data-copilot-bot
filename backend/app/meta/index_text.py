@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from app.meta.effective import effective_description
+from app.meta.table_description import parse_table_description_manual
 from app.meta.repository import (
     IndexableColumnRow,
     IndexableFieldValueRow,
@@ -15,11 +16,15 @@ from app.meta.repository import (
 
 
 def build_table_search_text(row: IndexableTableRow) -> str:
-    """表级向量索引文本：表名 + 有效描述 + 域/角色/粒度 + 字段摘要。"""
+    """表级向量索引文本：表名 + 有效描述 + default_where + 域/角色/粒度 + 字段摘要。"""
     parts = [row.table_name]
-    desc = effective_description(row.description_manual, row.table_comment_auto)
+    desc, default_where = parse_table_description_manual(row.description_manual)
+    if not desc:
+        desc = effective_description(row.description_manual, row.table_comment_auto)
     if desc:
         parts.append(desc)
+    if default_where:
+        parts.append(f"默认条件 {default_where}")
     if row.biz_domain:
         parts.append(row.biz_domain)
     if row.table_role:

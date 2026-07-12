@@ -43,9 +43,6 @@ from app.agent.chart_nodes import build_chart
 from app.agent.recall_nodes import (
     build_llm_context,
     extract_keywords_node,
-    filter_columns_node,
-    filter_metrics_node,
-    filter_tables_node,
     merge_retrieved_info_node,
     recall_field_values,
     recall_metrics,
@@ -77,10 +74,7 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
         graph.add_node("do_recall_columns", recall_columns)  # 字段召回（限定在表级候选内）
     graph.add_node("do_recall_metrics", recall_metrics)  # 指标向量/关键词召回
     graph.add_node("do_recall_field_values", recall_field_values)  # 字段取值全文/关键词召回
-    graph.add_node("merge_retrieved_info", merge_retrieved_info_node)  # 合并多路召回（含代码 artifact）
-    graph.add_node("filter_tables", filter_tables_node)  # 筛选候选表并做关系扩展
-    graph.add_node("filter_columns", filter_columns_node)  # 在候选表内筛选 Prompt 字段
-    graph.add_node("filter_metrics", filter_metrics_node)  # 保留 Top 指标
+    graph.add_node("merge_retrieved_info", merge_retrieved_info_node)  # 合并多路召回并定稿（含表/字段限流）
     graph.add_node("do_recall_sql_examples", recall_sql_examples_node)  # L1 样例知识库召回
     graph.add_node("build_llm_context", build_llm_context)  # 拼装结构化 Prompt 上下文
     graph.add_node("select_l1_examples", select_l1_examples_node)  # LLM 精选 L1 样例
@@ -115,10 +109,7 @@ def build_ask_graph(*, recall_columns_enabled: bool | None = None):
         graph.add_edge("do_recall_tables", "do_recall_metrics")
     graph.add_edge("do_recall_metrics", "do_recall_field_values")
     graph.add_edge("do_recall_field_values", "merge_retrieved_info")
-    graph.add_edge("merge_retrieved_info", "filter_tables")
-    graph.add_edge("filter_tables", "filter_columns")
-    graph.add_edge("filter_columns", "filter_metrics")
-    graph.add_edge("filter_metrics", "do_recall_sql_examples")
+    graph.add_edge("merge_retrieved_info", "do_recall_sql_examples")
     graph.add_edge("do_recall_sql_examples", "build_llm_context")
     graph.add_edge("build_llm_context", "select_l1_examples")
     graph.add_edge("select_l1_examples", "plan_question")

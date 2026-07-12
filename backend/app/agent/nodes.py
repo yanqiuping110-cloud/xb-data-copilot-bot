@@ -64,6 +64,15 @@ def _append_plan_context(context_text: str, state: AskGraphState) -> str:
     if plan:
         parts.append(f"- complexity: {plan.get('complexity')}")
         parts.append(f"- intent: {plan.get('intent')}")
+        if plan.get("aggregate_strategy"):
+            parts.append(f"- aggregate_strategy: {plan.get('aggregate_strategy')}")
+        if plan.get("structure_reason"):
+            parts.append(f"- structure_reason: {plan.get('structure_reason')}")
+        if plan.get("aggregate_strategy") == "subquery_per_branch":
+            parts.append(
+                "- 禁止继承上一轮多表 JOIN 结构；须以汇聚表为主表，"
+                "每路来源表用标量子查询聚合，不可多来源表同时 JOIN 后 SUM"
+            )
         for step in plan.get("steps") or []:
             goals = step.get("goal") or ""
             tools = ", ".join(step.get("needs_tool") or [])
@@ -155,6 +164,7 @@ async def generate_sql(state: AskGraphState, config: RunnableConfig) -> dict:
         question=question,
         context_text=context_text,
         compact=False,
+        plan=state.get("plan"),
         thinking_queue=thinking_queue,
     )
     gen_ms = int((time.perf_counter() - t0) * 1000)

@@ -53,6 +53,15 @@ def build_llm(settings: Settings) -> ChatOpenAI:
     return ChatOpenAI(**kwargs)
 
 
+_SUBQUERY_PER_BRANCH_HINT = (
+    "【分路聚合硬性约束】问句涉及多个来源表，彼此无表关系、仅经同一汇聚表关联："
+    "必须以汇聚表为 FROM 主表，每个来源表的指标用独立标量子查询聚合（MySQL 5.7），"
+    "禁止将多个来源表同时 LEFT/INNER JOIN 到汇聚表后再 SUM/COUNT（会导致行膨胀）。"
+    "禁止照搬上一轮会话 SQL 中的多表 JOIN 写法。"
+    "人数类指标仍可用 COUNT(DISTINCT ...) 放在子查询内。"
+)
+
+
 async def generate_sql_from_llm(
     *,
     settings: Settings,
@@ -61,6 +70,7 @@ async def generate_sql_from_llm(
     compact: bool = False,
     correction_hint: str | None = None,
     previous_sql: str | None = None,
+    plan: dict | None = None,
     thinking_queue: Any | None = None,
 ) -> tuple[str | None, int | None, int | None]:
     """
@@ -76,6 +86,8 @@ async def generate_sql_from_llm(
         + "SELECT 列别名优先使用中文；仅当用户明确要求英文表头时才使用英文别名。"
         + LLM_JOIN_ALIAS_SYSTEM_HINT
     )
+    if (plan or {}).get("aggregate_strategy") == "subquery_per_branch":
+        system += _SUBQUERY_PER_BRANCH_HINT
     bounded_q = wrap_untrusted(
         "user_question",
         question,
@@ -115,6 +127,7 @@ async def generate_sql_step_from_llm(
     question: str,
     context_text: str,
     plan_steps: list[dict],
+    plan: dict | None = None,
     thinking_queue: Any | None = None,
 ) -> tuple[str | None, list[dict], int | None, int | None]:
     """
@@ -131,18 +144,20 @@ async def generate_sql_step_from_llm(
     )
     system = (
         "你是企业问数 SQL 生成助手。根据规划步骤与用户问题生成一条可执行的 MySQL 只读 SELECT。"
-        "优先写简单 SQL：单条 SELECT + WHERE/GROUP BY 即可；仅在步骤明确需要时才使用 WITH CTE。"
+        "优先写简单 SQL：单条 SELECT + WHERE/GROUP BY 即可。"
         "禁止无关 CROSS JOIN、笛卡尔积或过度嵌套；多维度对比用 GROUP BY 或条件聚合。"
         "趋势类问题按上下文中的日期/时间列 GROUP BY；"
         "人数类指标用 COUNT(DISTINCT 清单中的人员标识列) 或 COUNT(*) 视字段含义而定。"
         + _CONTEXT_ONLY_HINT
         + LLM_JOIN_ALIAS_SYSTEM_HINT
     )
+    if (plan or {}).get("aggregate_strategy") == "subquery_per_branch":
+        system += _SUBQUERY_PER_BRANCH_HINT
     user = (
         f"{context_text}\n\n"
         f"规划步骤：\n{steps_text}\n\n"
         f"用户问题：{question}\n\n"
-        "请直接输出一条完整 SQL（可用 WITH 或单条 SELECT），列别名优先中文。"
+        "请直接输出一条完整 SQL（单条 SELECT，必要时用标量子查询分路聚合），列别名优先中文。"
     )
     from app.agent.llm_client import complete_messages
 

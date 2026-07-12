@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.meta.effective import effective_description
+from app.meta.table_description import table_default_where, table_effective_description
 from app.meta.repository import MetaRepository, RelationRow, parse_alias_json
 from app.sql.whitelist import get_allowed_tables
 from config.settings import Settings
@@ -45,7 +46,8 @@ async def describe_table(
         "table": row.table_name,
         "table_role": row.table_role,
         "grain": row.grain,
-        "description": effective_description(row.description_manual, row.table_comment_auto),
+        "description": table_effective_description(row),
+        "default_where": table_default_where(row),
         "sch_id_column": row.sch_id_column,
         "column_count": len(active_cols),
         "columns": [

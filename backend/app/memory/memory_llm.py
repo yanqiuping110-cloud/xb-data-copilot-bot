@@ -201,7 +201,7 @@ def build_memory_prompt_from_star(
 ) -> str:
     """按 LLM 决策拼装下游 memory prompt。"""
     parts: list[str] = [
-        "【记忆上下文（STAR · 供召回/规划/SQL 参考；不得绕过权限与 sql_guard）】",
+        "【记忆上下文（STAR · 仅供参考；不得绕过权限、sql_guard 或表 default_where）】",
     ]
     if star.get("situation"):
         parts.append(f"- 情境(S)：{star['situation'][:400]}")
@@ -379,6 +379,8 @@ async def process_memory_context_llm(
         "3. 用户未要求分项时 dimension_grain=platform 或 none，禁止擅自按项目/学校拆分\n"
         "4. 话题切换（如从趋势切到留存）→ reference_type=new_topic，不继承上一轮 GROUP BY 粒度\n"
         "5. resolved_question 须可独立执行，补全指代但不得编造未提及的过滤条件\n"
+        "6. 表元数据 default_where / filter 角色默认条件始终适用；记忆不得要求省略这些条件\n"
+        "7. 记忆仅作参考，权重低于知识库召回；禁止在 result 中写「无需 WHERE」除非用户明确要求全量含脏数据\n"
         "输出 JSON 字段：\n"
         '{"star":{"situation":"...","task":"...","action":"...","result":"..."},'
         '"reference_type":"none|new_topic|soft_followup|explicit_followup|repeat_last",'

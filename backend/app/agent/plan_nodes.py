@@ -13,6 +13,7 @@ from langchain_core.runnables import RunnableConfig
 
 from app.agent.context_builder import MergedRecallContext
 from app.agent.l1_nodes import _dicts_to_candidates
+from app.agent.plan_analyzer import apply_plan_structure_analysis, detect_multi_branch_aggregate
 from app.agent.plan_compare import (
     enrich_sql_steps_from_reference_sql,
     get_sql_execution_steps,
@@ -23,7 +24,38 @@ from app.agent.chart_builder import infer_visualization_from_question, normalize
 from app.agent.plan_llm import generate_plan_from_llm
 from app.agent.state import AskGraphState
 from app.ask.l1_service import primary_l1_sql
+from app.meta.repository import MetaRepository
 from config.settings import Settings
+
+
+async def _analyze_plan_structure(
+    plan: dict[str, Any],
+    merged: MergedRecallContext | None,
+    copilot_session,
+) -> dict[str, Any]:
+    """Python 结构分析：多来源表无直连时强制 subquery_per_branch。"""
+    if merged is None or not merged.table_names:
+        return plan
+
+    repo = MetaRepository(copilot_session)
+    relations = await repo.list_relations()
+    table_meta: dict[str, Any] = {}
+    column_map: dict[str, Any] = {}
+    for name in merged.table_names[:12]:
+        row = await repo.find_table_by_name(name)
+        if row is None:
+            continue
+        table_meta[row.table_name] = row
+        column_map[row.table_name] = await repo.get_column_map(row.id)
+
+    analysis = detect_multi_branch_aggregate(
+        recalled_tables=merged.table_names,
+        relations=relations,
+        table_meta=table_meta,
+        column_map=column_map,
+        metrics=plan.get("metrics"),
+    )
+    return apply_plan_structure_analysis(plan, analysis)
 
 
 def _seed_recall_summary(merged: MergedRecallContext | None) -> str:
@@ -79,6 +111,27 @@ def _ensure_plan_visualization(plan: dict[str, Any], question: str) -> dict[str,
     return plan
 
 
+def _plan_requires_agent_path(plan: dict[str, Any]) -> bool:
+    """结构复杂或需分路聚合时不得走 plan_skipped 快路径。"""
+    if plan.get("aggregate_strategy") == "subquery_per_branch":
+        return True
+    if plan.get("query_shape") == "multi_branch_aggregate":
+        return True
+    return False
+
+
+def _should_skip_plan(plan: dict[str, Any]) -> bool:
+    if _plan_requires_agent_path(plan):
+        return False
+    sql_exec_count = len(get_sql_execution_steps(plan))
+    multi_sql = plan_requires_multi_sql(plan)
+    return (
+        plan.get("complexity") == "low"
+        and not multi_sql
+        and sql_exec_count <= 1
+    )
+
+
 async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
     """
     问句规划：LLM 判定复杂度、multi_sql、步骤分解。
@@ -118,13 +171,31 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         plan = _fallback_plan()
 
     plan = enrich_sql_steps_from_reference_sql(plan, l1_sql)
+    plan = await _analyze_plan_structure(plan, merged, c["copilot_session"])
     plan = _ensure_plan_visualization(plan, question)
 
     sql_exec_count = len(get_sql_execution_steps(plan))
     multi_sql = plan_requires_multi_sql(plan)
     l1_ids = [ex.id for ex in selected_l1]
+    skip_plan = _should_skip_plan(plan)
 
-    if plan.get("complexity") == "low" and not multi_sql and sql_exec_count <= 1:
+    span_plan = {
+        "complexity": plan.get("complexity"),
+        "intent": plan.get("intent"),
+        "multi_sql": multi_sql,
+        "query_shape": plan.get("query_shape"),
+        "aggregate_strategy": plan.get("aggregate_strategy"),
+        "anchor_table": plan.get("anchor_table"),
+        "structure_reason": plan.get("structure_reason"),
+        "l1_selected_ids": l1_ids,
+        "l1_count": len(selected_l1),
+        "context_chars": len(context_text),
+        "step_count": len(plan.get("steps") or []),
+        "sql_exec_step_count": sql_exec_count,
+        "plan": plan,
+    }
+
+    if skip_plan:
         await _span(
             config,
             "plan_question",
@@ -133,11 +204,8 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
             {
                 "skipped": True,
                 "reason": "llm_low_single_sql",
-                "l1_selected_ids": l1_ids,
-                "l1_count": len(selected_l1),
                 "multi_sql": False,
-                "context_chars": len(context_text),
-                "plan": plan,
+                **span_plan,
             },
         )
         return {"plan_skipped": True, "plan": plan, "visualization_intent": plan.get("visualization")}
@@ -149,15 +217,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         "success",
         {
             "skipped": False,
-            "complexity": plan.get("complexity"),
-            "intent": plan.get("intent"),
-            "multi_sql": multi_sql,
-            "l1_selected_ids": l1_ids,
-            "l1_count": len(selected_l1),
-            "context_chars": len(context_text),
-            "step_count": len(plan.get("steps") or []),
-            "sql_exec_step_count": sql_exec_count,
-            "plan": plan,
+            **span_plan,
         },
     )
     plan = _inject_code_sources(plan, merged)
