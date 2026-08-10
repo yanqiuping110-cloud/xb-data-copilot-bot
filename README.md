@@ -1,28 +1,69 @@
-# Data Copilot · 企业级智能问数平台
+# Data Copilot
 
-> **让业务人员用自然语言查数据，把固定报表开发周期从「周」缩短到「分钟」。**
+### Enterprise Natural-Language Analytics · 企业级智能问数平台
 
-Data Copilot 是一套面向中大型业务系统的 **NL2SQL（自然语言转 SQL）** 子产品：产品、运营、业务域管理员无需写 SQL，即可在**动态数据权限**边界内自助查询核心业务指标。平台以 **元数据治理 + 混合召回 + LangGraph 多阶段推理 + SQL 安全网关 + Prompt Injection 纵深防御** 为核心，兼顾准确率、可审计性与企业落地成本。
+<p align="center">
+  <img src="https://img.shields.io/badge/License-Proprietary-blue?style=flat-square" alt="License"/>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue"/>
+  <img src="https://img.shields.io/badge/FastAPI-Async-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"/>
+  <img src="https://img.shields.io/badge/LangGraph-Multi--Agent-1C3C3C?style=flat-square" alt="LangGraph"/>
+  <img src="https://img.shields.io/badge/Security-SQL%20Guard%20%7C%20DataScope-b71c1c?style=flat-square" alt="Security"/>
+</p>
 
-**当前里程碑（14 周 MVP）**：Agent Plan/Tool Loop、Git 代码知识图谱、配置驱动 **DataScope**、**Prompt 定界/召回清洗** 与注入攻击评测子集均已落地；详见 [docs/PROGRESS.md](docs/PROGRESS.md)。
+<p align="center">
+  <strong>用自然语言查询企业数据</strong> — 把固定报表交付周期从「周」缩短到「分钟」。<br/>
+  面向中大型业务系统的 NL2SQL 子产品：元数据治理、混合召回、多阶段推理、SQL 安全网关与动态行级权限一体交付。
+</p>
+
+<p align="center">
+  <a href="#产品一览">产品一览</a> ·
+  <a href="#系统配置--ai-模型与多引擎数据源">系统配置</a> ·
+  <a href="#核心价值">核心价值</a> ·
+  <a href="#系统架构">架构</a> ·
+  <a href="#问数链路langgraph">问数链路</a> ·
+  <a href="#快速开始">快速开始</a>
+</p>
 
 ---
 
 ## 产品一览
 
-问一句业务问题，系统自动完成 **记忆整理 → 知识库召回 → L1 样例精选 → SQL 规划与执行 → 图表生成与自然语言解读**，全程 SSE 流式可观测。
+问一句业务问题，系统自动完成 **记忆整理 → 知识库召回 → L1 样例精选 → SQL 规划与执行 → 图表生成与自然语言解读**，全程 SSE 流式可观测，每一步耗时与大模型推理过程可审计。
 
 <p align="center">
   <img src="docs/images/ask-result.png" alt="问数结果：自然语言解读、SQL、图表与表格" width="920"/>
 </p>
-
-<p align="center"><em>问数结果 · 一句话解读 + SQL（ADMIN 可见）+ 自动图表/表格 + 反馈闭环</em></p>
+<p align="center"><em>问数工作台 · 自然语言解读 + SQL（ADMIN）+ 自动图表 / 表格 + 反馈闭环</em></p>
 
 <p align="center">
   <img src="docs/images/ask-pipeline.png" alt="执行详情：各节点耗时与合计" width="920"/>
 </p>
+<p align="center"><em>执行详情 · 节点级进度与耗时，大模型推理过程可折叠查看</em></p>
 
-<p align="center"><em>执行详情 · 每步进度与耗时（STAR 记忆、L1 召回/精选、混合检索等），合计耗时一目了然</em></p>
+---
+
+## 系统配置 · AI 模型与多引擎数据源
+
+管理台以 **Catalog（YAML）** 为唯一真相源配置 LLM 供应商与业务库类型，避免在业务代码里硬编码方言与厂商细节。支持 DeepSeek / 阿里云百炼 / OpenAI / Ollama 等模型接入，以及 MySQL、PostgreSQL、SQL Server、Oracle、ClickHouse、Doris、StarRocks、本地 Excel/CSV 等多引擎数据源；问数 SQL 生成、校验与执行均跟随当前默认库的方言与版本能力。
+
+<p align="center">
+  <img src="docs/images/admin-llm-providers.png" alt="添加模型：选择供应商向导" width="920"/>
+</p>
+<p align="center"><em>AI 模型配置 · 供应商卡片选型 · Chat / Embedding 角色分离 · 连通测试后落库</em></p>
+
+<p align="center">
+  <img src="docs/images/admin-datasource-wizard.png" alt="新建数据源：多引擎配置向导" width="920"/>
+</p>
+<p align="center"><em>业务数据源 · 多引擎向导 · 一键校验 · 设为默认问数库后即时切换方言上下文</em></p>
+
+| 能力 | 说明 |
+|------|------|
+| LLM Catalog | `llm_providers.yaml` 驱动供应商列表、默认 API Base、建议模型 |
+| Datasource Catalog | `datasource_types.yaml` 驱动可选引擎、表单 Schema、默认端口 |
+| 密钥保护 | 配置项密文落库（Fernet），接口仅回显掩码 |
+| SQL 方言 | `ResolvedSqlContext` 贯通 Prompt / sqlglot / Guard / 执行器 |
+| 可选驱动 | `pip install -e ".[db-pg,db-mssql,db-ch,db-oracle,db-excel]"` |
 
 ---
 
@@ -36,8 +77,11 @@ Data Copilot 是一套面向中大型业务系统的 **NL2SQL（自然语言转 
 | 可观测 | 黑盒接口，问题难追溯 | 全链路 Trace / Span / Audit，支持 badcase 闭环 |
 | 知识沉淀 | 业务逻辑锁死在 Java/SQL | Git 代码知识图谱 + 表字段 meta 融合召回 |
 | LLM 风险 | 易被注入指令绕过业务规则 | **不信任模型输出**：Prompt 定界 + sql_guard 执行层 Fail-closed |
+| 数据源扩展 | 改代码适配新库 | Catalog + Connector 注册，方言随默认库切换 |
 
 **典型场景**：「本部门本月核心指标是多少？」「最近 7 天每日趋势？」「全平台昨日汇总？」—— 系统自动理解意图、经动态权限校验后生成只读 SQL，返回表格与自然语言解读。
+
+**当前里程碑**：Agent Plan/Tool Loop、Git 代码知识图谱、配置驱动 DataScope、Prompt 定界与注入评测、**多引擎数据源 / LLM 管理台** 已落地；详见 [docs/PROGRESS.md](docs/PROGRESS.md)。
 
 ---
 
@@ -47,13 +91,14 @@ Data Copilot 是一套面向中大型业务系统的 **NL2SQL（自然语言转 
 flowchart TB
     subgraph Client["接入层"]
         UI["Vue3 问数控制台"]
-        Admin["元数据 / 语义 / 用户管理"]
+        Admin["元数据 / 语义 / 系统配置"]
     end
 
     subgraph API["应用层 · FastAPI"]
         Auth["JWT 认证 · 多角色 RBAC"]
         Ask["/ask 问数编排"]
         Meta["/admin/meta 元数据 API"]
+        Sys["/admin/system LLM · 数据源"]
         Scope["/admin  DataScope API"]
         Obs["可观测 · Tracer"]
     end
@@ -78,13 +123,14 @@ flowchart TB
     end
 
     subgraph Data["数据层"]
-        BizDB[("MySQL 业务库<br/>只读账号 · 表白名单")]
-        LLM["LLM / Embedding<br/>OpenAI 兼容 API"]
+        BizDB[("业务库 · 多引擎只读<br/>MySQL / PG / CH / Excel …")]
+        LLM["LLM / Embedding<br/>Catalog 配置 · OpenAI 兼容"]
     end
 
     UI --> Auth
     Admin --> Meta
     Admin --> Scope
+    Admin --> Sys
     UI --> Ask
     Ask --> Agent
     Auth --> Ask
@@ -101,7 +147,9 @@ flowchart TB
     Exec --> BizDB
     Obs --> MySQLMeta
     Meta --> MySQLMeta
-    Meta --> MySQLMeta
+    Sys --> MySQLMeta
+    Sys --> LLM
+    Sys --> BizDB
 ```
 
 ### 部署拓扑
@@ -111,8 +159,9 @@ flowchart TB
 │  应用宿主机                                                           │
 │  · Python Uvicorn :8000    ← 问数 API（开发 / Docker 生产）           │
 │  · Vue Vite :5173          ← 前端（开发）；生产为静态资源 + Nginx      │
-│  · Ollama / 内网 LLM       ← 大模型 + Embedding（OpenAI 兼容协议）     │
-│  · MySQL 5.7+              ← 业务只读库 + copilot 治理库（同实例可共存）  │
+│  · Ollama / 内网 LLM       ← 大模型 + Embedding（亦可在管理台配置）    │
+│  · MySQL 5.7+              ← copilot 治理库（元数据 · 审计 · 系统配置） │
+│  · 业务库（多引擎只读）    ← MySQL / PG / SQL Server / CH / Excel …   │
 │  · Zvec（默认）            ← 问数元数据向量/全文索引，数据目录 data/zvec   │
 └───────────────────────────────┬──────────────────────────────────────┘
                                 │ host.docker.internal（可选）
@@ -123,7 +172,7 @@ flowchart TB
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**设计原则**：业务 MySQL 不容器化，与现网一致；问数仅在独立库 `copilot` 中建表，对业务库 **零侵入、只读访问**。
+**设计原则**：业务库与治理库分离；问数仅在独立库 `copilot` 中建表，对业务库 **零侵入、只读访问**；LLM 与数据源连接信息经管理台加密落库，运行时按默认项解析。
 
 ---
 
@@ -183,7 +232,7 @@ sequenceDiagram
     participant Zvec as Zvec 索引
     participant LLM as 大模型
     participant Guard as SQL Guard
-    participant DB as 业务 MySQL
+    participant DB as 业务只读库
 
     User->>FE: 输入自然语言问题
     FE->>API: POST /api/v1/ask (+ JWT)

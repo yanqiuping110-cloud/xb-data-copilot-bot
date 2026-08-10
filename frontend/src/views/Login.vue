@@ -11,7 +11,7 @@
         <div class="brand-inner">
           <p class="brand-kicker">Enterprise Analytics</p>
           <h1 class="brand-title">Data Copilot</h1>
-          <p class="brand-subtitle">企业级智能问数与深度洞察平台</p>
+          <p class="brand-subtitle">企业级智能问数与数据治理平台</p>
           <ul class="brand-points">
             <li>
               <span class="point-icon">◆</span>
@@ -19,7 +19,7 @@
             </li>
             <li>
               <span class="point-icon">◆</span>
-              <span>Insight Engine · 多章深度报告 · PDF 交付</span>
+              <span>多引擎数据源 · Catalog 驱动模型配置</span>
             </li>
             <li>
               <span class="point-icon">◆</span>

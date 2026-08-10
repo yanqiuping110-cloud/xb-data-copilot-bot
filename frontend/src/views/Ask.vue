@@ -30,9 +30,6 @@
         >
           元数据管理
         </el-button>
-        <el-button link type="primary" @click="router.push('/insight')">
-          深度洞察
-        </el-button>
         <el-button link type="primary" @click="logout">退出</el-button>
       </div>
     </header>

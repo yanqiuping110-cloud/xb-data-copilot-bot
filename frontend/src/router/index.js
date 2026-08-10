@@ -22,8 +22,7 @@ const routes = [
   },
   {
     path: '/insight',
-    name: 'InsightEngine',
-    component: () => import('../views/InsightEngine.vue'),
+    redirect: '/ask',
   },
   {
     path: '/admin/users',
