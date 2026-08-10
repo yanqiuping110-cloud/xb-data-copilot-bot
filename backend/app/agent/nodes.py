@@ -253,9 +253,17 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
         }
 
     try:
+        from app.system.sql_context import resolve_sql_context
+
+        sql_ctx = resolve_sql_context(settings)
         policy = getattr(ctx, "effective_policy", None)
         final_sql = validate_sql(
-            raw, ctx, max_rows=settings.sql_max_rows, settings=settings, policy=policy
+            raw,
+            ctx,
+            max_rows=settings.sql_max_rows,
+            settings=settings,
+            policy=policy,
+            sql_ctx=sql_ctx,
         )
         final_sql = strip_sch_id_for_broad_roles(final_sql, ctx, settings=settings)
 
@@ -266,7 +274,7 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
             )
         )
         column_map = await meta_repo.load_active_column_names(table_names)
-        validate_sql_columns(final_sql, column_map)
+        validate_sql_columns(final_sql, column_map, sql_ctx=sql_ctx)
 
         found = re.findall(r"\bFROM\s+([a-zA-Z0-9_]+)", final_sql, flags=re.IGNORECASE)
         tables_used = ",".join(dict.fromkeys(t.lower() for t in found))
@@ -312,8 +320,13 @@ async def apply_policy(state: AskGraphState, config: RunnableConfig) -> dict:
 
     if policy is not None and settings.policy_data_scope_enabled and not policy.is_admin_bypass:
         try:
-            validate_scope_literals(final_sql, policy)
-            scoped_sql, scope_params = apply_scope_to_sql(final_sql, policy)
+            from app.system.sql_context import resolve_sql_context
+
+            sql_ctx = resolve_sql_context(settings)
+            validate_scope_literals(final_sql, policy, sql_ctx=sql_ctx, settings=settings)
+            scoped_sql, scope_params = apply_scope_to_sql(
+                final_sql, policy, sql_ctx=sql_ctx, settings=settings
+            )
             params.update(scope_params)
             detail = {
                 "scope_injected": scoped_sql != final_sql,

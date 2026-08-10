@@ -1,0 +1,157 @@
+# 业务库类型目录（唯一真相源）。selectable=true 且 connector 已注册才可写入/校验。
+types:
+  - code: mysql
+    name: MySQL
+    group: oltp
+    status: ga
+    selectable: true
+    color: "#00758F"
+    defaultPort: 3306
+    versionHint: "5.6+"
+    dialect: mysql
+    sqlglotRead: mysql
+    connector: connectors.mysql
+    formSchema:
+      - { key: name, label: 名称, type: text, required: true }
+      - { key: description, label: 描述, type: textarea, required: false, maxLength: 200 }
+      - { key: host, label: 主机名/IP地址, type: text, required: true }
+      - { key: port, label: 端口, type: number, required: true }
+      - { key: username, label: 用户名, type: text, required: true }
+      - { key: password, label: 密码, type: password, required: false }
+      - { key: databaseName, label: 数据库, type: text, required: true }
+
+  - code: postgresql
+    name: PostgreSQL
+    group: oltp
+    status: ga
+    selectable: true
+    color: "#336791"
+    defaultPort: 5432
+    versionHint: "12+"
+    dialect: postgres
+    sqlglotRead: postgres
+    connector: connectors.postgresql
+    formSchema:
+      - { key: name, label: 名称, type: text, required: true }
+      - { key: description, label: 描述, type: textarea, required: false, maxLength: 200 }
+      - { key: host, label: 主机名/IP地址, type: text, required: true }
+      - { key: port, label: 端口, type: number, required: true }
+      - { key: username, label: 用户名, type: text, required: true }
+      - { key: password, label: 密码, type: password, required: false }
+      - { key: databaseName, label: 数据库, type: text, required: true }
+
+  - code: sqlserver
+    name: SQL Server
+    group: oltp
+    status: ga
+    selectable: true
+    color: "#CC2927"
+    defaultPort: 1433
+    versionHint: "2016+"
+    dialect: tsql
+    sqlglotRead: tsql
+    connector: connectors.sqlserver
+    formSchema:
+      - { key: name, label: 名称, type: text, required: true }
+      - { key: description, label: 描述, type: textarea, required: false, maxLength: 200 }
+      - { key: host, label: 主机名/IP地址, type: text, required: true }
+      - { key: port, label: 端口, type: number, required: true }
+      - { key: username, label: 用户名, type: text, required: true }
+      - { key: password, label: 密码, type: password, required: false }
+      - { key: databaseName, label: 数据库, type: text, required: true }
+
+  - code: oracle
+    name: Oracle
+    group: oltp
+    status: ga
+    selectable: true
+    color: "#F80000"
+    defaultPort: 1521
+    versionHint: "12c+"
+    dialect: oracle
+    sqlglotRead: oracle
+    connector: connectors.oracle
+    formSchema:
+      - { key: name, label: 名称, type: text, required: true }
+      - { key: description, label: 描述, type: textarea, required: false, maxLength: 200 }
+      - { key: host, label: 主机名/IP地址, type: text, required: true }
+      - { key: port, label: 端口, type: number, required: true }
+      - { key: username, label: 用户名, type: text, required: true }
+      - { key: password, label: 密码, type: password, required: false }
+      - { key: databaseName, label: Service Name, type: text, required: true }
+
+  - code: clickhouse
+    name: ClickHouse
+    group: olap
+    status: ga
+    selectable: true
+    color: "#FFCC01"
+    defaultPort: 8123
+    versionHint: "22+"
+    dialect: clickhouse
+    sqlglotRead: clickhouse
+    connector: connectors.clickhouse
+    formSchema:
+      - { key: name, label: 名称, type: text, required: true }
+      - { key: description, label: 描述, type: textarea, required: false, maxLength: 200 }
+      - { key: host, label: 主机名/IP地址, type: text, required: true }
+      - { key: port, label: HTTP端口, type: number, required: true }
+      - { key: username, label: 用户名, type: text, required: true }
+      - { key: password, label: 密码, type: password, required: false }
+      - { key: databaseName, label: 数据库, type: text, required: true }
+
+  - code: doris
+    name: Apache Doris
+    group: olap
+    status: ga
+    selectable: true
+    color: "#444444"
+    defaultPort: 9030
+    versionHint: "1.2+"
+    dialect: mysql
+    sqlglotRead: mysql
+    connector: connectors.doris
+    formSchema:
+      - { key: name, label: 名称, type: text, required: true }
+      - { key: description, label: 描述, type: textarea, required: false, maxLength: 200 }
+      - { key: host, label: 主机名/IP地址, type: text, required: true }
+      - { key: port, label: 端口, type: number, required: true }
+      - { key: username, label: 用户名, type: text, required: true }
+      - { key: password, label: 密码, type: password, required: false }
+      - { key: databaseName, label: 数据库, type: text, required: true }
+
+  - code: starrocks
+    name: StarRocks
+    group: olap
+    status: ga
+    selectable: true
+    color: "#0B5FFF"
+    defaultPort: 9030
+    versionHint: "2.5+"
+    dialect: mysql
+    sqlglotRead: mysql
+    connector: connectors.starrocks
+    formSchema:
+      - { key: name, label: 名称, type: text, required: true }
+      - { key: description, label: 描述, type: textarea, required: false, maxLength: 200 }
+      - { key: host, label: 主机名/IP地址, type: text, required: true }
+      - { key: port, label: 端口, type: number, required: true }
+      - { key: username, label: 用户名, type: text, required: true }
+      - { key: password, label: 密码, type: password, required: false }
+      - { key: databaseName, label: 数据库, type: text, required: true }
+
+  - code: excel
+    name: 本地 Excel/CSV
+    group: file
+    status: ga
+    selectable: true
+    color: "#217346"
+    defaultPort: 0
+    versionHint: "xlsx/csv"
+    dialect: sqlite
+    sqlglotRead: sqlite
+    connector: connectors.excel
+    formSchema:
+      - { key: name, label: 名称, type: text, required: true }
+      - { key: description, label: 描述, type: textarea, required: false, maxLength: 200 }
+      - { key: databaseName, label: 文件路径, type: text, required: true }

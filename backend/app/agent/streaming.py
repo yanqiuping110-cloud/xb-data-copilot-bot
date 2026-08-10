@@ -45,6 +45,9 @@ def text_delta_event(delta: str) -> str:
     return format_sse("text_delta", {"delta": delta})
 
 
-def thinking_delta_event(delta: str) -> str:
-    """思考过程增量（DeepSeek reasoning_content）。"""
-    return format_sse("thinking_delta", {"delta": delta})
+def thinking_delta_event(delta: str, *, node: str | None = None) -> str:
+    """思考过程增量（DeepSeek reasoning_content）；可选挂载到 LangGraph 节点。"""
+    body: dict[str, Any] = {"delta": delta}
+    if node:
+        body["node"] = node
+    return format_sse("thinking_delta", body)

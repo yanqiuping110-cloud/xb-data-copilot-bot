@@ -6,7 +6,6 @@ MVP 阶段与 LangGraph validate_sql / apply_policy 节点职责一致，后续 
 
 from __future__ import annotations
 
-import sqlglot
 from sqlglot import exp
 
 from app.core.context import UserContext
@@ -14,8 +13,10 @@ from app.db.sql_policy import BusinessWriteForbiddenError, assert_business_reado
 from app.policy.effective_policy import EffectivePolicy
 from app.policy.role_policy import applies_sch_id_filter
 from app.sql.column_guard import validate_denied_columns_sql
+from app.sql.dialect import parse_sql, render_sql
 from app.sql.errors import SqlGuardError
 from app.sql.whitelist import SCH_ID_COLUMN, get_allowed_tables
+from app.system.sql_context import ResolvedSqlContext
 from config.settings import Settings, get_settings
 
 
@@ -64,9 +65,10 @@ def validate_sql(
     max_rows: int,
     settings: Settings | None = None,
     policy: EffectivePolicy | None = None,
+    sql_ctx: ResolvedSqlContext | None = None,
 ) -> str:
     """
-    校验 SQL 并返回带 LIMIT 的最终语句（MySQL 方言）。
+    校验 SQL 并返回带 LIMIT 的最终语句（方言来自 ResolvedSqlContext）。
 
     Raises:
         SqlGuardError: 非 SELECT、多语句、表不在白名单、学校账户缺 sch_id 等。
@@ -79,7 +81,7 @@ def validate_sql(
     stripped = sql.strip().rstrip(";")
 
     try:
-        parsed = sqlglot.parse_one(stripped, read="mysql")
+        parsed = parse_sql(stripped, sql_ctx=sql_ctx, settings=settings)
     except Exception as exc:
         raise SqlGuardError("PARSE_ERROR", f"SQL 解析失败: {exc}") from exc
 
@@ -109,7 +111,9 @@ def validate_sql(
         )
 
     if policy is not None and policy.denied_columns:
-        validate_denied_columns_sql(stripped, policy.denied_columns)
+        validate_denied_columns_sql(
+            stripped, policy.denied_columns, sql_ctx=sql_ctx, settings=settings
+        )
 
     s = settings or get_settings()
     if applies_sch_id_filter(ctx, settings=s):
@@ -143,7 +147,7 @@ def validate_sql(
                 else:
                     parsed = limited
 
-    return parsed.sql(dialect="mysql")
+    return render_sql(parsed, sql_ctx=sql_ctx, settings=settings)
 
 
 def validate_probe_sql(
@@ -153,6 +157,7 @@ def validate_probe_sql(
     max_rows: int = 10,
     settings: Settings | None = None,
     policy: EffectivePolicy | None = None,
+    sql_ctx: ResolvedSqlContext | None = None,
 ) -> str:
     """
     探查 SQL 校验：仅 SELECT、表白名单、强制 LIMIT≤max_rows（默认 10）。
@@ -160,4 +165,11 @@ def validate_probe_sql(
     供 run_probe_sql 工具使用。
     """
     capped = min(max_rows, 10)
-    return validate_sql(sql, ctx, max_rows=capped, settings=settings, policy=policy)
+    return validate_sql(
+        sql,
+        ctx,
+        max_rows=capped,
+        settings=settings,
+        policy=policy,
+        sql_ctx=sql_ctx,
+    )

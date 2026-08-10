@@ -10,14 +10,35 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin_code, admin_meta, admin_ops, admin_scope, admin_users, ask, auth, brief_report, chart, embed, errors, feedback, health, memory_prefs, research, sessions
+from app.api import (
+    admin_code,
+    admin_meta,
+    admin_ops,
+    admin_scope,
+    admin_system,
+    admin_users,
+    ask,
+    auth,
+    brief_report,
+    chart,
+    embed,
+    errors,
+    feedback,
+    health,
+    memory_prefs,
+    research,
+    sessions,
+)
 from app.ask.exceptions import AskError
 from app.auth import jwt_tokens
 from app.auth.service import AuthError
 from app.code.exceptions import CodeKnowledgeError
+from app.db.copilot import get_session_factory
 from app.meta.exceptions import MetaError
 from app.policy.role_policy import PolicyError
 from app.core.log_config import get_logger, setup_logging
+from app.system.exceptions import SystemConfigError
+from app.system.seed_from_env import seed_system_config_from_env
 from config.settings import get_settings
 
 
@@ -26,10 +47,16 @@ http_logger = get_logger("http")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时加载配置到 app.state，供 /ready 等使用。"""
+    """应用生命周期：加载配置、种子系统 LLM/数据源、写入 app.state。"""
     settings = get_settings()
     setup_logging(debug=settings.app_debug)
     app.state.settings = settings
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            await seed_system_config_from_env(session, settings)
+    except Exception:
+        http_logger.warning("system config seed skipped", exc_info=True)
     yield
 
 
@@ -57,6 +84,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(AskError, errors.ask_error_handler)
     app.add_exception_handler(MetaError, errors.meta_error_handler)
     app.add_exception_handler(CodeKnowledgeError, errors.code_knowledge_error_handler)
+    app.add_exception_handler(SystemConfigError, errors.system_config_error_handler)
 
     app.include_router(health.router, tags=["health"])
     app.include_router(auth.router)
@@ -64,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_meta.router)
     app.include_router(admin_ops.router)
     app.include_router(admin_scope.router)
+    app.include_router(admin_system.router)
     app.include_router(admin_code.router)
     app.include_router(ask.router)
     app.include_router(brief_report.router)

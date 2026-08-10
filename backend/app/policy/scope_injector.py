@@ -11,7 +11,10 @@ import sqlglot
 from sqlglot import exp
 
 from app.policy.effective_policy import EffectivePolicy
+from app.sql.dialect import parse_sql, render_sql
 from app.sql.errors import SqlGuardError
+from app.system.sql_context import ResolvedSqlContext
+from config.settings import Settings
 
 
 def _extract_tables(parsed: exp.Expression) -> set[str]:
@@ -103,6 +106,9 @@ def _coerce_values(raw_values: list[Any], grant_values: list[Any]) -> list[Any]:
 def validate_scope_literals(
     sql: str,
     policy: EffectivePolicy,
+    *,
+    sql_ctx: ResolvedSqlContext | None = None,
+    settings: Settings | None = None,
 ) -> None:
     """
     校验 SQL 中绑定列的字面量均在 grant 内。
@@ -114,7 +120,7 @@ def validate_scope_literals(
         return
 
     try:
-        parsed = sqlglot.parse_one(sql.strip().rstrip(";"), read="mysql")
+        parsed = parse_sql(sql, sql_ctx=sql_ctx, settings=settings)
     except Exception as exc:
         raise SqlGuardError("PARSE_ERROR", f"SQL 解析失败: {exc}") from exc
 
@@ -143,6 +149,9 @@ def validate_scope_literals(
 def apply_scope_to_sql(
     sql: str,
     policy: EffectivePolicy,
+    *,
+    sql_ctx: ResolvedSqlContext | None = None,
+    settings: Settings | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     为缺失的 scope 条件注入 AND <column> IN (:scope_<dim>_0, …)。
@@ -154,7 +163,7 @@ def apply_scope_to_sql(
         return sql, {}
 
     try:
-        parsed = sqlglot.parse_one(sql.strip().rstrip(";"), read="mysql")
+        parsed = parse_sql(sql, sql_ctx=sql_ctx, settings=settings)
     except Exception as exc:
         raise SqlGuardError("PARSE_ERROR", f"SQL 解析失败: {exc}") from exc
 
@@ -177,7 +186,7 @@ def apply_scope_to_sql(
 
             literals = _find_scope_literals(parsed, alias_map, table, column_name)
             if literals:
-                validate_scope_literals(sql, policy)
+                validate_scope_literals(sql, policy, sql_ctx=sql_ctx, settings=settings)
                 continue
 
             table_alias = None
@@ -194,10 +203,10 @@ def apply_scope_to_sql(
                 params[key] = val
 
             in_sql = f"{col_ref} IN ({', '.join(placeholders)})"
-            conditions.append(sqlglot.parse_one(in_sql, read="mysql"))
+            conditions.append(parse_sql(in_sql, sql_ctx=sql_ctx, settings=settings))
 
     if not conditions:
-        return parsed.sql(dialect="mysql"), params
+        return render_sql(parsed, sql_ctx=sql_ctx, settings=settings), params
 
     where = parsed.args.get("where")
     combined = conditions[0]
@@ -208,4 +217,4 @@ def apply_scope_to_sql(
     else:
         parsed.set("where", exp.Where(this=combined))
 
-    return parsed.sql(dialect="mysql"), params
+    return render_sql(parsed, sql_ctx=sql_ctx, settings=settings), params

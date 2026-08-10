@@ -2,8 +2,8 @@
 
 import json
 
+from app.agent.log_utils import NODE_LABELS
 from app.agent.streaming import (
-    NODE_LABELS,
     done_event,
     error_event,
     format_sse,
@@ -30,6 +30,22 @@ def test_progress_event_uses_chinese_label():
     frame = progress_event("generate_sql")
     assert "生成 SQL" in frame
     assert "generate_sql" in frame
+
+
+def test_progress_event_running_status():
+    frame = progress_event("process_memory_context", status="running")
+    assert '"status": "running"' in frame
+
+
+def test_thinking_delta_includes_node():
+    from app.agent.streaming import thinking_delta_event
+
+    frame = thinking_delta_event("推理片段", node="format_answer")
+    assert "event: thinking_delta" in frame
+    data_line = [ln for ln in frame.split("\n") if ln.startswith("data:")][0]
+    payload = json.loads(data_line[5:].strip())
+    assert payload["delta"] == "推理片段"
+    assert payload["node"] == "format_answer"
 
 
 def test_done_event_camel_case():

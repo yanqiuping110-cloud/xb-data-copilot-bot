@@ -4,36 +4,132 @@
       <li
         v-for="(step, i) in steps"
         :key="step.node || i"
-        :class="['timeline-item', step.status || (step.done ? 'done' : ''), { active: step.active, slow: isSlow(step) }]"
+        :class="[
+          'timeline-item',
+          step.status || (step.done ? 'done' : ''),
+          { active: isRunning(step), slow: isSlow(step) },
+        ]"
       >
-        <span class="timeline-icon" :aria-label="step.status">{{ statusGlyph(step) }}</span>
+        <span class="timeline-icon" :aria-label="step.status">
+          <i v-if="isRunning(step)" class="timeline-spinner" />
+          <template v-else>{{ statusGlyph(step) }}</template>
+        </span>
         <div class="timeline-body">
           <div class="timeline-head">
             <span class="timeline-label">{{ step.label }}</span>
+            <span v-if="showThinking && hasThinking(step)" class="timeline-llm-badge">大模型</span>
             <span v-if="durationLabel(step)" class="timeline-duration" :class="durationClass(step)">
               {{ durationLabel(step) }}
             </span>
           </div>
           <p v-if="stepSubtitle(step)" class="timeline-sub">{{ stepSubtitle(step) }}</p>
+          <details
+            v-if="showThinking && hasThinking(step)"
+            class="step-thinking"
+            :open="isThinkingDetailsOpen(step)"
+            @toggle="onThinkingToggle(step, $event)"
+          >
+            <summary>
+              推理过程
+              <span v-if="thinkingBlocks(step).length > 1" class="step-thinking__count">
+                {{ thinkingBlocks(step).length }} 段
+              </span>
+            </summary>
+            <div class="step-thinking__list">
+              <StepThinkingPane
+                v-for="(block, bi) in thinkingBlocks(step)"
+                :key="`${step.node}-${bi}`"
+                :text="block"
+                :title="thinkingBlocks(step).length > 1 ? `推理 ${bi + 1}` : ''"
+                :active="isThinkingDetailsOpen(step)"
+              />
+            </div>
+          </details>
         </div>
       </li>
     </ul>
-    <div v-if="totalMs > 0" class="timeline-total">
+    <div v-if="displayTotalMs > 0" class="timeline-total">
       <span class="total-label">合计耗时</span>
-      <span class="total-value">{{ formatDurationMs(totalMs) }}</span>
+      <span class="total-value">{{ formatDurationMs(displayTotalMs) }}</span>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { formatDurationMs, timelineTotalMs } from '../../utils/askProgress.js'
+import StepThinkingPane from './StepThinkingPane.vue'
 
 const props = defineProps({
   steps: { type: Array, default: () => [] },
+  /** 父级可选传入时钟；不传则组件内自 tick */
+  nowMs: { type: Number, default: null },
+  /** ADMIN 可见：在步骤内展示大模型推理 */
+  showThinking: { type: Boolean, default: false },
 })
 
-const totalMs = computed(() => timelineTotalMs(props.steps))
+const localNow = ref(Date.now())
+/** 用户手动折叠/展开：完成后尊重用户选择；进行中默认展开 */
+const thinkingOpen = ref({})
+let timer = null
+
+const hasRunning = computed(() =>
+  (props.steps || []).some((s) => s.active || s.status === 'running'),
+)
+
+const effectiveNow = computed(() => (props.nowMs != null ? props.nowMs : localNow.value))
+
+watch(
+  hasRunning,
+  (running) => {
+    if (props.nowMs != null) return
+    if (running && !timer) {
+      localNow.value = Date.now()
+      timer = setInterval(() => {
+        localNow.value = Date.now()
+      }, 200)
+    } else if (!running && timer) {
+      clearInterval(timer)
+      timer = null
+    }
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+})
+
+const displayTotalMs = computed(() => timelineTotalMs(props.steps, effectiveNow.value))
+
+function thinkingBlocks(step) {
+  if (Array.isArray(step.thinkingBlocks) && step.thinkingBlocks.length) {
+    return step.thinkingBlocks.filter((b) => !!b)
+  }
+  return step.thinking ? [step.thinking] : []
+}
+
+function hasThinking(step) {
+  return thinkingBlocks(step).length > 0
+}
+
+function isThinkingDetailsOpen(step) {
+  const key = step.node
+  if (Object.prototype.hasOwnProperty.call(thinkingOpen.value, key)) {
+    return !!thinkingOpen.value[key]
+  }
+  // 默认展开有推理的步骤；用户手动折叠后记住状态
+  return hasThinking(step)
+}
+
+function onThinkingToggle(step, event) {
+  const open = !!event?.target?.open
+  thinkingOpen.value = { ...thinkingOpen.value, [step.node]: open }
+}
+
+function isRunning(step) {
+  return !!(step.active || step.status === 'running')
+}
 
 function stepSubtitle(step) {
   return step.summary || step.subtitle || ''
@@ -42,22 +138,28 @@ function stepSubtitle(step) {
 function statusGlyph(step) {
   if (step.status === 'fail') return '!'
   if (step.status === 'skipped') return '−'
-  if (step.active || step.status === 'running') return '◌'
   return '✓'
 }
 
+function elapsedMs(step) {
+  if (isRunning(step) && step.startedAt) {
+    return Math.max(0, effectiveNow.value - step.startedAt)
+  }
+  return step.durationMs
+}
+
 function durationLabel(step) {
-  if (step.active || step.status === 'running') return '进行中'
-  if (step.durationMs == null) return ''
-  return formatDurationMs(step.durationMs)
+  const ms = elapsedMs(step)
+  if (ms == null) return isRunning(step) ? '0 ms' : ''
+  return formatDurationMs(ms)
 }
 
 function isSlow(step) {
-  return (step.durationMs || 0) >= 2000
+  return (elapsedMs(step) || 0) >= 2000
 }
 
 function durationClass(step) {
-  if (step.active || step.status === 'running') return 'is-running'
+  if (isRunning(step)) return 'is-running'
   const ms = step.durationMs || 0
   if (ms >= 5000) return 'is-slow'
   if (ms >= 2000) return 'is-medium'
@@ -121,9 +223,21 @@ function durationClass(step) {
   background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
 }
 
+.timeline-item.fail .timeline-icon {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
+
 .timeline-item.active .timeline-icon {
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.timeline-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: spin 0.7s linear infinite;
 }
 
 .timeline-body {
@@ -142,6 +256,18 @@ function durationClass(step) {
   font-weight: 600;
   color: #0f172a;
   line-height: 1.35;
+}
+
+.timeline-llm-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #4338ca;
+  background: #e0e7ff;
+  border: 1px solid #c7d2fe;
 }
 
 .timeline-duration {
@@ -186,6 +312,39 @@ function durationClass(step) {
   color: #64748b;
 }
 
+.step-thinking {
+  margin-top: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+.step-thinking summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  user-select: none;
+  list-style-position: inside;
+}
+
+.step-thinking__count {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #6366f1;
+  background: #eef2ff;
+}
+
+.step-thinking__list {
+  display: flex;
+  flex-direction: column;
+}
+
 .timeline-total {
   display: flex;
   align-items: center;
@@ -209,13 +368,9 @@ function durationClass(step) {
   font-variant-numeric: tabular-nums;
 }
 
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.65;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

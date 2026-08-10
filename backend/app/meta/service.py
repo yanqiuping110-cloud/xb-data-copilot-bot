@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.meta.table_description import table_default_where, table_effective_description
 from app.meta.exceptions import MetaError
-from app.meta.introspector import BusinessSchemaIntrospector, IntrospectedTable
+from app.meta.introspector import IntrospectedTable, get_introspector
 from app.meta.repository import ColumnMetaRow, MetaRepository, TableMetaRow, dump_alias_json
+from app.system.runtime_config import resolve_business_dsn
 from config.settings import Settings
 
 
@@ -54,8 +55,12 @@ class MetaService:
         self._business = business_session
         self._settings = settings
         self._repo = MetaRepository(copilot_session)
-        self._introspector = BusinessSchemaIntrospector(
-            business_session, settings.mysql_business_database
+        dsn = resolve_business_dsn(settings)
+        self._introspector = get_introspector(
+            business_session,
+            dsn.database,
+            settings=settings,
+            db_type=dsn.db_type,
         )
 
     async def introspect_preview(self, table_name: str) -> tuple[IntrospectedTable, bool]:

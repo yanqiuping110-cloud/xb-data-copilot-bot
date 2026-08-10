@@ -1,0 +1,347 @@
+/* 系统配置台：对标 SQLBot 工作台风格（浅色 + 品牌绿） */
+:root {
+  --sys-bg: #f5f7fa;
+  --sys-surface: #ffffff;
+  --sys-border: #e5e7eb;
+  --sys-accent: #0ca678;
+  --sys-accent-soft: #e6f9f1;
+  --sys-text: #1f2937;
+  --sys-muted: #6b7280;
+  --sys-radius-card: 12px;
+  --sys-radius-btn: 8px;
+  --sys-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.sys-page {
+  min-height: 100vh;
+  background: var(--sys-bg);
+  color: var(--sys-text);
+}
+
+.sys-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  background: var(--sys-surface);
+  border-bottom: 1px solid var(--sys-border);
+}
+
+.sys-header__title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.sys-main {
+  padding: 16px 24px 40px;
+}
+
+.sys-panel {
+  background: transparent;
+}
+
+.sys-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.sys-toolbar__left,
+.sys-toolbar__right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.sys-search {
+  width: 220px;
+}
+
+.sys-btn-accent.el-button--primary {
+  --el-button-bg-color: var(--sys-accent);
+  --el-button-border-color: var(--sys-accent);
+  --el-button-hover-bg-color: #099268;
+  --el-button-hover-border-color: #099268;
+  border-radius: var(--sys-radius-btn);
+}
+
+.sys-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.sys-card {
+  position: relative;
+  background: var(--sys-surface);
+  border: 1px solid var(--sys-border);
+  border-radius: var(--sys-radius-card);
+  box-shadow: var(--sys-shadow);
+  padding: 16px 16px 12px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  cursor: default;
+}
+
+.sys-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 20px rgba(0, 0, 0, 0.06);
+}
+
+.sys-card__badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: var(--sys-accent-soft);
+  color: var(--sys-accent);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  animation: sys-badge-in 0.25s ease;
+}
+
+@keyframes sys-badge-in {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.sys-card__row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.sys-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+  letter-spacing: -0.02em;
+}
+
+.sys-card__body {
+  min-width: 0;
+  flex: 1;
+  padding-right: 64px;
+}
+
+.sys-card__name {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sys-card__meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sys-muted);
+  line-height: 1.6;
+}
+
+.sys-card__meta strong {
+  color: #9ca3af;
+  font-weight: 400;
+}
+
+.sys-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.sys-empty {
+  text-align: center;
+  padding: 64px 24px;
+  background: var(--sys-surface);
+  border: 1px dashed var(--sys-border);
+  border-radius: var(--sys-radius-card);
+  color: var(--sys-muted);
+}
+
+.sys-empty__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--sys-text);
+  margin: 0 0 8px;
+}
+
+.sys-wizard {
+  display: flex;
+  min-height: 420px;
+  border: 1px solid var(--sys-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.sys-wizard__side {
+  width: 220px;
+  background: #fafbfc;
+  border-right: 1px solid var(--sys-border);
+  display: flex;
+  flex-direction: column;
+}
+
+.sys-wizard__side-search {
+  padding: 12px;
+  border-bottom: 1px solid var(--sys-border);
+}
+
+.sys-wizard__side-list {
+  overflow: auto;
+  flex: 1;
+  padding: 8px;
+}
+
+.sys-type-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--sys-text);
+  transition: background 0.15s ease;
+}
+
+.sys-type-item:hover {
+  background: #f0f2f5;
+}
+
+.sys-type-item.is-active {
+  background: var(--sys-accent-soft);
+  color: #087f5b;
+  font-weight: 600;
+}
+
+.sys-type-item.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sys-type-item__logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.sys-type-item__soon {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--sys-muted);
+  font-weight: 400;
+}
+
+.sys-wizard__main {
+  flex: 1;
+  padding: 20px 24px;
+  overflow: auto;
+}
+
+.sys-wizard__heading {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.sys-wizard__sub {
+  margin: 0 0 20px;
+  color: var(--sys-muted);
+  font-size: 13px;
+}
+
+.sys-provider-wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 4px;
+}
+
+.sys-provider-tile {
+  border: 1px solid var(--sys-border);
+  border-radius: 10px;
+  padding: 16px 12px;
+  text-align: center;
+  cursor: pointer;
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.sys-provider-tile:hover {
+  border-color: var(--sys-accent);
+  transform: translateY(-1px);
+}
+
+.sys-provider-tile.is-active {
+  border-color: var(--sys-accent);
+  box-shadow: 0 0 0 2px var(--sys-accent-soft);
+}
+
+.sys-provider-tile__logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  margin: 0 auto 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+}
+
+.sys-provider-tile__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sys-muted {
+  color: var(--sys-muted);
+}
+
+@media (max-width: 720px) {
+  .sys-wizard {
+    flex-direction: column;
+  }
+  .sys-wizard__side {
+    width: 100%;
+    max-height: 180px;
+  }
+  .sys-card__body {
+    padding-right: 0;
+  }
+  .sys-card__badge {
+    position: static;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+}

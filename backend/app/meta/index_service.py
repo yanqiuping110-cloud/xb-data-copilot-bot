@@ -20,6 +20,7 @@ from app.meta.index_text import (
 from app.meta.repository import MetaRepository
 from app.retrieval.embedding import EmbeddingClient
 from app.retrieval.search_index import SearchIndexClient, create_search_index_client
+from app.system.runtime_config import resolve_embedding
 from config.settings import Settings
 
 
@@ -71,7 +72,7 @@ class MetaKnowledgeService:
         metrics = await self._repo.list_indexable_metrics()
         field_values = await self._repo.list_indexable_field_values()
 
-        dims = self._settings.embedding_dims
+        dims = resolve_embedding(self._settings).embedding_dims or self._settings.embedding_dims
         table_count = 0
         column_count = 0
         metric_count = 0
@@ -187,7 +188,7 @@ class MetaKnowledgeService:
         """
         code_repo = CodeKnowledgeRepository(self._session)
         artifacts = await code_repo.list_indexable_artifacts()
-        dims = self._settings.embedding_dims
+        dims = resolve_embedding(self._settings).embedding_dims or self._settings.embedding_dims
         if artifacts:
             texts = [build_indexable_search_text(a) for a in artifacts]
             vectors = await self._embedding.embed_texts(texts)

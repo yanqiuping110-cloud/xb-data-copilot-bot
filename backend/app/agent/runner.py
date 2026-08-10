@@ -8,6 +8,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -165,36 +166,56 @@ async def stream_ask_graph(
     )
     logger.info("[trace=%s] 问数开始 stream=true question=%r", trace_id, question)
 
-    stop_poller = asyncio.Event()
-    pending_sse: asyncio.Queue[str] = asyncio.Queue()
+    # 统一出口：节点 running / thinking / text_delta / 图 updates 都进此队列，保证长节点中途也能刷到前端
+    out_q: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+    stop_workers = asyncio.Event()
+
+    from app.agent.progress_callback import AskNodeStartProgressCallback
+
+    node_start_cb = AskNodeStartProgressCallback(out_q)
+    # RunnableConfig callbacks：节点开始立即推 running
+    existing_cbs = list(config.get("callbacks") or [])
+    existing_cbs.append(node_start_cb)
+    config = {**config, "callbacks": existing_cbs}
 
     async def _delta_poller() -> None:
-        while not stop_poller.is_set():
+        while not stop_workers.is_set():
             for frame in _drain_thinking_delta_queue(thinking_delta_queue):
-                await pending_sse.put(frame)
+                await out_q.put(("sse", frame))
             for frame in _drain_answer_delta_queue(answer_delta_queue):
-                await pending_sse.put(frame)
+                await out_q.put(("sse", frame))
             await asyncio.sleep(0.05)
         for frame in _drain_thinking_delta_queue(thinking_delta_queue):
-            await pending_sse.put(frame)
+            await out_q.put(("sse", frame))
         for frame in _drain_answer_delta_queue(answer_delta_queue):
-            await pending_sse.put(frame)
+            await out_q.put(("sse", frame))
+
+    async def _astream_worker() -> None:
+        try:
+            async for chunk in get_ask_graph().astream(initial, config, stream_mode="updates"):
+                await out_q.put(("chunk", chunk))
+                if await tracer.get_turn_status(copilot_session, trace_id) == "cancelled":
+                    break
+        except Exception as exc:
+            await out_q.put(("error", exc))
+        finally:
+            await out_q.put(("end", None))
 
     poller_task = asyncio.create_task(_delta_poller())
-
-    def _yield_pending() -> list[str]:
-        frames: list[str] = []
-        while not pending_sse.empty():
-            try:
-                frames.append(pending_sse.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-        return frames
+    stream_task = asyncio.create_task(_astream_worker())
 
     try:
-        async for chunk in get_ask_graph().astream(initial, config, stream_mode="updates"):
-            for frame in _yield_pending():
-                yield frame
+        while True:
+            kind, payload = await out_q.get()
+            if kind == "sse":
+                yield payload
+                continue
+            if kind == "error":
+                raise payload
+            if kind == "end":
+                break
+            # chunk: 节点完成
+            chunk = payload
             if await tracer.get_turn_status(copilot_session, trace_id) == "cancelled":
                 logger.info("[trace=%s] 检测到用户中断，停止流水线", trace_id)
                 break
@@ -214,12 +235,12 @@ async def stream_ask_graph(
                     collector.mark_first_token(_elapsed_ms(t0))
                     first_progress_sent = True
                 duration_ms = collector.duration_for_node(node_name)
-                yield progress_event(node_name, detail=detail, duration_ms=duration_ms)
-            for frame in _yield_pending():
-                yield frame
-
-        for frame in _yield_pending():
-            yield frame
+                yield progress_event(
+                    node_name,
+                    detail=detail,
+                    status="done",
+                    duration_ms=duration_ms,
+                )
 
         if await tracer.get_turn_status(copilot_session, trace_id) == "cancelled":
             yield done_event(_cancelled_response(trace_id, session_id, t0))
@@ -322,7 +343,12 @@ async def stream_ask_graph(
         )
         yield error_event("STREAM_ERROR", str(exc))
     finally:
-        stop_poller.set()
+        stop_workers.set()
+        stream_task.cancel()
+        try:
+            await stream_task
+        except asyncio.CancelledError:
+            pass
         await poller_task
 
 
@@ -422,18 +448,26 @@ def _drain_answer_delta_queue(
 
 
 def _drain_thinking_delta_queue(
-    queue: asyncio.Queue[str] | None,
+    queue: asyncio.Queue | None,
 ) -> list[str]:
     frames: list[str] = []
     if queue is None:
         return frames
     while not queue.empty():
         try:
-            delta = queue.get_nowait()
+            item = queue.get_nowait()
         except asyncio.QueueEmpty:
             break
+        if not item:
+            continue
+        if isinstance(item, dict):
+            delta = item.get("delta") or ""
+            node = item.get("node")
+        else:
+            delta = str(item)
+            node = None
         if delta:
-            frames.append(thinking_delta_event(delta))
+            frames.append(thinking_delta_event(delta, node=node))
     return frames
 
 

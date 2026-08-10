@@ -103,9 +103,14 @@ export function formatDurationMs(ms) {
   return `${min} min ${sec} s`
 }
 
-export function timelineTotalMs(steps) {
+export function timelineTotalMs(steps, nowMs = Date.now()) {
   if (!steps?.length) return 0
-  return steps.reduce((sum, step) => sum + (Number(step.durationMs) || 0), 0)
+  return steps.reduce((sum, step) => {
+    if ((step.active || step.status === 'running') && step.startedAt) {
+      return sum + Math.max(0, nowMs - step.startedAt)
+    }
+    return sum + (Number(step.durationMs) || 0)
+  }, 0)
 }
 
 export function formatStepSubtitle(evt) {
@@ -125,12 +130,16 @@ export function formatStepSubtitle(evt) {
 export function applyProgressEvent(msg, evt) {
   if (!evt?.node) return
   if (!msg.timeline) msg.timeline = []
+  const now = Date.now()
 
   for (const step of msg.timeline) {
     if (step.active && step.node !== evt.node) {
       step.active = false
       step.done = true
       step.status = 'done'
+      if (step.durationMs == null && step.startedAt) {
+        step.durationMs = Math.max(0, now - step.startedAt)
+      }
     }
   }
 
@@ -140,26 +149,92 @@ export function applyProgressEvent(msg, evt) {
     msg.timeline.push(step)
   }
 
+  const isRunning = evt.status === 'running'
   Object.assign(step, {
     label: evt.label,
     phase: evt.phase || nodeToPhase(evt.node),
-    status: evt.status === 'running' ? 'running' : 'done',
-    summary: evt.summary,
-    subtitle: formatStepSubtitle(evt),
-    durationMs: evt.durationMs,
+    status: isRunning ? 'running' : evt.status === 'fail' ? 'fail' : 'done',
+    summary: evt.summary ?? step.summary,
+    subtitle: formatStepSubtitle(evt) || step.subtitle,
     icon: evt.icon,
-    active: evt.status === 'running',
-    done: evt.status !== 'running',
+    active: isRunning,
+    done: !isRunning,
   })
 
-  if (evt.status !== 'running') {
+  if (isRunning) {
+    if (!step.startedAt) step.startedAt = now
+    // 进行中不覆盖服务端最终耗时字段
+    if (evt.durationMs == null) step.durationMs = undefined
+    beginStepThinkingBlock(step)
+    _flushPendingThinking(msg, step, evt.node)
+  } else {
+    if (evt.durationMs != null) {
+      step.durationMs = evt.durationMs
+    } else if (step.durationMs == null && step.startedAt) {
+      step.durationMs = Math.max(0, now - step.startedAt)
+    }
     step.active = false
     step.done = true
-    step.status = 'done'
+    step._thinkingClosed = true
   }
 
   msg.pipelineStep = nodeToPipelineStep(evt.node)
-  msg.statusText = evt.status === 'running' ? `正在${evt.label}…` : `已完成 ${evt.label}`
+  msg.statusText = isRunning ? `正在${evt.label}…` : `已完成 ${evt.label}`
+}
+
+function _flushPendingThinking(msg, step, node) {
+  const pending = msg._pendingThinking
+  if (!pending) return
+  const pendingNode = msg._pendingThinkingNode
+  if (pendingNode && pendingNode !== node) return
+  appendStepThinking(step, pending)
+  msg._pendingThinking = ''
+  msg._pendingThinkingNode = null
+}
+
+/** 开始新一轮推理块（同一步多次调模型时分隔）。 */
+export function beginStepThinkingBlock(step) {
+  if (!step) return
+  if (!Array.isArray(step.thinkingBlocks)) step.thinkingBlocks = []
+  const last = step.thinkingBlocks[step.thinkingBlocks.length - 1]
+  if (last && last.length > 0) {
+    step._thinkingClosed = true
+  }
+}
+
+export function appendStepThinking(step, delta) {
+  if (!step || !delta) return
+  if (!Array.isArray(step.thinkingBlocks)) step.thinkingBlocks = []
+  if (!step.thinkingBlocks.length || step._thinkingClosed) {
+    step.thinkingBlocks.push(delta)
+    step._thinkingClosed = false
+  } else {
+    const idx = step.thinkingBlocks.length - 1
+    step.thinkingBlocks[idx] = (step.thinkingBlocks[idx] || '') + delta
+  }
+  step.thinking = step.thinkingBlocks.join('\n\n')
+}
+
+/** 将思考增量挂到对应执行步骤（ADMIN 流式）。 */
+export function applyThinkingDelta(msg, evt) {
+  if (!msg) return
+  const delta = typeof evt === 'string' ? evt : evt?.delta
+  if (!delta) return
+  const node = typeof evt === 'object' ? evt?.node : null
+
+  msg.thinking = (msg.thinking || '') + delta
+
+  if (!msg.timeline) msg.timeline = []
+  let step = node ? msg.timeline.find((s) => s.node === node) : null
+  if (!step) {
+    step = msg.timeline.find((s) => s.active || s.status === 'running')
+  }
+  if (!step) {
+    msg._pendingThinking = (msg._pendingThinking || '') + delta
+    if (node) msg._pendingThinkingNode = node
+    return
+  }
+  appendStepThinking(step, delta)
 }
 
 export function finalizeTimeline(msg) {
@@ -172,6 +247,8 @@ export function finalizeTimeline(msg) {
   msg.statusText = ''
   msg.pipelineStep = 6
   msg.progressOpen = false
+  msg._pendingThinking = ''
+  msg._pendingThinkingNode = null
 }
 
 export function createAssistantStreamMessage(text = '正在分析您的问题…') {

@@ -7,7 +7,10 @@ from __future__ import annotations
 import sqlglot
 from sqlglot import exp
 
+from app.sql.dialect import parse_sql, render_sql
 from app.sql.errors import SqlGuardError
+from app.system.sql_context import ResolvedSqlContext
+from config.settings import Settings
 
 
 def _build_alias_map(parsed: exp.Expression) -> dict[str, str]:
@@ -38,6 +41,9 @@ def _collect_output_aliases(parsed: exp.Expression) -> set[str]:
 def validate_sql_columns(
     sql: str,
     table_columns: dict[str, set[str]],
+    *,
+    sql_ctx: ResolvedSqlContext | None = None,
+    settings: Settings | None = None,
 ) -> None:
     """
     校验 SQL 中引用的列是否存在于元数据。
@@ -53,7 +59,7 @@ def validate_sql_columns(
         return
 
     try:
-        parsed = sqlglot.parse_one(sql.strip().rstrip(";"), read="mysql")
+        parsed = parse_sql(sql, sql_ctx=sql_ctx, settings=settings)
     except Exception as exc:
         raise SqlGuardError("PARSE_ERROR", f"SQL 解析失败: {exc}") from exc
 
@@ -92,13 +98,16 @@ def validate_sql_columns(
 def validate_denied_columns_sql(
     sql: str,
     denied_columns: dict[str, frozenset[str]],
+    *,
+    sql_ctx: ResolvedSqlContext | None = None,
+    settings: Settings | None = None,
 ) -> None:
     """AST 遍历 SELECT 引用，命中 deny 列则拒绝（DataScope · §11.6）。"""
     if not denied_columns:
         return
 
     try:
-        parsed = sqlglot.parse_one(sql.strip().rstrip(";"), read="mysql")
+        parsed = parse_sql(sql, sql_ctx=sql_ctx, settings=settings)
     except Exception as exc:
         raise SqlGuardError("PARSE_ERROR", f"SQL 解析失败: {exc}") from exc
 

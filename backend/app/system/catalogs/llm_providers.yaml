@@ -1,0 +1,132 @@
+# LLM 供应商目录（唯一真相源）。业务代码经 catalog_loader / API 读取，禁止复制到 agent。
+providers:
+  - code: deepseek
+    name: DeepSeek
+    logoKey: deepseek
+    color: "#4D6BFE"
+    defaultApiBase: "https://api.deepseek.com"
+    suggestedModels: ["deepseek-chat", "deepseek-reasoner"]
+    supportsThinking: true
+    adapterKey: openai_compatible
+    extraDefaults: { thinking_enabled: true }
+    roles: [chat]
+  - code: dashscope
+    name: 阿里云百炼
+    logoKey: dashscope
+    color: "#FF6A00"
+    defaultApiBase: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    suggestedModels: ["qwen-plus", "qwen-turbo", "qwen-max"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat, embedding]
+  - code: qianfan
+    name: 千帆大模型
+    logoKey: qianfan
+    color: "#2932E1"
+    defaultApiBase: "https://qianfan.baidubce.com/v2"
+    suggestedModels: ["ernie-x1-turbo-32k", "ernie-4.0-8k"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat]
+  - code: hunyuan
+    name: 腾讯混元
+    logoKey: hunyuan
+    color: "#006EFF"
+    defaultApiBase: "https://api.hunyuan.cloud.tencent.com/v1"
+    suggestedModels: ["hunyuan-turbo", "hunyuan-large"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat]
+  - code: spark
+    name: 讯飞星火
+    logoKey: spark
+    color: "#1E88E5"
+    defaultApiBase: "https://spark-api-open.xf-yun.com/v1"
+    suggestedModels: ["4.0Ultra", "generalv3.5"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat]
+  - code: kimi
+    name: Kimi
+    logoKey: kimi
+    color: "#1A1A1A"
+    defaultApiBase: "https://api.moonshot.cn/v1"
+    suggestedModels: ["moonshot-v1-8k", "moonshot-v1-32k"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat]
+  - code: volcengine
+    name: 火山引擎
+    logoKey: volcengine
+    color: "#1664FF"
+    defaultApiBase: "https://ark.cn-beijing.volces.com/api/v3"
+    suggestedModels: ["doubao-pro-32k"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat]
+  - code: minimax
+    name: MiniMax
+    logoKey: minimax
+    color: "#E11D48"
+    defaultApiBase: "https://api.minimax.chat/v1"
+    suggestedModels: ["MiniMax-Text-01"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat]
+  - code: openai
+    name: OpenAI
+    logoKey: openai
+    color: "#10A37F"
+    defaultApiBase: "https://api.openai.com/v1"
+    suggestedModels: ["gpt-4o", "gpt-4o-mini"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat, embedding]
+  - code: azure_openai
+    name: Azure OpenAI
+    logoKey: azure
+    color: "#0078D4"
+    defaultApiBase: ""
+    suggestedModels: []
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat, embedding]
+  - code: gemini
+    name: Gemini
+    logoKey: gemini
+    color: "#4285F4"
+    defaultApiBase: ""
+    suggestedModels: ["gemini-2.0-flash"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat]
+  - code: ollama
+    name: Ollama
+    logoKey: ollama
+    color: "#111111"
+    defaultApiBase: "http://127.0.0.1:11434/v1"
+    suggestedModels: ["qwen2.5", "nomic-embed-text"]
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat, embedding]
+  - code: openai_compatible
+    name: 通用 OpenAI 兼容
+    logoKey: generic
+    color: "#0CA678"
+    defaultApiBase: ""
+    suggestedModels: []
+    supportsThinking: false
+    adapterKey: openai_compatible
+    extraDefaults: {}
+    roles: [chat, embedding]

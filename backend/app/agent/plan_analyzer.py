@@ -263,7 +263,7 @@ def detect_multi_branch_aggregate(
             "structure_reason": (
                 f"来源表 {', '.join(sources)} 均关联汇聚表 {anchor}，"
                 f"但彼此无表关系路径，禁止多路同时 JOIN 后 SUM；"
-                f"应使用标量子查询分路聚合（MySQL 5.7）。"
+                f"应按当前库方言/版本做分路聚合（低版本用标量子查询）。"
             ),
         }
     return None

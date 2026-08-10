@@ -98,6 +98,18 @@ const routes = [
     meta: { requiresMetaManager: true },
   },
   {
+    path: '/admin/system/llm',
+    name: 'AdminSystemLlm',
+    component: () => import('../views/AdminSystemLlm.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
+    path: '/admin/system/datasources',
+    name: 'AdminSystemDatasources',
+    component: () => import('../views/AdminSystemDatasources.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
     path: '/embed/ask',
     name: 'EmbedAsk',
     component: () => import('../views/EmbedAsk.vue'),

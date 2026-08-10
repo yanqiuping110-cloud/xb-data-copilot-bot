@@ -71,7 +71,16 @@ async def _prepare_final_sql(
     copilot_session,
 ) -> tuple[str, dict[str, Any], str]:
     """校验 SQL 并准备执行参数（与 validate_sql + apply_policy 一致）。"""
-    final_sql = validate_sql(raw_sql, ctx, max_rows=settings.sql_max_rows, settings=settings)
+    from app.system.sql_context import resolve_sql_context
+
+    sql_ctx = resolve_sql_context(settings)
+    final_sql = validate_sql(
+        raw_sql,
+        ctx,
+        max_rows=settings.sql_max_rows,
+        settings=settings,
+        sql_ctx=sql_ctx,
+    )
     final_sql = strip_sch_id_for_broad_roles(final_sql, ctx, settings=settings)
 
     meta_repo = MetaRepository(copilot_session)
@@ -81,7 +90,7 @@ async def _prepare_final_sql(
         )
     )
     column_map = await meta_repo.load_active_column_names(table_names)
-    validate_sql_columns(final_sql, column_map)
+    validate_sql_columns(final_sql, column_map, sql_ctx=sql_ctx)
 
     found = re.findall(r"\bFROM\s+([a-zA-Z0-9_]+)", final_sql, flags=re.IGNORECASE)
     tables_used = ",".join(dict.fromkeys(t.lower() for t in found))

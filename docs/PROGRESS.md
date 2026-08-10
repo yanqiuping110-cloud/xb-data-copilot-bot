@@ -36,6 +36,8 @@
 | **动态 DataScope（第 13 周）** | ✅ 完成 | `V010` + `EffectivePolicy` + `ScopeInjector` + admin API |
 | **Prompt Injection（第 13～14 周）** | ✅ 完成 | `prompt_boundary` + LLM/Memory 触点 + `inj-*` 评测 |
 | **MVP 评测（第 14 周）** | ✅ 文档/脚本 | `replay_eval --subset injection` + `PROMPT_SECURITY.md` |
+| **AI 模型 / 业务数据源配置化（一期）** | ✅ 完成 | V016 + Admin 两页 + runtime_config；见 [LLM_DATASOURCE_CONFIG_PLAN.md](./LLM_DATASOURCE_CONFIG_PLAN.md) |
+| **多供应商 × 多库 × 专业 UI（二期）** | ✅ 完成（P4 不做） | Catalog/Registry、`ResolvedSqlContext`、V017、P2/P3 连接器；见 [SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md](./SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md) |
 
 ---
 

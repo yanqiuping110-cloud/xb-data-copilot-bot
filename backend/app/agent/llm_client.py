@@ -13,6 +13,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from openai import AsyncOpenAI
 
+from app.system.models import ResolvedLlmConfig
+from app.system.runtime_config import resolve_chat_llm
 from config.settings import Settings
 
 
@@ -34,22 +36,37 @@ def messages_to_api(messages: Sequence[BaseMessage]) -> list[dict[str, str]]:
     return out
 
 
-def thinking_request_body(settings: Settings) -> dict[str, Any]:
+def _thinking_enabled(settings: Settings, cfg: ResolvedLlmConfig | None = None) -> bool:
+    resolved = cfg or resolve_chat_llm(settings)
+    if "thinking_enabled" in resolved.extra:
+        return bool(resolved.extra.get("thinking_enabled"))
+    return bool(settings.llm_thinking_enabled)
+
+
+def thinking_request_body(
+    settings: Settings,
+    cfg: ResolvedLlmConfig | None = None,
+) -> dict[str, Any]:
     """DeepSeek 思考模式请求体扩展。"""
-    if not settings.llm_thinking_enabled:
+    resolved = cfg or resolve_chat_llm(settings)
+    if not _thinking_enabled(settings, resolved):
         return {}
     body: dict[str, Any] = {"thinking": {"type": "enabled"}}
-    effort = (settings.llm_reasoning_effort or "").strip()
+    effort = (
+        str(resolved.extra.get("reasoning_effort") or "").strip()
+        or (settings.llm_reasoning_effort or "").strip()
+    )
     if effort:
         body["reasoning_effort"] = effort
     return body
 
 
 def make_openai_client(settings: Settings) -> AsyncOpenAI:
+    cfg = resolve_chat_llm(settings)
     return AsyncOpenAI(
-        api_key=settings.llm_api_key or "ollama",
-        base_url=settings.llm_api_base.rstrip("/"),
-        timeout=settings.llm_timeout_sec,
+        api_key=cfg.api_key or "ollama",
+        base_url=cfg.api_base.rstrip("/"),
+        timeout=cfg.timeout_sec,
     )
 
 
@@ -61,6 +78,27 @@ def _usage_tokens(usage: Any) -> tuple[int | None, int | None]:
     return token_in, token_out
 
 
+def _current_langgraph_node() -> str | None:
+    """当前正在执行的 Ask 图节点名（嵌套 LLM 调用时可用）。"""
+    try:
+        from langgraph.config import get_config
+
+        cfg = get_config() or {}
+        meta = cfg.get("metadata") or {}
+        node = meta.get("langgraph_node")
+        if isinstance(node, str) and node.strip():
+            return node.strip()
+    except Exception:
+        return None
+    return None
+
+
+async def _enqueue_thinking(queue: asyncio.Queue | None, delta: str) -> None:
+    if queue is None or not delta:
+        return
+    await queue.put({"delta": delta, "node": _current_langgraph_node()})
+
+
 def _chat_create_kwargs(
     settings: Settings,
     messages: Sequence[BaseMessage],
@@ -68,13 +106,14 @@ def _chat_create_kwargs(
     stream: bool = False,
 ) -> dict[str, Any]:
     """组装 chat.completions.create 参数（thinking 走 extra_body）。"""
+    cfg = resolve_chat_llm(settings)
     kwargs: dict[str, Any] = {
-        "model": settings.llm_model,
+        "model": cfg.model,
         "messages": messages_to_api(messages),
     }
     if stream:
         kwargs["stream"] = True
-    extra = thinking_request_body(settings)
+    extra = thinking_request_body(settings, cfg)
     if extra:
         kwargs["extra_body"] = extra
     return kwargs
@@ -102,7 +141,7 @@ async def _stream_openai_chat(
         if rc:
             thinking_parts.append(rc)
             if thinking_queue is not None and settings.llm_thinking_stream:
-                await thinking_queue.put(rc)
+                await _enqueue_thinking(thinking_queue, rc)
         if cc:
             content_parts.append(cc)
             if content_queue is not None:
@@ -124,7 +163,11 @@ async def complete_messages(
     Returns:
         (content, reasoning_content, token_in, token_out)
     """
-    use_openai = settings.llm_thinking_enabled or content_queue is not None or thinking_queue is not None
+    use_openai = (
+        _thinking_enabled(settings)
+        or content_queue is not None
+        or thinking_queue is not None
+    )
     want_stream = content_queue is not None or (
         thinking_queue is not None and settings.llm_thinking_stream
     )
@@ -152,7 +195,7 @@ async def complete_messages(
             and thinking_queue is not None
             and settings.llm_thinking_stream
         ):
-            await thinking_queue.put(reasoning)
+            await _enqueue_thinking(thinking_queue, reasoning)
         return content, reasoning, token_in, token_out
 
     from app.agent.llm_sql import build_llm

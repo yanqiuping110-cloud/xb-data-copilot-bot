@@ -116,7 +116,6 @@
                   :status-text="msg.statusText"
                   :show-status="loading && idx === messages.length - 1 && !!msg.statusText"
                 />
-                <AskThinkingPanel v-if="canShowThinking && msg.thinking" :text="msg.thinking" />
                 <div class="answer-line">{{ msg.text }}</div>
 
                 <details
@@ -125,7 +124,11 @@
                   :open="msg.progressOpen"
                 >
                   <summary>{{ timelineSummary(msg.timeline) }}</summary>
-                  <AskTimeline :steps="msg.timeline" />
+                  <AskTimeline
+                    :steps="msg.timeline"
+                    :now-ms="progressClock"
+                    :show-thinking="canShowThinking"
+                  />
                 </details>
 
                 <template v-if="msg.intermediateSteps?.length">
@@ -300,7 +303,7 @@
 
 <script setup>
 /** 问数对话页：左侧对话栏 + 学校切换 + SSE 流式 POST /api/v1/ask */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchMe, switchSchool } from '../api/auth'
@@ -316,13 +319,13 @@ import {
 } from '../api/sessions'
 import ResultPanel from '../components/ResultPanel.vue'
 import AskPipelineHeader from '../components/ask/AskPipelineHeader.vue'
-import AskThinkingPanel from '../components/ask/AskThinkingPanel.vue'
 import AskTimeline from '../components/ask/AskTimeline.vue'
 import BriefReportDrawer from '../components/brief-report/BriefReportDrawer.vue'
 import ExcelExportDrawer from '../components/brief-report/ExcelExportDrawer.vue'
 import { countReportableMessages } from '../utils/briefReportTurn.js'
 import {
   applyProgressEvent,
+  applyThinkingDelta,
   createAssistantStreamMessage,
   finalizeTimeline,
   formatDurationMs,
@@ -336,6 +339,29 @@ const selectedSchId = ref(null)
 const question = ref('')
 const loading = ref(false)
 const cancelling = ref(false)
+const progressClock = ref(Date.now())
+let progressClockTimer = null
+
+watch(loading, (on) => {
+  if (on) {
+    progressClock.value = Date.now()
+    if (!progressClockTimer) {
+      progressClockTimer = setInterval(() => {
+        progressClock.value = Date.now()
+      }, 200)
+    }
+  } else if (progressClockTimer) {
+    clearInterval(progressClockTimer)
+    progressClockTimer = null
+  }
+})
+
+onUnmounted(() => {
+  if (progressClockTimer) {
+    clearInterval(progressClockTimer)
+    progressClockTimer = null
+  }
+})
 const abortController = ref(null)
 const currentTraceId = ref(null)
 const messages = ref([])
@@ -639,7 +665,7 @@ onMounted(async () => {
 
 function timelineSummary(timeline) {
   if (!timeline?.length) return ''
-  const total = timelineTotalMs(timeline)
+  const total = timelineTotalMs(timeline, progressClock.value)
   const totalText = total > 0 ? ` · ${formatDurationMs(total)}` : ''
   return `执行详情（${timeline.length} 步${totalText}）`
 }
@@ -695,6 +721,8 @@ async function onAsk() {
         const msg = messages.value[assistantIdx]
         if (!msg) return
         applyProgressEvent(msg, evt)
+        // 进行中保持执行详情展开，便于看到当前步骤与实时耗时
+        if (evt.status === 'running') msg.progressOpen = true
         if (evt.node === 'execute_plan_sql_step' && evt.detail) {
           upsertIntermediateStep(msg, evt.detail)
         }
@@ -749,10 +777,11 @@ async function onAsk() {
     }
 
   if (canShowThinking.value) {
-    streamHandlers.onThinkingDelta = ({ delta }) => {
+    streamHandlers.onThinkingDelta = (evt) => {
       const msg = messages.value[assistantIdx]
-      if (!msg || !delta) return
-      msg.thinking = (msg.thinking || '') + delta
+      if (!msg) return
+      applyThinkingDelta(msg, evt)
+      if (evt?.delta) msg.progressOpen = true
     }
   }
 

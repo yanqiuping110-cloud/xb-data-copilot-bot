@@ -93,8 +93,12 @@ def build_llm_sql_generation_constraints(
     settings: Settings | None = None,
 ) -> list[str]:
     """LLM Prompt【生成约束】：方言、表白名单、JOIN 别名、sch_id 等。"""
+    from app.system.sql_context import resolve_sql_context
+
+    sql_ctx = resolve_sql_context(settings)
     lines = [
-        "- 方言：MySQL 5.7，仅单条 SELECT，不要 INSERT/UPDATE/DELETE",
+        f"- 方言：{sql_ctx.prompt_dialect_label}，仅单条 SELECT，不要 INSERT/UPDATE/DELETE",
+        f"- {sql_ctx.aggregate_strategy_hint()}",
         "- 表名与列名仅可使用【允许查询的业务表】与【候选表字段清单】中已列出的名称，禁止引用未出现的表或字段",
         (
             "- 涉及多表 JOIN 时：FROM/JOIN 中每张表必须定义短别名"

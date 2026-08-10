@@ -13,6 +13,7 @@ from app.auth.service import AuthError
 from app.code.exceptions import CodeKnowledgeError
 from app.meta.exceptions import MetaError
 from app.policy.role_policy import PolicyError
+from app.system.exceptions import SystemConfigError
 
 
 def _error_body(code: str, message: str) -> dict:
@@ -61,6 +62,14 @@ async def meta_error_handler(_: Request, exc: MetaError) -> JSONResponse:
 
 async def code_knowledge_error_handler(_: Request, exc: CodeKnowledgeError) -> JSONResponse:
     """Git 代码知识库业务错误。"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_error_body(exc.code, exc.message),
+    )
+
+
+async def system_config_error_handler(_: Request, exc: SystemConfigError) -> JSONResponse:
+    """系统 LLM / 数据源配置错误。"""
     return JSONResponse(
         status_code=exc.status_code,
         content=_error_body(exc.code, exc.message),

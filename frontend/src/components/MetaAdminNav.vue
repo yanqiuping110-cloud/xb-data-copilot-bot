@@ -8,12 +8,14 @@
     <el-menu-item v-if="showScope" index="/admin/meta/scope">数据范围</el-menu-item>
     <el-menu-item index="/admin/meta/badcases">Badcase</el-menu-item>
     <el-menu-item index="/admin/meta/ops">运营中心</el-menu-item>
+    <el-menu-item v-if="showSystem" index="/admin/system/llm">AI 模型配置</el-menu-item>
+    <el-menu-item v-if="showSystem" index="/admin/system/datasources">数据源</el-menu-item>
     <el-menu-item v-if="showGitRepos" index="/admin/code/repos">Git 仓库</el-menu-item>
   </el-menu>
 </template>
 
 <script setup>
-/** 元数据管理子导航（Git 仓库 tab 仅超管可见） */
+/** 元数据管理子导航（Git / 系统配置仅超管可见） */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { fetchMe } from '../api/auth'
@@ -22,6 +24,7 @@ const route = useRoute()
 const userRole = ref(localStorage.getItem('userRole') || '')
 const showGitRepos = computed(() => userRole.value === 'ADMIN')
 const showScope = computed(() => userRole.value === 'ADMIN')
+const showSystem = computed(() => userRole.value === 'ADMIN')
 
 const active = computed(() => {
   const p = route.path

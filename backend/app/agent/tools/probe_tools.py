@@ -34,12 +34,15 @@ async def run_probe_sql(
         return {"error": "EMPTY_SQL", "tool": "run_probe_sql"}
 
     try:
+        from app.system.sql_context import resolve_sql_context
+
         safe_sql = validate_probe_sql(
             sql,
             ctx,
             max_rows=_PROBE_MAX_ROWS,
             settings=settings,
             policy=getattr(ctx, "effective_policy", None),
+            sql_ctx=resolve_sql_context(settings),
         )
     except SqlGuardError as exc:
         return {"error": exc.code, "message": exc.message, "tool": "run_probe_sql"}

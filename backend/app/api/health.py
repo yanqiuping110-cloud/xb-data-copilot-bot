@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.db.business import check_business_connection
 from app.db.copilot import check_copilot_connection
 from app.retrieval.search_index import create_search_index_client
+from app.system.runtime_config import resolve_business_dsn, resolve_chat_llm
 from config.settings import Settings
 
 router = APIRouter()
@@ -39,13 +40,25 @@ async def ready(request: Request):
     finally:
         await index_client.close()
 
+    chat = resolve_chat_llm(settings)
+    biz = resolve_business_dsn(settings)
+    from app.system.sql_context import resolve_sql_context
+
+    sql_ctx = resolve_sql_context(settings)
     checks = {
         "app_env": settings.app_env,
         "mysql_copilot": copilot_ok,
         "mysql_business": business_ok,
+        "business_database": biz.database,
+        "business_db_type": sql_ctx.db_type,
+        "business_server_version": sql_ctx.server_version,
+        "business_dialect": sql_ctx.dialect,
+        "business_config_source": biz.source,
         "vector_store": settings.vector_store,
         "search_index": search_index_ok,
-        "llm_api_base": settings.llm_api_base,
+        "llm_api_base": chat.api_base,
+        "llm_provider": chat.provider,
+        "llm_config_source": chat.source,
         "ragflow_enabled": settings.ragflow_enabled,
     }
     if settings.vector_store.lower() == "elasticsearch":

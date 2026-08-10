@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     # ---------- JWT 与超管种子（seed_admin.py）----------
     jwt_secret: str = Field(alias="JWT_SECRET")
     jwt_expire_hours: int = Field(default=24, alias="JWT_EXPIRE_HOURS")
+    config_crypto_key: str = Field(
+        default="",
+        alias="CONFIG_CRYPTO_KEY",
+        description="系统配置（API Key/业务库密码）Fernet 密钥；空则由 JWT_SECRET 派生",
+    )
     seed_admin_username: str = Field(default="admin", alias="SEED_ADMIN_USERNAME")
     seed_admin_password: str = Field(default="123456", alias="SEED_ADMIN_PASSWORD")
 
