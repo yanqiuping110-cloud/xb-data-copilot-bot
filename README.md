@@ -627,6 +627,7 @@ erDiagram
 | [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) | 完整架构、14 周里程碑、§14 Phase 2 backlog |
 | [docs/PHASE2_ROADMAP.md](docs/PHASE2_ROADMAP.md) | **Phase 2 三大优先级**：Chart SSR、运营闭环、MCP/iframe |
 | [docs/CHART_VISUALIZATION_PLAN.md](docs/CHART_VISUALIZATION_PLAN.md) | 图表展示：Plan 意图识别、chartSpec、历史回放；SSR 见 Phase 2 §P2-A |
+| [docs/DIALOGUE_GATE_PLAN.md](docs/DIALOGUE_GATE_PLAN.md) | 对话门禁与多轮澄清：闲聊短路、缺槽追问、召回/Plan 闸门 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 模块完成度与联调清单 |
 | [docs/EVAL_QUESTIONS.md](docs/EVAL_QUESTIONS.md) | 评测问句（含 inj-* 注入子集） |
 | [docs/PROMPT_SECURITY.md](docs/PROMPT_SECURITY.md) | 威胁模型、定界符约定、运营规范 |
