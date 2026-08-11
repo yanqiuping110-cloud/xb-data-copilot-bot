@@ -70,17 +70,38 @@ def test_assemble_compare_by_date_with_labels():
     step_a = {
         "step_id": 1,
         "entity_label": "活动A",
-        "columns": ["日期", "打卡人数", "运动个数"],
+        "columns": ["date", "check_in_count", "sport_count"],
         "rows": [["2026-05-20", 10, 100], ["2026-05-21", 12, 110]],
     }
     step_b = {
         "step_id": 2,
         "entity_label": "活动B",
-        "columns": ["日期", "打卡人数", "运动个数"],
+        "columns": ["date", "check_in_count", "sport_count"],
         "rows": [["2026-05-20", 5, 50], ["2026-05-21", 6, 55]],
     }
-    cols, rows = assemble_compare_by_date([step_a, step_b], join_key="日期")
-    assert "日期" in cols
+    cols, rows = assemble_compare_by_date([step_a, step_b], join_key="date")
+    assert "date" in cols
     assert any("活动A" in c for c in cols)
     assert any("活动B" in c for c in cols)
     assert len(rows) == 2
+
+
+def test_assemble_compare_by_date_chinese_join_key_compat():
+    """旧 plan join_key=日期 仍可对齐英文 date 列。"""
+    from app.agent.result_assembler import assemble_compare_by_date
+
+    step_a = {
+        "step_id": 1,
+        "entity_label": "A",
+        "columns": ["date", "cnt"],
+        "rows": [["2026-01-01", 1]],
+    }
+    step_b = {
+        "step_id": 2,
+        "entity_label": "B",
+        "columns": ["date", "cnt"],
+        "rows": [["2026-01-01", 2]],
+    }
+    cols, rows = assemble_compare_by_date([step_a, step_b], join_key="日期")
+    assert "date" in cols
+    assert len(rows) == 1

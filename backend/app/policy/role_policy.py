@@ -125,6 +125,10 @@ def build_llm_sql_generation_constraints(
         "- 只能使用【候选表字段清单】中的真实 column_name，"
         "禁止编造未列出的字段"
     )
+    lines.append(
+        "- SELECT 输出列 AS 别名必须用英文标识符（snake_case / metric_code），"
+        "禁止中文别名；中文表头由系统在展示/导出时转换"
+    )
     lines.append("- 输出仅包含 SQL，不要解释")
     return lines
 

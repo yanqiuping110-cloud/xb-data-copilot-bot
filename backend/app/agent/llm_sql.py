@@ -24,6 +24,12 @@ _CONTEXT_ONLY_HINT = (
     "时间/日期筛选须使用清单中的日期或时间列，禁止把中文「日期」当作列名。"
 )
 
+# 业务库普遍不支持中文 AS；展示层再 localize_result_columns 转中文表头。
+_ENGLISH_ALIAS_HINT = (
+    "SELECT 输出列别名必须使用英文标识符（snake_case 或 metric_code），"
+    "禁止中文别名、禁止用引号包裹中文 AS；中文表头由系统在展示/导出时转换。"
+)
+
 
 def _extract_sql(text: str) -> str | None:
     """从模型输出中提取 SELECT 或 WITH ... SELECT 语句。"""
@@ -89,7 +95,7 @@ async def generate_sql_from_llm(
         + "你是企业问数系统的 SQL 生成助手，只为业务库生成只读查询。"
         + f"目标方言：{sql_ctx.prompt_dialect_label}。"
         + _CONTEXT_ONLY_HINT
-        + "SELECT 列别名优先使用中文；仅当用户明确要求英文表头时才使用英文别名。"
+        + _ENGLISH_ALIAS_HINT
         + LLM_JOIN_ALIAS_SYSTEM_HINT
     )
     if (plan or {}).get("aggregate_strategy") == "subquery_per_branch":
@@ -159,6 +165,7 @@ async def generate_sql_step_from_llm(
         "趋势类问题按上下文中的日期/时间列 GROUP BY；"
         "人数类指标用 COUNT(DISTINCT 清单中的人员标识列) 或 COUNT(*) 视字段含义而定。"
         + _CONTEXT_ONLY_HINT
+        + _ENGLISH_ALIAS_HINT
         + LLM_JOIN_ALIAS_SYSTEM_HINT
     )
     if (plan or {}).get("aggregate_strategy") == "subquery_per_branch":
@@ -167,7 +174,8 @@ async def generate_sql_step_from_llm(
         f"{context_text}\n\n"
         f"规划步骤：\n{steps_text}\n\n"
         f"用户问题：{question}\n\n"
-        "请直接输出一条完整 SQL（单条 SELECT，必要时用标量子查询分路聚合），列别名优先中文。"
+        "请直接输出一条完整 SQL（单条 SELECT，必要时用标量子查询分路聚合），"
+        "列别名须为英文标识符。"
     )
     from app.agent.llm_client import complete_messages
 
@@ -242,8 +250,8 @@ async def generate_sql_for_plan_step(
     if step_metrics:
         metrics_line = "、".join(step_metrics[:12])
         constraints.append(
-            f"本步结果列须覆盖以下指标（中文列名）：{metrics_line}。"
-            "人数类用 COUNT(DISTINCT 人员标识列)；各分项分别聚合。"
+            f"本步结果须覆盖以下业务指标（语义为中文，SQL 别名须英文）：{metrics_line}。"
+            "人数类用 COUNT(DISTINCT 人员标识列)；各分项分别聚合，别名用 snake_case。"
         )
     constraint_text = "\n".join(constraints)
 
@@ -256,8 +264,10 @@ async def generate_sql_for_plan_step(
         "本步骤 SQL 将单独执行；多实体对比时每一步只查一个实体，由程序按对齐键合并结果。"
         "须完整实现问句与本步 goal/metrics 中的全部指标，不得省略维度或合并为单一总数。"
         "多表关联时使用上下文【候选表字段】中的外键与维度表；"
-        "结果须含对齐键列（如日期，别名「日期」）及各指标列；优先 JOIN + GROUP BY 或条件聚合。"
+        "结果须含英文对齐键列（如 date / stat_date）及各指标英文别名列；"
+        "优先 JOIN + GROUP BY 或条件聚合。"
         + _CONTEXT_ONLY_HINT
+        + _ENGLISH_ALIAS_HINT
         + LLM_JOIN_ALIAS_SYSTEM_HINT
     )
     user_parts = [
@@ -270,10 +280,12 @@ async def generate_sql_for_plan_step(
         f"当前仅需完成：{step_line}",
     ]
     if step_metrics:
-        user_parts.append(f"本步 metrics：{'、'.join(step_metrics)}")
+        user_parts.append(f"本步 metrics（业务语义）：{'、'.join(step_metrics)}")
     if constraint_text:
         user_parts.extend(["", "【本步硬性约束】", constraint_text])
-    user_parts.extend(["", "请输出本步骤的一条 SELECT（列别名优先中文，须含对齐键列）。"])
+    user_parts.extend(
+        ["", "请输出本步骤的一条 SELECT（英文列别名，须含对齐键列如 date/stat_date）。"]
+    )
     user = "\n".join(user_parts)
     from app.agent.llm_client import complete_messages
 

@@ -16,7 +16,7 @@ def test_normalize_plan_multi_sql_steps():
         "multi_sql": True,
         "metrics": ["打卡人数", "跳绳运动个数"],
         "assembly_mode": "join_by_date",
-        "join_key": "日期",
+        "join_key": "date",
         "steps": [
             {
                 "id": 1,

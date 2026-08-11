@@ -222,8 +222,10 @@ async def generate_plan_from_llm(
         "- anchor_table: 汇聚表名（如活动主表）\n"
         "- metric_groups: 可选，每路来源 [{source_tables, anchor_table, biz_domain}]\n"
         "- assembly_mode: multi_sql=true 时填 join_by_date | pivot | join\n"
-        "- join_key: 组装对齐键，中文别名如「日期」\n"
-        "- metrics: 问句要求的全部指标/输出列（中文），如参与人数、各项目运动个数\n"
+        "- join_key: 组装对齐键，须为英文 SQL 别名（如 date / stat_date）；"
+        "展示层再转为中文表头\n"
+        "- metrics: 问句要求的全部指标/输出列（中文语义），如参与人数、各项目运动个数；"
+        "实际 SQL 别名用英文，由展示层本地化\n"
         "- steps: 每步含 id, goal, needs_tool, sql_step, entity_label, filter_hint, metrics\n"
         "  · sql_step=true 表示该步单独生成并执行一条 SELECT\n"
         "  · goal 须写清本步要输出的全部指标（不可只写「按日指标」而遗漏问句中的分项）\n"
@@ -287,7 +289,7 @@ async def generate_plan_from_llm(
             "",
             "请输出 JSON 示例：",
             '{"complexity":"high","intent":"entity_compare","multi_sql":true,'
-            '"assembly_mode":"join_by_date","join_key":"日期",'
+            '"assembly_mode":"join_by_date","join_key":"date",'
             '"metrics":["指标A","指标B","指标C"],'
             '"steps":[{"id":1,"goal":"实体X按日：指标A、B、C",'
             '"sql_step":true,"entity_label":"实体X",'

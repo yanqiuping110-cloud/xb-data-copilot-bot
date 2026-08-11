@@ -36,7 +36,8 @@ def test_expand_table_names_by_relations():
 
 def test_reject_hallucinated_columns():
     sql = (
-        "SELECT s.student_name AS 学生名, s.enrollment_year AS 入学年份, COUNT(r.id) AS 运动打卡数 "
+        "SELECT s.student_name AS student_nm, s.enrollment_year AS enroll_year, "
+        "COUNT(r.id) AS sport_check_count "
         "FROM base_student AS s "
         "JOIN sport_activity_qzs_record AS r ON s.id = r.people_id "
         "WHERE r.project_id = 1 "
@@ -54,7 +55,8 @@ def test_reject_hallucinated_columns():
 
 def test_accept_real_columns():
     sql = (
-        "SELECT s.name AS 学生名, s.in_year AS 入学年份, SUM(r.sport_count) AS 运动打卡数 "
+        "SELECT s.name AS student_name, s.in_year AS enrollment_year, "
+        "SUM(r.sport_count) AS sport_check_count "
         "FROM base_student AS s "
         "JOIN sport_activity_qzs_record AS r ON s.id = r.people_id "
         "WHERE r.project_id = 1 "
@@ -68,6 +70,21 @@ def test_accept_real_columns():
 
 
 def test_accept_select_alias_in_order_by():
+    sql = (
+        "SELECT DATE(create_time) AS stat_date, COUNT(DISTINCT people_id) AS participant_count "
+        "FROM sport_activity_qzs_record "
+        "WHERE create_time >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) "
+        "GROUP BY DATE(create_time) "
+        "ORDER BY stat_date"
+    )
+    column_map = {
+        "sport_activity_qzs_record": {"id", "people_id", "project_id", "create_time"},
+    }
+    validate_sql_columns(sql, column_map)
+
+
+def test_accept_chinese_alias_compat():
+    """兼容历史中文 AS（部分方言支持）；校验仍应通过。"""
     sql = (
         "SELECT DATE(create_time) AS 日期, COUNT(DISTINCT people_id) AS 参与人数 "
         "FROM sport_activity_qzs_record "

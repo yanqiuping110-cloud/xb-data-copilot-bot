@@ -54,7 +54,7 @@ def test_apply_scope_only_on_tables_with_binding():
         is_admin_bypass=False,
     )
     sql = (
-        "SELECT a.record_date AS `日期`, COUNT(DISTINCT a.user_id) AS `活动参与人数` "
+        "SELECT a.record_date AS stat_date, COUNT(DISTINCT a.user_id) AS participant_count "
         "FROM sport_activity_qzs_time AS a "
         "JOIN sport_activity_new AS act ON a.activity_id = act.id AND act.status = 1 "
         "WHERE a.record_date >= CURRENT_DATE - INTERVAL '30' DAY "

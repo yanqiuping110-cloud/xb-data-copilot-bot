@@ -8,22 +8,39 @@ from typing import Any
 
 from app.agent.plan_compare import short_entity_label
 
+import re
+
+_CJK_RE_LOCAL = re.compile(r"[\u4e00-\u9fff]")
+
 _JOIN_KEY_PRIORITY = (
-    "年级",
+    "date",
+    "stat_date",
+    "record_date",
+    "dt",
     "grade",
-    "班级",
     "class",
     "sch_id",
-    "学校",
-    "日期",
-    "date",
-    "dt",
-    "月份",
     "month",
-    "周",
     "week",
-    "项目",
     "project",
+    "日期",
+    "年级",
+    "班级",
+    "学校",
+    "月份",
+    "周",
+    "项目",
+)
+
+# 按日对齐时的日期列候选（英文优先，兼容旧中文别名）
+_DATE_JOIN_KEYS = (
+    "date",
+    "stat_date",
+    "record_date",
+    "dt",
+    "day",
+    "日期",
+    "统计日期",
 )
 
 
@@ -200,9 +217,17 @@ def pivot_wide(
 def _find_date_join_column(columns: list[str], join_key: str | None = None) -> str | None:
     """在列名中找日期维（用于多活动按日对齐）。"""
     if join_key:
+        key = str(join_key).strip()
+        key_l = key.lower()
         for col in columns:
-            if col == join_key or join_key in col:
+            if col == key or key in col or key_l == col.lower() or key_l in col.lower():
                 return col
+        # join_key 为中文「日期」而结果列为 date/stat_date 时走英文候选
+        if _CJK_RE_LOCAL.search(key) or key_l in ("date", "day", "dt"):
+            for hint in _DATE_JOIN_KEYS:
+                for col in columns:
+                    if col == hint or hint in col.lower() or hint in col:
+                        return col
     for hint in _DATE_JOIN_KEYS:
         for col in columns:
             if col == hint or hint in col.lower() or hint in col:
@@ -240,7 +265,7 @@ def assemble_compare_by_date(
     if not intermediate_results:
         return [], []
 
-    join_key = join_key or "日期"
+    join_key = join_key or "date"
     prefixed: list[tuple[list[str], list[list], str]] = []
 
     for ir in intermediate_results:
