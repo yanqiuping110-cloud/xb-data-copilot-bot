@@ -83,3 +83,18 @@ class AskGraphState(TypedDict, total=False):
     # 图表展示
     visualization_intent: dict | None
     chart_spec: dict | None
+    # 对话门禁 / AskUserQuestion
+    dialogue_act: str | None
+    dialogue_confidence: float | None
+    resolved_question: str | None
+    missing_slots: list[str]
+    filled_slots: dict[str, Any]
+    clarify_question: str | None
+    clarify_options: list[str]
+    ask_user_question: dict | None
+    pending_clarification: dict | None
+    ready_to_execute: bool
+    clarification_answers: list[dict] | None
+    clarification_thread_id: str | None
+    dialogue_gate_skipped: bool
+    need_clarification: bool

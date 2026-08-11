@@ -40,10 +40,13 @@ async def load_session_memory(state: AskGraphState, config: RunnableConfig) -> d
     status = "success" if not memory.skipped else "degraded"
     await _span(config, "load_session_memory", t0, status, detail)
 
-    return {
+    out: dict[str, Any] = {
         "session_memory": memory,
         "memory_skipped": memory.skipped,
     }
+    if memory.pending_clarification:
+        out["pending_clarification"] = memory.pending_clarification
+    return out
 
 
 async def load_user_preference(state: AskGraphState, config: RunnableConfig) -> dict:
@@ -67,8 +70,48 @@ async def process_memory_context_node(state: AskGraphState, config: RunnableConf
     t0 = time.perf_counter()
     c = _cfg(config)
     settings: Settings = c["settings"]
-    question = state.get("normalized_question") or state.get("question") or ""
+    question = (
+        state.get("resolved_question")
+        or state.get("normalized_question")
+        or state.get("question")
+        or ""
+    )
     memory = state.get("session_memory")
+
+    # 有 pending 或门禁已产出 resolved：禁止 STAR/指代再改写问句
+    skip_rewrite = bool(
+        state.get("pending_clarification")
+        or (state.get("resolved_question") and state.get("dialogue_act") == "data_query")
+    )
+    if skip_rewrite:
+        prefs = state.get("user_preferences") or []
+        pref_bits = []
+        for p in prefs[:6]:
+            pref_bits.append(f"{p.pref_key}={p.pref_value}")
+        memory_prompt = ""
+        if pref_bits:
+            memory_prompt = "【用户偏好】\n" + "\n".join(pref_bits)
+        if memory and memory.summary_text:
+            memory_prompt = (memory_prompt + "\n\n【会话摘要】\n" + memory.summary_text).strip()
+        await _span(
+            config,
+            "process_memory_context",
+            t0,
+            "success",
+            {
+                "skip_rewrite": True,
+                "resolved_question": question,
+                "memory_chars": len(memory_prompt),
+            },
+        )
+        out_skip: dict[str, Any] = {
+            "memory_prompt_text": memory_prompt,
+            "memory_star": None,
+            "reference_type": None,
+            "normalized_question": question,
+            "recall_question": question,
+        }
+        return out_skip
 
     result = await process_memory_context_llm(
         settings=settings,

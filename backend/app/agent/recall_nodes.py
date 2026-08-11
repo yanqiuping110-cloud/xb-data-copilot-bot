@@ -200,7 +200,49 @@ async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig
             "prompt_column_counts": {k: len(v) for k, v in merged.prompt_columns.items()},
         },
     )
-    return {"merged_recall": merged, "recall_code_artifacts": code_items}
+    out: dict = {"merged_recall": merged, "recall_code_artifacts": code_items}
+
+    # 召回二次闸门：低分 / 空结果 → AskUserQuestion
+    if settings.dialogue_gate_enabled:
+        top_table = merged.recalled_tables[0].score if merged.recalled_tables else 0.0
+        top_metric = merged.metrics[0].score if merged.metrics else 0.0
+        empty_recall = not merged.recalled_tables and not merged.metrics
+        low_table = bool(merged.recalled_tables) and top_table < settings.dialogue_recall_table_min
+        # 问句像指标问但 metric top1 过低
+        q = state.get("normalized_question") or ""
+        looks_metric = any(
+            k in q
+            for k in ("人数", "人次", "数量", "次数", "金额", "销量", "订单", "占比", "趋势", "汇总")
+        )
+        low_metric = looks_metric and (
+            not merged.metrics or top_metric < settings.dialogue_recall_metric_min
+        )
+        if empty_recall or low_table or low_metric:
+            metric_opts = [m.metric_name or m.metric_code for m in merged.metrics[:4] if m]
+            from app.agent.ask_user_payload import build_ask_user_from_slots
+
+            reason = "未找到足够相关的数据表或指标，请补充或换一种问法"
+            if low_metric and metric_opts:
+                reason = "找到多个相近指标，请确认你关注哪一个"
+            ask_user = build_ask_user_from_slots(
+                missing_slots=["metric"] if low_metric else ["entity", "metric"],
+                clarify_question=reason,
+                metric_candidates=[str(x) for x in metric_opts if x],
+                reason=reason,
+                max_questions=settings.dialogue_ask_max_questions,
+                max_options=settings.dialogue_ask_max_options,
+            )
+            out.update(
+                {
+                    "need_clarification": True,
+                    "dialogue_act": "clarify",
+                    "ready_to_execute": False,
+                    "missing_slots": ["metric"] if low_metric else ["entity", "metric"],
+                    "ask_user_question": ask_user,
+                    "clarify_question": reason,
+                }
+            )
+    return out
 
 
 async def build_llm_context(state: AskGraphState, config: RunnableConfig) -> dict:

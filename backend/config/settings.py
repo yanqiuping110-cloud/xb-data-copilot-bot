@@ -301,6 +301,63 @@ class Settings(BaseSettings):
     session_evict_policy: str = Field(default="oldest", alias="SESSION_EVICT_POLICY")
     session_ui_turn_limit: int = Field(default=30, alias="SESSION_UI_TURN_LIMIT")
 
+    # ---------- 对话门禁 / AskUserQuestion（DIALOGUE_GATE_PLAN）----------
+    dialogue_gate_enabled: bool = Field(
+        default=True,
+        alias="DIALOGUE_GATE_ENABLED",
+        description="是否启用闲聊/缺槽/域外门禁；false 时与现网一致每句进召回",
+    )
+    dialogue_gate_llm_enabled: bool = Field(
+        default=True,
+        alias="DIALOGUE_GATE_LLM_ENABLED",
+        description="门禁是否调用 LLM；false 时仅规则短路",
+    )
+    dialogue_clarify_max_asks: int = Field(
+        default=2,
+        alias="DIALOGUE_CLARIFY_MAX_ASKS",
+        description="单主题最大追问轮数",
+    )
+    dialogue_min_confidence: float = Field(
+        default=0.55,
+        alias="DIALOGUE_MIN_CONFIDENCE",
+        description="门禁置信低于此值倾向 clarify",
+    )
+    dialogue_ask_max_questions: int = Field(
+        default=2,
+        alias="DIALOGUE_ASK_MAX_QUESTIONS",
+        description="单次 AskUserQuestion 问题上限（硬顶 4）",
+    )
+    dialogue_ask_max_options: int = Field(
+        default=4,
+        alias="DIALOGUE_ASK_MAX_OPTIONS",
+        description="AskUserQuestion 每题选项上限",
+    )
+    dialogue_agent_ask_enabled: bool = Field(
+        default=True,
+        alias="DIALOGUE_AGENT_ASK_ENABLED",
+        description="Agent Loop 是否允许调用 ask_user_question",
+    )
+    dialogue_recall_table_min: float = Field(
+        default=0.15,
+        alias="DIALOGUE_RECALL_TABLE_MIN",
+        description="表召回 top1 低于此分倾向澄清/未找到",
+    )
+    dialogue_recall_metric_min: float = Field(
+        default=0.12,
+        alias="DIALOGUE_RECALL_METRIC_MIN",
+        description="指标召回 top1 低于此分倾向 AskUserQuestion",
+    )
+    dialogue_fail_open: bool = Field(
+        default=True,
+        alias="DIALOGUE_FAIL_OPEN",
+        description="门禁 LLM 异常时是否降级继续问数",
+    )
+    dialogue_require_time_slot: bool = Field(
+        default=True,
+        alias="DIALOGUE_REQUIRE_TIME_SLOT",
+        description="无时间且无累计口径时是否强制澄清",
+    )
+
     # ---------- 动态数据权限（第 13 周 · §11.6）----------
     policy_data_scope_enabled: bool = Field(
         default=False,

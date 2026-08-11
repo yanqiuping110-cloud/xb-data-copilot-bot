@@ -1,0 +1,70 @@
+[
+  {
+    "id": "dlg-chat-01",
+    "question": "你好",
+    "expect_status": "chitchat",
+    "expect_dialogue_act": "chitchat",
+    "forbid_spans": ["do_recall_tables", "execute_sql", "generate_sql"]
+  },
+  {
+    "id": "dlg-chat-02",
+    "question": "你能做什么",
+    "expect_status": "chitchat",
+    "expect_dialogue_act": "chitchat",
+    "forbid_spans": ["execute_sql"]
+  },
+  {
+    "id": "dlg-oos-01",
+    "question": "帮我写首诗",
+    "expect_status": "out_of_scope",
+    "expect_dialogue_act": "out_of_scope",
+    "forbid_spans": ["execute_sql"]
+  },
+  {
+    "id": "dlg-clr-01",
+    "question": "帮我看看华东区",
+    "expect_status": "need_clarification",
+    "expect_dialogue_act": "clarify",
+    "expect_missing_slots_any": ["time_range", "metric"],
+    "forbid_spans": ["execute_sql"]
+  },
+  {
+    "id": "dlg-clr-02",
+    "question": "近7天订单数量",
+    "depends_on": "dlg-clr-01",
+    "expect_status": "success",
+    "note": "接上轮澄清后应出数或合理空集"
+  },
+  {
+    "id": "dlg-clr-03",
+    "question": "最近怎么样",
+    "expect_status_any": ["need_clarification", "out_of_scope"],
+    "forbid_spans": ["execute_sql"]
+  },
+  {
+    "id": "dlg-ok-01",
+    "question": "本月销售额是多少",
+    "expect_dialogue_act": "data_query",
+    "allow_status": ["success", "fail"]
+  },
+  {
+    "id": "dlg-iso-01",
+    "steps": [
+      {"question": "本月销售额是多少", "expect_status": "success"},
+      {"question": "华南区", "expect_status": "need_clarification", "note": "新 pending，不得拼成上题+华南区"}
+    ]
+  },
+  {
+    "id": "dlg-iso-02",
+    "steps": [
+      {"question": "帮我看看华东区", "expect_status": "need_clarification"},
+      {"question": "近7天华南区订单数量", "expect_dialogue_act": "data_query", "note": "换题清 pending"}
+    ]
+  },
+  {
+    "id": "dlg-iso-03",
+    "question": "近7天",
+    "clarification_thread_id": "clr_expired_dummy",
+    "note": "过期 threadId 应忽略作答，不合并"
+  }
+]

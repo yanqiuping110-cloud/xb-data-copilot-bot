@@ -9,6 +9,9 @@ NODE_PHASE: dict[str, tuple[str, str]] = {
     "load_session_memory": ("understand", "理解"),
     "load_user_preference": ("understand", "理解"),
     "process_memory_context": ("understand", "理解"),
+    "route_dialogue": ("understand", "理解"),
+    "reply_chat": ("answer", "回答"),
+    "ask_clarification": ("understand", "理解"),
     "extract_keywords": ("understand", "理解"),
     "do_recall_tables": ("recall", "召回"),
     "recall_tables": ("recall", "召回"),
@@ -46,6 +49,9 @@ NODE_ICON: dict[str, str] = {
     "load_session_memory": "collection",
     "load_user_preference": "collection",
     "process_memory_context": "collection",
+    "route_dialogue": "chat-dot-round",
+    "reply_chat": "chat-line-round",
+    "ask_clarification": "question-filled",
     "extract_keywords": "search",
     "do_recall_tables": "search",
     "do_recall_columns": "search",
@@ -75,6 +81,19 @@ def build_progress_summary(node: str, detail: dict[str, Any] | None) -> str | No
     """脱敏人话摘要：禁止物理表名/列名/SQL 片段。"""
     if not detail:
         return None
+
+    if node == "route_dialogue":
+        act = detail.get("dialogueAct") or detail.get("dialogue_act")
+        if act:
+            return f"判定为 {act}"
+        if detail.get("skipped"):
+            return "门禁已关闭"
+
+    if node == "ask_clarification":
+        return "需要补充信息"
+
+    if node == "reply_chat":
+        return "已直接答复"
 
     if node == "extract_keywords":
         kws = detail.get("keywords") or []

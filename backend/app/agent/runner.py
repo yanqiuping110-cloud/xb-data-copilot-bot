@@ -258,7 +258,12 @@ async def stream_ask_graph(
             collector=collector,
         )
         yield done_event(response)
-        if response.status != "success":
+        if response.status not in (
+            "success",
+            "need_clarification",
+            "chitchat",
+            "out_of_scope",
+        ):
             logger.error(
                 "[trace=%s] 问数流结束 status=%s error_code=%s error_message=%s sql=%r",
                 trace_id,
@@ -408,6 +413,12 @@ async def _prepare_ask_run(
         "correct_sql_count": 0,
         "sql_params": {},
     }
+    if body.clarification_answers:
+        initial["clarification_answers"] = [
+            a.model_dump() for a in body.clarification_answers
+        ]
+    if body.clarification_thread_id:
+        initial["clarification_thread_id"] = body.clarification_thread_id
 
     collector = TraceLogCollector(trace_id, stream=stream)
     answer_delta_queue: asyncio.Queue[str] | None = asyncio.Queue() if stream else None
@@ -489,9 +500,18 @@ async def _finalize_ask_run(
 
     status = final_state.get("status") or "fail"
     error_code = final_state.get("error_code")
-    error_message = final_state.get("error_message") if status != "success" else None
+    # need_clarification / chitchat / out_of_scope 不算 fail
+    dialogue_statuses = {"need_clarification", "chitchat", "out_of_scope"}
+    error_message = (
+        final_state.get("error_message")
+        if status not in ("success", *dialogue_statuses)
+        else None
+    )
     row_count = len(final_state.get("rows") or [])
     latency_ms_total = _elapsed_ms(t0)
+
+    clarification = _clarification_from_state(final_state)
+    dialogue_act = final_state.get("dialogue_act")
 
     display_columns = localize_result_columns(
         final_state.get("columns"),
@@ -502,13 +522,17 @@ async def _finalize_ask_run(
         answer=final_state.get("answer"),
         columns=display_columns,
         rows=final_state.get("rows"),
-        error_message=final_state.get("error_message") if status != "success" else None,
+        error_message=final_state.get("error_message")
+        if status not in ("success", *dialogue_statuses)
+        else None,
         intermediate_results=_serialize_intermediate_for_storage(
             final_state.get("intermediate_results")
         ),
         assembly_mode=final_state.get("assembly_mode"),
         chart_spec=final_state.get("chart_spec"),
         visualization_intent=final_state.get("visualization_intent"),
+        clarification=clarification,
+        dialogue_act=dialogue_act,
     )
 
     trace_log = collector.to_json(
@@ -551,6 +575,10 @@ async def _finalize_ask_run(
     session_svc = SessionService(copilot_session, settings)
     if status == "success":
         await session_svc.upsert_on_ask(session_id, ctx, question, success=True)
+        # 成功出数立即清 pending，避免串话
+        if settings.session_memory_enabled:
+            mem_clear = MemoryService(copilot_session, settings)
+            await mem_clear.clear_pending_clarification(session_id, ctx.user_id)
     await copilot_session.commit()
 
     if status == "success" and settings.session_memory_enabled:
@@ -561,6 +589,14 @@ async def _finalize_ask_run(
             await copilot_session.commit()
 
     chart_spec_obj = _chart_spec_from_state(final_state)
+    clarification_obj = None
+    if clarification:
+        from app.schemas.ask import ClarificationPayload
+
+        try:
+            clarification_obj = ClarificationPayload.model_validate(clarification)
+        except Exception:
+            clarification_obj = None
 
     return AskResponse(
         trace_id=trace_id,
@@ -574,7 +610,7 @@ async def _finalize_ask_run(
         latency_ms=_elapsed_ms(t0),
         error_code=error_code,
         error_message=final_state.get("error_message")
-        if status != "success"
+        if status not in ("success", "need_clarification", "chitchat", "out_of_scope")
         else None,
         assembly_mode=final_state.get("assembly_mode"),
         intermediate_results=_serialize_intermediate_for_response(
@@ -584,6 +620,8 @@ async def _finalize_ask_run(
         chart_spec=chart_spec_obj,
         chart_image_url=None,
         visualization_intent=final_state.get("visualization_intent"),
+        dialogue_act=dialogue_act,
+        clarification=clarification_obj,
     )
 
 
@@ -761,6 +799,27 @@ def _intermediate_preview(intermediate: list | None) -> list[dict] | None:
         }
         for ir in intermediate[-3:]
     ]
+
+
+def _clarification_from_state(state: AskGraphState) -> dict | None:
+    """从 state 组装 clarification 字典（供 result_json / AskResponse）。"""
+    payload = state.get("_clarification_payload")
+    if isinstance(payload, dict):
+        return payload
+    ask_user = state.get("ask_user_question")
+    if not ask_user and state.get("status") != "need_clarification":
+        return None
+    from app.agent.ask_user_payload import clarification_payload_dict
+
+    pending = state.get("pending_clarification") or {}
+    return clarification_payload_dict(
+        ask_user=ask_user if isinstance(ask_user, dict) else None,
+        missing_slots=list(state.get("missing_slots") or []),
+        partial_question=state.get("resolved_question") or state.get("normalized_question"),
+        thread_id=pending.get("thread_id"),
+        clarify_question=state.get("clarify_question"),
+        clarify_options=state.get("clarify_options"),
+    )
 
 
 def _chart_spec_from_state(state: AskGraphState) -> ChartSpec | None:

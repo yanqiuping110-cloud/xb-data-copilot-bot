@@ -1,10 +1,10 @@
 # 对话门禁与多轮澄清 · 开发计划
 
-> **状态**：待开发（方案已定）  
-> **版本**：v1.4 · 2026-08-11  
+> **状态**：已实现（P0+P1 落地，可按 Feature Flag 回滚）  
+> **版本**：v1.5 · 2026-08-11  
 > **范围**：闲聊短路、域外拒答、缺槽澄清、低置信召回闸门；多轮半截问句合并后再执行；**AskUserQuestion 主动提问工具**；**澄清线程与成功问数隔离**；**与 L1 短期记忆协同**；开源参考（门禁 + AskUser）  
 > **原则**：在现有 LangGraph 问数图上**加门禁**，不推倒 Plan / Agent Loop / 分步 SQL  
-> **关联文档**：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) §11.5（会话记忆）、[ASK_STREAM_UI_PLAN.md](./ASK_STREAM_UI_PLAN.md)、[EVAL_QUESTIONS.md](./EVAL_QUESTIONS.md)  
+> **关联文档**：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) §11.5（会话记忆）、[ASK_STREAM_UI_PLAN.md](./ASK_STREAM_UI_PLAN.md)、[EVAL_QUESTIONS.md](./EVAL_QUESTIONS.md)、[eval/dialogue_gate.json](./eval/dialogue_gate.json)  
 > **参考**：[WorkBuddy · AskUserQuestion 设计哲学](https://cloud.tencent.com/developer/article/2703129)（结构化提问、选项克制、人机协作）
 
 ---
@@ -36,7 +36,7 @@
 | 场景 | 用户表现 | 当前行为 | 不良后果 |
 |------|----------|----------|----------|
 | 闲聊 | 「你好」「你能做什么」 | 全量召回 → Plan → 尝试 SQL | 错表、空结果、浪费 LLM/库 |
-| 半截问 | 「帮我看看跳绳」 | 强行补全并执行 | 答非所问 |
+| 半截问 | 「帮我看看华东区」 | 强行补全并执行 | 答非所问 |
 | 模糊问 | 「最近怎么样」 | 低相关召回仍生成 SQL | 错误执行、信任损伤 |
 | 多轮补全 | 先问一半，再补时间/指标 | 仅有指代改写（「那上周呢」） | 无法「先问再查」 |
 
@@ -140,14 +140,14 @@ flowchart TD
 {
   "dialogue_act": "chitchat|clarify|data_query|out_of_scope",
   "confidence": 0.86,
-  "resolved_question": "本校近30天跳绳参与人数趋势",
+  "resolved_question": "近30天华东区销售额趋势",
   "missing_slots": ["time_range", "metric"],
   "filled_slots": {
-    "entity": "跳绳",
+    "entity": "华东区",
     "scope": "本校"
   },
-  "clarify_question": "你想看哪个时间范围？例如近7天、本月、本学期。",
-  "clarify_options": ["近7天", "本月", "本学期"],
+  "clarify_question": "你想看哪个时间范围？例如近7天、本月、本年。",
+  "clarify_options": ["近7天", "本月", "本年"],
   "assumptions": [],
   "reason": "有实体无时间与指标"
 }
@@ -223,7 +223,7 @@ P0 硬规则建议：**无时间且无明确「累计/总共」口径 → clarif
 
 | 触发点 | 典型场景 | 是否已召回 |
 |--------|----------|------------|
-| ① 门禁 | 「帮我看看跳绳」缺时间/指标 | 否（省成本） |
+| ① 门禁 | 「帮我看看华东区」缺时间/指标 | 否（省成本） |
 | ② Plan | 问句完整但口径歧义、多锚点表 | 是（选项可来自候选） |
 | ③ Agent | `search_metrics` 返回多个近义指标 | 是（选项来自 observation） |
 
@@ -235,7 +235,7 @@ P0 硬规则建议：**无时间且无明确「累计/总共」口径 → clarif
 {
   "ask_user_question": {
     "title": "还需要确认一下",
-    "reason": "已识别「跳绳」，但缺少时间范围与指标",
+    "reason": "已识别「华东区」，但缺少时间范围与指标",
     "questions": [
       {
         "id": "time_range",
@@ -244,7 +244,7 @@ P0 硬规则建议：**无时间且无明确「累计/总共」口径 → clarif
         "options": [
           { "id": "7d", "label": "近7天", "recommended": true },
           { "id": "month", "label": "本月" },
-          { "id": "term", "label": "本学期" },
+          { "id": "term", "label": "本年" },
           { "id": "custom", "label": "我自己说" }
         ]
       },
@@ -253,8 +253,8 @@ P0 硬规则建议：**无时间且无明确「累计/总共」口径 → clarif
         "prompt": "关注哪个指标？",
         "allow_free_text": true,
         "options": [
-          { "id": "participants", "label": "参与人数", "recommended": true },
-          { "id": "person_times", "label": "参与人次" }
+          { "id": "qty", "label": "数量", "recommended": true },
+          { "id": "orders", "label": "订单量" }
         ]
       }
     ]
@@ -304,7 +304,7 @@ P1 可选请求扩展（非必须）：
 
 ```json
 {
-  "question": "近7天参与人数",
+  "question": "近7天订单数量",
   "clarificationAnswers": [
     { "questionId": "time_range", "optionId": "7d" },
     { "questionId": "metric", "optionId": "participants" }
@@ -446,13 +446,13 @@ class ClarificationPayload(CamelModel):
 {
   "last_sql": "...",
   "pending_clarification": {
-    "original_question": "帮我看看跳绳",
-    "resolved_partial": "跳绳相关查询",
+    "original_question": "帮我看看华东区",
+    "resolved_partial": "华东区相关查询",
     "missing_slots": ["time_range", "metric"],
     "ask_user_question": { "title": "...", "questions": [] },
-    "clarify_question": "你想看参与人数还是参与人次？时间范围呢？",
+    "clarify_question": "你想看哪个指标？时间范围呢？",
     "candidates": {
-      "metrics": ["参与人数", "参与人次"]
+      "metrics": ["数量", "趋势"]
     },
     "ask_count": 1,
     "trace_id": "...",
@@ -534,7 +534,7 @@ class ClarificationPayload(CamelModel):
    |------|------|
    | 显式取消 | 「取消」「算了」「不问这个了」 |
    | 完整新问句 | 本轮已自带时间+指标+实体，且与 pending.entity 明显不同 |
-   | 实体切换 | pending 在谈「跳绳」，用户突然问「足球报名人数」 |
+   | 实体切换 | pending 在谈「华东区」，用户突然问「华南区订单量」 |
    | 前端「换个问题」 | UI 按钮直接清 pending 再发 |
    | 结构化作答缺失且不像补槽 | 长句、无 clarificationAnswers、语义独立 |
 
@@ -556,7 +556,7 @@ else:
 
 | 错误串话 | 防护 |
 |----------|------|
-| 上题「本校近7天跳绳人数」成功后，用户说「足球」，被拼成「本校近7天跳绳人数足球」 | 无 pending 时「足球」是新半截问，只开新 pending，不读 last_turn 来拼接 |
+| 上题「本月销售额」成功后，用户说「华南区」，被拼成「本月销售额华南区」 | 无 pending 时「华南区」是新半截问，只开新 pending，不读 last_turn 来拼接 |
 | 澄清中用户改口问完整新题，仍拼进旧 pending | 换题检测清 pending |
 | 用户点了两轮前的旧选项卡片 | `thread_id` 校验失败则忽略 |
 | 澄清失败/取消后，下一句仍带旧 missing_slots | 取消与超轮次清 pending |
@@ -567,8 +567,8 @@ else:
 {
   "pending_clarification": {
     "thread_id": "clr_01J...",
-    "original_question": "帮我看看跳绳",
-    "filled_slots": { "entity": "跳绳" },
+    "original_question": "帮我看看华东区",
+    "filled_slots": { "entity": "华东区" },
     "missing_slots": ["time_range", "metric"],
     "ask_count": 1,
     "source": "dialogue_gate|plan|agent",
@@ -670,7 +670,7 @@ load_session_memory
 {
   "ready_to_execute": true,
   "missing_slots": [],
-  "ambiguities": ["指标可能是参与人数或人次"],
+  "ambiguities": ["指标可能是数量或金额"],
   "ask_user_question": null
 }
 ```
@@ -744,7 +744,7 @@ else → agent_loop
 | 4 | Agent 工具 `ask_user_question` + `action=ask_user` | agent_llm / tools |
 | 5 | 澄清轮次上限与取消语义 | 规则 + 文案 |
 | 6 | 历史回放持久化 clarification | result_json / sessions API |
-| 7 | 回归：多轮「跳绳」→「近7天人数」应成功出数 | e2e / 评测 |
+| 7 | 回归：多轮「华东区」→「近7天订单数量」应成功出数 | e2e / 评测 |
 
 ### P2 · 体验增强（约 1 周，可排期）
 
@@ -793,12 +793,12 @@ W4     P2 可选项 + 运营指标（按需）
 | `dlg-chat-01` | 你好 | `chitchat`；无 recall/SQL span |
 | `dlg-chat-02` | 你能做什么 | `chitchat`；能力说明 |
 | `dlg-oos-01` | 帮我写首诗 | `out_of_scope` |
-| `dlg-clr-01` | 帮我看看跳绳 | `need_clarification`；含 AskUserQuestion / missing_slots |
-| `dlg-clr-02` | （接上）近7天参与人数 | `success`；有结果或合理空集 |
+| `dlg-clr-01` | 帮我看看华东区 | `need_clarification`；含 AskUserQuestion / missing_slots |
+| `dlg-clr-02` | （接上）近7天订单数量 | `success`；有结果或合理空集 |
 | `dlg-clr-03` | 最近怎么样 | `need_clarification` 或 `out_of_scope` |
 | `dlg-ask-01` | 指标歧义问句 | Agent/Plan 触发 ask_user；选项 ≤4；有 recommended |
-| `dlg-ok-01` | 本校近7天跳绳参与人数 | `data_query` → 现有成功路径 |
-| `dlg-iso-01` | 成功问「跳绳近7天人数」后再说「足球」 | 新 pending，不得拼成跳绳+足球 |
+| `dlg-ok-01` | 本月销售额是多少 | `data_query` → 现有成功路径 |
+| `dlg-iso-01` | 成功问「本月销售额」后再说「华南区」 | 新 pending，不得拼成上题+华南区 |
 | `dlg-iso-02` | 澄清中改口问完整新题 | 清旧 pending，按新题路由 |
 | `dlg-iso-03` | 提交过期 clarificationThreadId | 忽略作答，不合并 |
 
@@ -950,7 +950,7 @@ confidence-router: route|clarify|fallback
       "options": [
         { "label": "近7天 (Recommended)", "description": "默认看最近一周" },
         { "label": "本月", "description": "自然月" },
-        { "label": "本学期", "description": "按学期口径" }
+        { "label": "本年", "description": "按自然年口径" }
       ]
     }
   ]

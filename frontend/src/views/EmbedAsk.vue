@@ -7,6 +7,13 @@
       <div ref="chatRef" class="chat-area">
         <div v-for="(msg, idx) in messages" :key="idx" :class="['msg', msg.role]">
           <div class="bubble">{{ msg.text }}</div>
+          <AskUserQuestionCard
+            v-if="msg.clarification"
+            :clarification="msg.clarification"
+            :readonly="msg.clarificationReadonly"
+            :submitting="loading"
+            @submit="onClarificationSubmit"
+          />
           <ResultPanel
             v-if="msg.result?.columns?.length && msg.result?.rows?.length"
             :columns="msg.result.columns"
@@ -34,6 +41,7 @@ import { nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import ResultPanel from '../components/ResultPanel.vue'
+import AskUserQuestionCard from '../components/ask/AskUserQuestionCard.vue'
 import { postAskStream } from '../api/ask'
 
 const route = useRoute()
@@ -66,6 +74,18 @@ function onParentMessage(event) {
 async function onAsk() {
   const q = question.value.trim()
   if (!q || loading.value) return
+  await runAsk(q)
+}
+
+async function onClarificationSubmit(payload) {
+  if (loading.value) return
+  await runAsk(payload.question, {
+    clarificationAnswers: payload.clarificationAnswers,
+    clarificationThreadId: payload.clarificationThreadId,
+  })
+}
+
+async function runAsk(q, extras = {}) {
   messages.value.push({ role: 'user', text: q })
   question.value = ''
   loading.value = true
@@ -76,11 +96,21 @@ async function onAsk() {
     await postAskStream({
       question: q,
       traceId,
+      clarificationAnswers: extras.clarificationAnswers,
+      clarificationThreadId: extras.clarificationThreadId,
       onDone: (res) => {
         const msg = messages.value[assistantIdx]
-        msg.text = res.status === 'success' ? (res.answer || '查询完成') : (res.errorMessage || '未能回答')
+        const ok =
+          res.status === 'success' ||
+          res.status === 'chitchat' ||
+          res.status === 'out_of_scope' ||
+          res.status === 'need_clarification'
+        msg.text = ok ? (res.answer || '查询完成') : (res.errorMessage || '未能回答')
         msg.result = { columns: res.columns, rows: res.rows }
         msg.chartSpec = res.chartSpec
+        msg.clarification = res.clarification || null
+        msg.clarificationReadonly = false
+        msg.status = res.status
       },
       onError: (err) => {
         messages.value[assistantIdx].text = err.message || '问数失败'

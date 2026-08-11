@@ -246,6 +246,8 @@ def build_result_json(
     assembly_mode: str | None = None,
     chart_spec: dict | None = None,
     visualization_intent: dict | None = None,
+    clarification: dict | None = None,
+    dialogue_act: str | None = None,
     max_rows: int = _MAX_RESULT_ROWS,
 ) -> str:
     """构建写入 copilot_ask_turn.result_json 的快照（供历史 UI 回放）。"""
@@ -266,6 +268,10 @@ def build_result_json(
         payload["chart_spec"] = chart_spec
     if visualization_intent:
         payload["visualization_intent"] = visualization_intent
+    if clarification:
+        payload["clarification"] = clarification
+    if dialogue_act:
+        payload["dialogue_act"] = dialogue_act
     return json.dumps(payload, ensure_ascii=False, default=str)
 
 

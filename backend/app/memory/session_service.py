@@ -209,7 +209,10 @@ class SessionService:
                     WHERE t.session_id = :session_id
                       AND t.user_id = :user_id
                       AND t.deleted = 0
-                      AND t.status IN ('success', 'fail', 'degraded', 'cancelled')
+                      AND t.status IN (
+                        'success', 'fail', 'degraded', 'cancelled',
+                        'need_clarification', 'chitchat', 'out_of_scope'
+                      )
                     ORDER BY t.created_at DESC
                     LIMIT :limit
                 ) sub
@@ -229,7 +232,13 @@ class SessionService:
             error_message = snapshot.get("error_message")
             if status == "cancelled" and not answer:
                 answer = error_message or "用户主动中断"
-            if status != "success" and status != "cancelled" and not answer:
+            if status not in (
+                "success",
+                "cancelled",
+                "need_clarification",
+                "chitchat",
+                "out_of_scope",
+            ) and not answer:
                 answer = error_message or row.get("error_code")
             messages.append(
                 {
@@ -248,6 +257,8 @@ class SessionService:
                     "intermediate_results": snapshot.get("intermediate_results"),
                     "chart_spec": snapshot.get("chart_spec"),
                     "visualization_intent": snapshot.get("visualization_intent"),
+                    "clarification": snapshot.get("clarification"),
+                    "dialogue_act": snapshot.get("dialogue_act"),
                 }
             )
         return messages

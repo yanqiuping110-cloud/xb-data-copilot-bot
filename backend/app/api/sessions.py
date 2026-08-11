@@ -122,6 +122,8 @@ async def get_session_messages(
             intermediate_results=r.get("intermediate_results"),
             chart_spec=ChartSpec.model_validate(r["chart_spec"]) if r.get("chart_spec") else None,
             visualization_intent=r.get("visualization_intent"),
+            clarification=r.get("clarification"),
+            dialogue_act=r.get("dialogue_act"),
         )
         for r in rows
     ]

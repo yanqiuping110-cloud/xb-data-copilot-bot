@@ -80,6 +80,57 @@ async def agent_loop(state: AskGraphState, config: RunnableConfig) -> dict:
         )
         return {"agent_loop_done": True, "use_agent_path": True, "agent_step_count": step_count}
 
+    if action.get("action") == "ask_user" or action.get("tool") == "ask_user_question":
+        if not settings.dialogue_agent_ask_enabled:
+            await _span(
+                config,
+                "agent_loop",
+                t0,
+                "degraded",
+                {"done": True, "reason": "ask_user_disabled", "step_count": step_count},
+            )
+            return {"agent_loop_done": True, "use_agent_path": True, "agent_step_count": step_count}
+        args = action.get("args") or {}
+        from app.agent.ask_user_payload import clip_ask_user_question
+
+        ask_user = clip_ask_user_question(
+            {
+                "title": args.get("title") or "还需要确认一下",
+                "reason": args.get("reason"),
+                "questions": args.get("questions") or [],
+            },
+            max_questions=settings.dialogue_ask_max_questions,
+            max_options=settings.dialogue_ask_max_options,
+        )
+        obs = {
+            "tool": "ask_user_question",
+            "args": args,
+            "result": {"asked": True, "questions": (ask_user or {}).get("questions") or []},
+        }
+        observations.append(obs)
+        agent_steps.append({"phase": "agent_loop", "tool": "ask_user_question", "step": step_count + 1})
+        await _span(
+            config,
+            "agent_loop",
+            t0,
+            "success",
+            {"done": True, "reason": "ask_user", "step_count": step_count + 1},
+        )
+        return {
+            "tool_observations": observations,
+            "agent_steps": agent_steps,
+            "agent_step_count": step_count + 1,
+            "agent_loop_done": True,
+            "use_agent_path": True,
+            "need_clarification": True,
+            "dialogue_act": "clarify",
+            "ready_to_execute": False,
+            "ask_user_question": ask_user,
+            "clarify_question": (ask_user or {}).get("reason")
+            or "查询条件存在歧义，请确认后再继续。",
+            "missing_slots": list(args.get("missing_slots") or ["metric"]),
+        }
+
     tool_name = action.get("tool") or ""
     args = action.get("args") or {}
     result = await execute_tool_span(
@@ -122,7 +173,9 @@ async def agent_loop(state: AskGraphState, config: RunnableConfig) -> dict:
 
 
 def route_after_agent_loop(state: AskGraphState) -> str:
-    """agent_loop 未结束时继续循环，否则进入 build_agent_context。"""
+    """agent_loop 未结束时继续循环；ask_user 则澄清；否则进入 build_agent_context。"""
+    if state.get("need_clarification"):
+        return "ask_clarification"
     if state.get("agent_loop_done"):
         return "build_agent_context"
     return "agent_loop"

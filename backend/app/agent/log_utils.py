@@ -12,6 +12,10 @@ NODE_LABELS: dict[str, str] = {
     "load_session_memory": "加载会话记忆",
     "load_user_preference": "加载用户偏好",
     "process_memory_context": "记忆上下文",
+    "route_dialogue": "对话分流",
+    "reply_chat": "闲聊答复",
+    "ask_clarification": "澄清提问",
+    "ask_user_question": "向用户提问",
     "extract_keywords": "抽取关键词",
     "do_recall_tables": "召回相关表",
     "do_recall_columns": "召回相关字段",
@@ -49,6 +53,7 @@ NODE_LABELS: dict[str, str] = {
     "tool_get_code_artifact": "工具·代码片段",
     "tool_trace_code_flow": "工具·调用链",
     "tool_link_artifact_to_meta": "工具·代码关联元数据",
+    "tool_ask_user_question": "工具·向用户提问",
 }
 
 # _span 等日志里使用的短节点名 → 图节点名

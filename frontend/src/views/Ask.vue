@@ -115,6 +115,14 @@
                 />
                 <div class="answer-line">{{ msg.text }}</div>
 
+                <AskUserQuestionCard
+                  v-if="msg.clarification && (msg.status === 'need_clarification' || msg.clarification)"
+                  :clarification="msg.clarification"
+                  :readonly="msg.clarificationReadonly"
+                  :submitting="loading"
+                  @submit="(payload) => onClarificationSubmit(payload, msg)"
+                />
+
                 <details
                   v-if="msg.timeline?.length"
                   class="progress-details"
@@ -248,7 +256,7 @@
                 v-model="question"
                 type="textarea"
                 :autosize="{ minRows: 2, maxRows: 6 }"
-                placeholder="例如：本校本月跳绳参与人数 / 最近7天每日趋势"
+                placeholder="例如：本月销售额是多少 / 最近7天订单趋势"
                 :disabled="loading || needSelectSchool"
                 @keydown.enter.exact.prevent="onAsk"
               />
@@ -317,6 +325,7 @@ import {
 import ResultPanel from '../components/ResultPanel.vue'
 import AskPipelineHeader from '../components/ask/AskPipelineHeader.vue'
 import AskTimeline from '../components/ask/AskTimeline.vue'
+import AskUserQuestionCard from '../components/ask/AskUserQuestionCard.vue'
 import BriefReportDrawer from '../components/brief-report/BriefReportDrawer.vue'
 import ExcelExportDrawer from '../components/brief-report/ExcelExportDrawer.vue'
 import { countReportableMessages } from '../utils/briefReportTurn.js'
@@ -369,7 +378,7 @@ const pageReady = ref(false)
 const sessionBusy = ref(false)
 const messagesEl = ref(null)
 const WELCOME_TEXT =
-  '你好，我是问数助手。可尝试：「本校本月跳绳参与人数」「最近7天每日趋势」「昨日全平台活动参与人次」。'
+  '你好，我是问数助手。可尝试：「本月销售额是多少」「最近7天订单趋势」「昨日新增用户数」。'
 const stickToBottom = ref(true)
 const SCROLL_THRESHOLD = 48
 const prefDrawerVisible = ref(false)
@@ -467,7 +476,11 @@ function notifyChartsResize() {
 function buildAssistantHistoryMessage(m) {
   const isSuccess = m.status === 'success'
   const isCancelled = m.status === 'cancelled'
-  const text = isSuccess
+  const isDialogue =
+    m.status === 'need_clarification' ||
+    m.status === 'chitchat' ||
+    m.status === 'out_of_scope'
+  const text = isSuccess || isDialogue
     ? m.answer || (m.rowCount != null ? `根据查询结果，共返回 ${m.rowCount} 行数据。` : '查询完成')
     : isCancelled
       ? m.errorMessage || m.answer || '已中断查询（用户主动取消）'
@@ -475,7 +488,11 @@ function buildAssistantHistoryMessage(m) {
   return {
     role: 'assistant',
     text,
-    isError: !isSuccess,
+    isError: !isSuccess && !isDialogue && !isCancelled,
+    status: m.status,
+    clarification: m.clarification || null,
+    clarificationReadonly: true,
+    dialogueAct: m.dialogueAct || null,
     meta: buildMeta(m),
     traceId: m.traceId,
     feedback: null,
@@ -700,6 +717,19 @@ function applyCancelledMessage(msg, traceId) {
 async function onAsk() {
   const q = question.value.trim()
   if (!q || loading.value) return
+  await runAsk(q)
+}
+
+async function onClarificationSubmit(payload, msg) {
+  if (loading.value) return
+  if (msg) msg.clarificationReadonly = true
+  await runAsk(payload.question, {
+    clarificationAnswers: payload.clarificationAnswers,
+    clarificationThreadId: payload.clarificationThreadId,
+  })
+}
+
+async function runAsk(q, extras = {}) {
   stickToBottom.value = true
   messages.value.push({ role: 'user', text: q })
   question.value = ''
@@ -741,12 +771,20 @@ async function onAsk() {
         const msg = messages.value[assistantIdx]
         const isSuccess = res.status === 'success'
         const isCancelled = res.status === 'cancelled'
-        msg.isError = !isSuccess
+        const isDialogue =
+          res.status === 'need_clarification' ||
+          res.status === 'chitchat' ||
+          res.status === 'out_of_scope'
+        msg.isError = !isSuccess && !isDialogue && !isCancelled
+        msg.status = res.status
+        msg.clarification = res.clarification || null
+        msg.clarificationReadonly = false
+        msg.dialogueAct = res.dialogueAct || null
         if (isCancelled) {
           applyCancelledMessage(msg, res.traceId || traceId)
           return
         }
-        msg.text = isSuccess
+        msg.text = isSuccess || isDialogue
           ? res.answer || '查询完成'
           : res.errorMessage || '未能回答该问题'
         msg.meta = res.traceId
@@ -787,6 +825,8 @@ async function onAsk() {
       question: q,
       sessionId: sessionId.value,
       traceId,
+      clarificationAnswers: extras.clarificationAnswers,
+      clarificationThreadId: extras.clarificationThreadId,
       signal: abortController.value.signal,
       ...streamHandlers,
     })

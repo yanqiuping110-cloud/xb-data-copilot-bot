@@ -27,6 +27,8 @@ class SessionMemory:
     session_id: str
     turns: list[SessionTurnSlot] = field(default_factory=list)
     summary_text: str | None = None
+    slot_json: dict | None = None
+    pending_clarification: dict | None = None
     skipped: bool = False
     skip_reason: str | None = None
 

@@ -89,6 +89,10 @@ def _fallback_plan() -> dict[str, Any]:
         "complexity": "low",
         "intent": "open_query",
         "multi_sql": False,
+        "ready_to_execute": True,
+        "missing_slots": [],
+        "ambiguities": [],
+        "ask_user_question": None,
         "steps": [
             {
                 "id": 1,
@@ -195,7 +199,7 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         "plan": plan,
     }
 
-    if skip_plan:
+    if skip_plan and plan.get("ready_to_execute") is not False:
         await _span(
             config,
             "plan_question",
@@ -208,7 +212,41 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
                 **span_plan,
             },
         )
-        return {"plan_skipped": True, "plan": plan, "visualization_intent": plan.get("visualization")}
+        return {
+            "plan_skipped": True,
+            "plan": plan,
+            "visualization_intent": plan.get("visualization"),
+            "ready_to_execute": True,
+        }
+
+    if plan.get("ready_to_execute") is False:
+        await _span(
+            config,
+            "plan_question",
+            t0,
+            "success",
+            {
+                "skipped": False,
+                "ready_to_execute": False,
+                "missing_slots": plan.get("missing_slots"),
+                **span_plan,
+            },
+        )
+        ask_user = plan.get("ask_user_question")
+        return {
+            "plan_skipped": False,
+            "plan": plan,
+            "visualization_intent": plan.get("visualization"),
+            "ready_to_execute": False,
+            "need_clarification": True,
+            "dialogue_act": "clarify",
+            "missing_slots": list(plan.get("missing_slots") or []),
+            "ask_user_question": ask_user if isinstance(ask_user, dict) else None,
+            "clarify_question": (
+                "；".join(plan.get("ambiguities") or [])
+                or "查询条件存在歧义，请补充后再试。"
+            ),
+        }
 
     await _span(
         config,
@@ -233,13 +271,21 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         "intermediate_results": [],
         "sql_exec_step_index": 0,
         "sql_steps": [],
+        "ready_to_execute": True,
     }
 
 
 def route_after_plan(state: AskGraphState) -> str:
-    """plan_question 之后：快路径 generate_sql，复杂问句进 agent_loop。"""
+    """plan_question 之后：澄清 / 快路径 generate_sql / 复杂问句进 agent_loop。"""
     if state.get("error_code"):
         return "format_answer"
+    if state.get("need_clarification") or state.get("ready_to_execute") is False:
+        # plan 明确 not ready，或召回闸已标记
+        if state.get("dialogue_act") == "clarify" or state.get("need_clarification"):
+            return "ask_clarification"
+        plan = state.get("plan") or {}
+        if plan.get("ready_to_execute") is False:
+            return "ask_clarification"
     if state.get("plan_skipped"):
         return "generate_sql"
     return "agent_loop"

@@ -133,11 +133,18 @@ class MemoryService:
                 )
             turns.reverse()
 
-            summary_text = await self._load_summary(session_id, user_id)
+            summary_text, slot_json = await self._load_summary_and_slots(session_id, user_id)
+            pending = None
+            if isinstance(slot_json, dict):
+                pending = slot_json.get("pending_clarification")
+                if pending is not None and not isinstance(pending, dict):
+                    pending = None
             return SessionMemory(
                 session_id=session_id,
                 turns=turns,
                 summary_text=summary_text,
+                slot_json=slot_json,
+                pending_clarification=pending,
             )
         except Exception as exc:
             logger.warning("load_session_memory fail-open: %s", exc)
@@ -145,11 +152,13 @@ class MemoryService:
             empty.skip_reason = str(exc)
             return empty
 
-    async def _load_summary(self, session_id: str, user_id: int) -> str | None:
+    async def _load_summary_and_slots(
+        self, session_id: str, user_id: int
+    ) -> tuple[str | None, dict | None]:
         result = await self._session.execute(
             text(
                 """
-                SELECT summary_text FROM copilot_session_summary
+                SELECT summary_text, slot_json FROM copilot_session_summary
                 WHERE session_id = :session_id AND user_id = :user_id AND deleted = 0
                 LIMIT 1
                 """
@@ -158,8 +167,72 @@ class MemoryService:
         )
         row = result.mappings().first()
         if not row:
-            return None
-        return row.get("summary_text")
+            return None, None
+        slot_raw = row.get("slot_json")
+        slot_json: dict | None = None
+        if isinstance(slot_raw, dict):
+            slot_json = slot_raw
+        elif isinstance(slot_raw, str) and slot_raw.strip():
+            try:
+                parsed = json.loads(slot_raw)
+                if isinstance(parsed, dict):
+                    slot_json = parsed
+            except json.JSONDecodeError:
+                slot_json = None
+        return row.get("summary_text"), slot_json
+
+    async def _load_summary(self, session_id: str, user_id: int) -> str | None:
+        text_val, _slots = await self._load_summary_and_slots(session_id, user_id)
+        return text_val
+
+    async def save_pending_clarification(
+        self,
+        session_id: str | None,
+        user_id: int,
+        pending: dict | None,
+    ) -> None:
+        """写入/更新 slot_json.pending_clarification（Fail-open）。"""
+        if not session_id:
+            return
+        try:
+            _summary, slot_json = await self._load_summary_and_slots(session_id, user_id)
+            slot = dict(slot_json or {})
+            if pending is None:
+                slot.pop("pending_clarification", None)
+            else:
+                slot["pending_clarification"] = pending
+            await self._session.execute(
+                text(
+                    """
+                    INSERT INTO copilot_session_summary (
+                        session_id, user_id, summary_text, slot_json, turn_count
+                    ) VALUES (
+                        :session_id, :user_id, COALESCE(:summary, ''), :slot_json, 0
+                    )
+                    ON DUPLICATE KEY UPDATE
+                        slot_json = VALUES(slot_json),
+                        updated_at = NOW(),
+                        deleted = 0
+                    """
+                ),
+                {
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "summary": _summary,
+                    "slot_json": json.dumps(slot, ensure_ascii=False),
+                },
+            )
+            await self._session.commit()
+        except Exception as exc:
+            logger.warning("save_pending_clarification fail-open: %s", exc)
+
+    async def clear_pending_clarification(
+        self,
+        session_id: str | None,
+        user_id: int,
+    ) -> None:
+        """清除 pending_clarification。"""
+        await self.save_pending_clarification(session_id, user_id, None)
 
     async def load_user_preferences(self, user_id: int) -> list[UserPreferenceItem]:
         """读取 explicit 白名单偏好（Fail-open）。"""
@@ -275,11 +348,15 @@ class MemoryService:
         lines = [f"Q: {t.question[:80]}" for t in memory.turns[-3:]]
         summary = "；".join(lines)
         last = memory.last_turn
+        # 保留 pending（若仍有）；成功问数路径应已 clear
+        existing = memory.slot_json if isinstance(memory.slot_json, dict) else {}
         slot = {
             "last_sql": (last.final_sql or "")[:500] if last else None,
             "last_tables": last.tables_used if last else None,
             "last_question": last.question if last else None,
         }
+        if existing.get("pending_clarification"):
+            slot["pending_clarification"] = existing["pending_clarification"]
         await self._session.execute(
             text(
                 """

@@ -33,6 +33,8 @@ export async function postAskStream({
   question,
   sessionId,
   traceId,
+  clarificationAnswers,
+  clarificationThreadId,
   onProgress,
   onDone,
   onError,
@@ -47,17 +49,25 @@ export async function postAskStream({
   }
 
   const url = `${API_BASE}/api/v1/ask`
+  const body = {
+    question,
+    sessionId,
+    traceId,
+    options: { stream: true },
+  }
+  if (clarificationAnswers?.length) {
+    body.clarificationAnswers = clarificationAnswers
+  }
+  if (clarificationThreadId) {
+    body.clarificationThreadId = clarificationThreadId
+  }
+
   let resp
   try {
     resp = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        question,
-        sessionId,
-        traceId,
-        options: { stream: true },
-      }),
+      body: JSON.stringify(body),
       signal,
     })
   } catch (err) {

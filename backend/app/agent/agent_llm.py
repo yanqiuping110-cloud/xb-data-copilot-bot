@@ -28,6 +28,7 @@ _AGENT_TOOLS = (
     "get_code_artifact",
     "trace_code_flow",
     "link_artifact_to_meta",
+    "ask_user_question",
     "submit_final_sql",
 )
 
@@ -196,6 +197,8 @@ async def decide_agent_action(
         f"可用工具：{', '.join(_AGENT_TOOLS)}。"
         "输出 JSON：{\"action\":\"tool\",\"tool\":\"describe_table\",\"args\":{\"table\":\"表名\"}}"
         "或 {\"action\":\"finish\"} 表示信息足够可生成 SQL。"
+        "或 {\"action\":\"ask_user\",\"tool\":\"ask_user_question\",\"args\":{\"reason\":\"...\",\"questions\":[...]}}"
+        "当指标/实体仍歧义且无法安全出 SQL 时用 ask_user，禁止瞎猜 finish。"
         "禁止写库；run_probe_sql 仅用于 DISTINCT/COUNT 探查，须带 LIMIT。"
     )
     bounded_q = wrap_untrusted(
@@ -222,9 +225,15 @@ async def decide_agent_action(
         action = str(parsed.get("action") or "").lower()
         if action in ("finish", "done", "submit_final_sql"):
             return {"action": "finish"}
+        if action in ("ask_user", "ask_user_question"):
+            args = parsed.get("args") if isinstance(parsed.get("args"), dict) else {}
+            return {"action": "ask_user", "tool": "ask_user_question", "args": args}
         tool = str(parsed.get("tool") or "").strip()
         if tool == "submit_final_sql":
             return {"action": "finish"}
+        if tool == "ask_user_question":
+            args = parsed.get("args") if isinstance(parsed.get("args"), dict) else {}
+            return {"action": "ask_user", "tool": "ask_user_question", "args": args}
         if tool not in _AGENT_TOOLS or tool == "submit_final_sql":
             return fallback
         args = parsed.get("args") if isinstance(parsed.get("args"), dict) else {}

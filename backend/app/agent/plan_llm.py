@@ -157,6 +157,29 @@ def _normalize_plan(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(sources, list):
         sources = ["meta:recall"]
 
+    ready_raw = raw.get("ready_to_execute")
+    if ready_raw is None:
+        ready_to_execute = True
+    else:
+        ready_to_execute = bool(ready_raw)
+
+    missing = raw.get("missing_slots") or []
+    if not isinstance(missing, list):
+        missing = []
+    missing_slots = [str(s) for s in missing if str(s).strip()][:8]
+
+    ambiguities = raw.get("ambiguities") or []
+    if not isinstance(ambiguities, list):
+        ambiguities = []
+    ambiguities = [str(a) for a in ambiguities if str(a).strip()][:6]
+
+    ask_user = raw.get("ask_user_question")
+    if ask_user is not None and not isinstance(ask_user, dict):
+        ask_user = None
+
+    if missing_slots or ambiguities:
+        ready_to_execute = False
+
     plan: dict[str, Any] = {
         "complexity": complexity,
         "intent": intent,
@@ -164,6 +187,10 @@ def _normalize_plan(raw: dict[str, Any]) -> dict[str, Any]:
         "steps": normalized_steps,
         "sources": [str(s) for s in sources],
         "metrics": _normalize_metrics(raw.get("metrics")),
+        "ready_to_execute": ready_to_execute,
+        "missing_slots": missing_slots,
+        "ambiguities": ambiguities,
+        "ask_user_question": ask_user,
     }
     if assembly_mode:
         plan["assembly_mode"] = assembly_mode
@@ -224,7 +251,7 @@ async def generate_plan_from_llm(
         "- assembly_mode: multi_sql=true 时填 join_by_date | pivot | join\n"
         "- join_key: 组装对齐键，须为英文 SQL 别名（如 date / stat_date）；"
         "展示层再转为中文表头\n"
-        "- metrics: 问句要求的全部指标/输出列（中文语义），如参与人数、各项目运动个数；"
+        "- metrics: 问句要求的全部指标/输出列（中文语义），如销售额、订单量、各维度分项；"
         "实际 SQL 别名用英文，由展示层本地化\n"
         "- steps: 每步含 id, goal, needs_tool, sql_step, entity_label, filter_hint, metrics\n"
         "  · sql_step=true 表示该步单独生成并执行一条 SELECT\n"
@@ -257,6 +284,10 @@ async def generate_plan_from_llm(
         "  · 对比/排名/各项目 → preferred_types=[bar,column]\n"
         "  · 占比/构成 → preferred_types=[pie,bar]\n"
         "  · 明细/列表 → enabled=false\n"
+        "- ready_to_execute: boolean，信息是否足够安全生成 SQL；缺槽/严重歧义时 false\n"
+        "- missing_slots: 缺槽列表，如 time_range|metric|entity|scope|dimension\n"
+        "- ambiguities: 歧义说明字符串列表（可选）\n"
+        "- ask_user_question: 可选，{title,reason,questions:[{id,prompt,options:[{id,label,recommended}]}]}\n"
     )
     user_parts = [
         f"用户问句：{question}",

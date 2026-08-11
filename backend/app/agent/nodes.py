@@ -150,10 +150,20 @@ async def generate_sql(state: AskGraphState, config: RunnableConfig) -> dict:
     c = _cfg(config)
     ctx: UserContext = c["ctx"]
     settings: Settings = c["settings"]
-    question = state.get("normalized_question") or ""
+    question = (
+        state.get("resolved_question")
+        or state.get("normalized_question")
+        or ""
+    )
     context_text = state.get("context_text") or ""
     if context_text and not context_text.startswith("【当前用户角色】"):
         context_text = f"{build_role_context_header(ctx, settings=settings)}\n\n{context_text}"
+    # 有门禁解析问句时，标明以 resolved 为准
+    if state.get("resolved_question"):
+        context_text = (
+            f"【本轮已解析问句（以 resolved 为准）】{state['resolved_question']}\n\n"
+            + context_text
+        )
     context_text = _append_plan_context(context_text, state)
     retry_count = state.get("retry_count") or 0
     l2_retry = False
@@ -494,6 +504,23 @@ def _format_answer_text(state: AskGraphState) -> str:
 async def format_answer(state: AskGraphState, config: RunnableConfig) -> dict:
     """生成一句话回答或 L3 拒答文案；复杂 Agent 路径可选用 LLM 解读。"""
     t0 = time.perf_counter()
+    # 门禁短路状态：保留 answer / status，不覆盖为 success
+    early_status = state.get("status")
+    if early_status in ("chitchat", "out_of_scope", "need_clarification"):
+        answer = state.get("answer") or (
+            "请补充信息后再试。"
+            if early_status == "need_clarification"
+            else "你好，我是问数助手。"
+        )
+        await _span(
+            config,
+            "format_answer",
+            t0,
+            "success",
+            {"answer_preview": answer, "dialogue_status": early_status},
+        )
+        return {"answer": answer, "status": early_status}
+
     error_code = state.get("error_code")
     rows = state.get("rows") or []
     # 语义验证失败但已有结果集：仍返回可读答复，避免「有表却整单 fail」

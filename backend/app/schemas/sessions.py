@@ -48,6 +48,8 @@ class SessionMessageItem(CamelModel):
     intermediate_results: list[IntermediateSqlResult] | None = None
     chart_spec: ChartSpec | None = None
     visualization_intent: dict | None = None
+    clarification: dict | None = None
+    dialogue_act: str | None = None
 
 
 class SessionMessagesResponse(CamelModel):
