@@ -176,7 +176,27 @@ def build_progress_summary(node: str, detail: dict[str, Any] | None) -> str | No
     if node == "agent_loop":
         tool = detail.get("tool")
         if tool:
-            return f"调用工具 {tool}"
+            table = detail.get("table") or (detail.get("args") or {}).get("table")
+            if tool == "describe_table" and table:
+                return f"决策查看表结构 · {table}"
+            labels = {
+                "describe_table": "决策查看表结构",
+                "search_sql_examples": "决策检索 SQL 样例",
+                "search_metrics": "决策检索业务指标",
+                "search_field_values": "决策检索字段取值",
+                "list_relations": "决策查看表关系",
+                "get_join_path": "决策查找关联路径",
+                "run_probe_sql": "决策探针探查",
+                "ask_user_question": "决策向用户澄清",
+            }
+            return labels.get(str(tool), f"调用工具 {tool}")
+        reason = detail.get("reason")
+        if reason == "finish":
+            return "结束工具循环"
+        if reason == "max_steps":
+            return "达到步数上限"
+        if reason == "ask_user":
+            return "需要向用户澄清"
 
     return None
 

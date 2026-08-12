@@ -127,6 +127,130 @@ export function formatStepSubtitle(evt) {
   return ''
 }
 
+/** Agent 工具名 → 本轮推理用途（展示标题） */
+const AGENT_TOOL_PURPOSE = {
+  describe_table: '决策：查看表结构',
+  list_relations: '决策：查看表关系',
+  get_join_path: '决策：查找关联路径',
+  search_metrics: '决策：检索业务指标',
+  search_field_values: '决策：检索字段取值',
+  search_sql_examples: '决策：检索 SQL 样例',
+  run_probe_sql: '决策：探针探查数据',
+  search_code_artifacts: '决策：检索代码知识',
+  get_code_artifact: '决策：读取代码产物',
+  trace_code_flow: '决策：追踪代码链路',
+  link_artifact_to_meta: '决策：关联代码元数据',
+  ask_user_question: '决策：向用户澄清',
+}
+
+/** 节点默认推理用途（非多轮 Agent 时） */
+const NODE_THINKING_PURPOSE = {
+  select_l1_examples: '精选相似样例',
+  plan_question: '规划查询步骤',
+  agent_loop: '决策下一步工具',
+  generate_sql: '生成 SQL',
+  generate_sql_step: '分步生成 SQL',
+  correct_sql: '修正 SQL',
+  process_memory_context: '整理记忆上下文',
+  format_answer: '组织自然语言回答',
+  route_dialogue: '对话分流判定',
+}
+
+const AGENT_TOOL_NAME_RE =
+  /\b(describe_table|list_relations|get_join_path|search_metrics|search_field_values|search_sql_examples|run_probe_sql|search_code_artifacts|get_code_artifact|trace_code_flow|link_artifact_to_meta|ask_user_question)\b/
+
+function purposeForAgentTool(tool) {
+  if (!tool) return null
+  return AGENT_TOOL_PURPOSE[tool] || `决策：调用 ${tool}`
+}
+
+function purposeFromAgentDetail(detail) {
+  if (!detail || typeof detail !== 'object') return null
+  const tool = detail.tool
+  if (tool) {
+    const base = purposeForAgentTool(String(tool))
+    const args = detail.args || {}
+    const table = args.table || detail.table
+    if (tool === 'describe_table' && table) {
+      return `${base}（${table}）`
+    }
+    const q = args.query || args.keyword
+    if (q && typeof q === 'string') {
+      const short = q.length > 24 ? `${q.slice(0, 24)}…` : q
+      return `${base}（${short}）`
+    }
+    return base
+  }
+  const reason = String(detail.reason || '')
+  if (reason === 'finish') return '决策：信息已够，结束循环'
+  if (reason === 'max_steps') return '决策：达到步数上限，结束循环'
+  if (reason === 'ask_user') return '决策：向用户澄清'
+  if (reason === 'ask_user_disabled') return '决策：澄清已禁用，结束循环'
+  if (reason === 'disabled') return '工具循环已关闭'
+  return null
+}
+
+function inferToolFromThinkingText(text) {
+  if (!text) return null
+  const match = String(text).match(AGENT_TOOL_NAME_RE)
+  if (match) return match[1]
+  if (/"action"\s*:\s*"finish"|action["\s:=]+finish|信息足够|结束循环|可生成\s*SQL|准备生成\s*SQL/i.test(text)) {
+    return 'finish'
+  }
+  return null
+}
+
+/** 为最新一轮推理块写入用途标题。 */
+export function assignThinkingBlockTitle(step, title) {
+  if (!step || !title) return
+  if (!Array.isArray(step.thinkingBlocks) || !step.thinkingBlocks.length) return
+  if (!Array.isArray(step.thinkingBlockTitles)) step.thinkingBlockTitles = []
+  const idx = step.thinkingBlocks.length - 1
+  while (step.thinkingBlockTitles.length < step.thinkingBlocks.length) {
+    step.thinkingBlockTitles.push('')
+  }
+  step.thinkingBlockTitles[idx] = title
+}
+
+/**
+ * 解析某段推理的展示标题：优先进度 detail / 已写入标题，其次从正文推断用途。
+ */
+export function resolveThinkingBlockTitle(step, text, index, total) {
+  const stored = step?.thinkingBlockTitles?.[index]
+  if (stored) return stored
+
+  if (step?.node === 'agent_loop' || !step?.node) {
+    const fromText = inferToolFromThinkingText(text)
+    if (fromText === 'finish') return '决策：信息已够，结束循环'
+    if (fromText) return purposeForAgentTool(fromText)
+  }
+
+  const nodePurpose = NODE_THINKING_PURPOSE[step?.node]
+  if (nodePurpose) {
+    return total > 1 ? `${nodePurpose} · 第 ${index + 1} 轮` : nodePurpose
+  }
+
+  return total > 1 ? `推理用途 · 第 ${index + 1} 轮` : '模型推理'
+}
+
+/** 带用途标题的推理块列表（供时间线展示）。 */
+export function getThinkingBlocksWithTitles(step) {
+  const raw =
+    Array.isArray(step?.thinkingBlocks) && step.thinkingBlocks.length
+      ? step.thinkingBlocks
+      : step?.thinking
+        ? [step.thinking]
+        : []
+  const blocks = raw
+    .map((text, index) => ({ text, index }))
+    .filter((b) => !!b.text)
+  const total = blocks.length
+  return blocks.map(({ text, index }) => ({
+    text,
+    title: resolveThinkingBlockTitle(step, text, index, total),
+  }))
+}
+
 export function applyProgressEvent(msg, evt) {
   if (!evt?.node) return
   if (!msg.timeline) msg.timeline = []
@@ -166,6 +290,11 @@ export function applyProgressEvent(msg, evt) {
     // 进行中不覆盖服务端最终耗时字段
     if (evt.durationMs == null) step.durationMs = undefined
     beginStepThinkingBlock(step)
+    if (evt.node === 'agent_loop') {
+      step._pendingThinkingTitle = '正在决策下一步工具…'
+    } else if (NODE_THINKING_PURPOSE[evt.node]) {
+      step._pendingThinkingTitle = NODE_THINKING_PURPOSE[evt.node]
+    }
     _flushPendingThinking(msg, step, evt.node)
   } else {
     if (evt.durationMs != null) {
@@ -176,6 +305,11 @@ export function applyProgressEvent(msg, evt) {
     step.active = false
     step.done = true
     step._thinkingClosed = true
+    step._pendingThinkingTitle = null
+    const purpose =
+      purposeFromAgentDetail(evt.detail) ||
+      (evt.node !== 'agent_loop' ? NODE_THINKING_PURPOSE[evt.node] : null)
+    if (purpose) assignThinkingBlockTitle(step, purpose)
   }
 
   msg.pipelineStep = nodeToPipelineStep(evt.node)
@@ -208,6 +342,10 @@ export function appendStepThinking(step, delta) {
   if (!step.thinkingBlocks.length || step._thinkingClosed) {
     step.thinkingBlocks.push(delta)
     step._thinkingClosed = false
+    if (step._pendingThinkingTitle) {
+      assignThinkingBlockTitle(step, step._pendingThinkingTitle)
+      step._pendingThinkingTitle = null
+    }
   } else {
     const idx = step.thinkingBlocks.length - 1
     step.thinkingBlocks[idx] = (step.thinkingBlocks[idx] || '') + delta

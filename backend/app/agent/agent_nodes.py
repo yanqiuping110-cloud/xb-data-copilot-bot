@@ -149,17 +149,28 @@ async def agent_loop(state: AskGraphState, config: RunnableConfig) -> dict:
     step_count += 1
 
     done = step_count >= max_steps
+    tool_detail: dict[str, Any] = {
+        "done": done,
+        "tool": tool_name,
+        "step_count": step_count,
+        "observation_count": len(observations),
+    }
+    # 供前端推理段标题展示用途（表名/检索词等短参数）
+    slim_args = {
+        k: args[k]
+        for k in ("table", "query", "keyword", "from_table", "to_table")
+        if k in args and args[k] is not None
+    }
+    if slim_args:
+        tool_detail["args"] = slim_args
+        if "table" in slim_args:
+            tool_detail["table"] = slim_args["table"]
     await _span(
         config,
         "agent_loop",
         t0,
         "success",
-        {
-            "done": done,
-            "tool": tool_name,
-            "step_count": step_count,
-            "observation_count": len(observations),
-        },
+        tool_detail,
     )
     update: dict[str, Any] = {
         "tool_observations": observations,

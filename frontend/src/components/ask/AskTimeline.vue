@@ -39,8 +39,8 @@
               <StepThinkingPane
                 v-for="(block, bi) in thinkingBlocks(step)"
                 :key="`${step.node}-${bi}`"
-                :text="block"
-                :title="thinkingBlocks(step).length > 1 ? `推理 ${bi + 1}` : ''"
+                :text="block.text"
+                :title="block.title"
                 :active="isThinkingDetailsOpen(step)"
               />
             </div>
@@ -57,7 +57,11 @@
 
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { formatDurationMs, timelineTotalMs } from '../../utils/askProgress.js'
+import {
+  formatDurationMs,
+  getThinkingBlocksWithTitles,
+  timelineTotalMs,
+} from '../../utils/askProgress.js'
 import StepThinkingPane from './StepThinkingPane.vue'
 
 const props = defineProps({
@@ -103,10 +107,7 @@ onUnmounted(() => {
 const displayTotalMs = computed(() => timelineTotalMs(props.steps, effectiveNow.value))
 
 function thinkingBlocks(step) {
-  if (Array.isArray(step.thinkingBlocks) && step.thinkingBlocks.length) {
-    return step.thinkingBlocks.filter((b) => !!b)
-  }
-  return step.thinking ? [step.thinking] : []
+  return getThinkingBlocksWithTitles(step)
 }
 
 function hasThinking(step) {
