@@ -9,7 +9,11 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from app.agent.agent_llm import _fallback_action, decide_agent_action
+from app.agent.agent_llm import (
+    _fallback_action,
+    _needs_tools_complete,
+    decide_agent_action,
+)
 from app.agent.context_builder import build_agent_context_text
 from app.agent.l1_nodes import _dicts_to_candidates
 from app.agent.llm_sql import generate_sql_from_llm, generate_sql_step_from_llm
@@ -55,6 +59,22 @@ async def agent_loop(state: AskGraphState, config: RunnableConfig) -> dict:
     observations = list(state.get("tool_observations") or [])
     agent_steps = list(state.get("agent_steps") or [])
     default_tables = (merged.table_names if merged else [])[:5]
+
+    # needs_tool 已完成后跳过 LLM，直接结束循环
+    if _needs_tools_complete(plan, observations, default_tables=default_tables):
+        await _span(
+            config,
+            "agent_loop",
+            t0,
+            "success",
+            {
+                "done": True,
+                "reason": "needs_tool_complete",
+                "step_count": step_count,
+                "observation_count": len(observations),
+            },
+        )
+        return {"agent_loop_done": True, "use_agent_path": True, "agent_step_count": step_count}
 
     action = await decide_agent_action(
         settings=settings,
@@ -148,13 +168,16 @@ async def agent_loop(state: AskGraphState, config: RunnableConfig) -> dict:
     agent_steps.append({"phase": "agent_loop", "tool": tool_name, "step": step_count + 1})
     step_count += 1
 
-    done = step_count >= max_steps
+    needs_done = _needs_tools_complete(plan, observations, default_tables=default_tables)
+    done = step_count >= max_steps or needs_done
     tool_detail: dict[str, Any] = {
         "done": done,
         "tool": tool_name,
         "step_count": step_count,
         "observation_count": len(observations),
     }
+    if needs_done:
+        tool_detail["reason"] = "needs_tool_complete"
     # 供前端推理段标题展示用途（表名/检索词等短参数）
     slim_args = {
         k: args[k]

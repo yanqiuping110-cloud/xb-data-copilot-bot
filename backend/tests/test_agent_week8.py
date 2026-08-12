@@ -83,6 +83,57 @@ def test_fallback_action_runs_plan_tools_in_order():
     assert done["action"] == "finish"
 
 
+def test_describe_table_visits_each_plan_table_once_then_finish():
+    from app.agent.agent_llm import _fallback_action, _needs_tools_complete, _next_describe_table
+
+    plan = {
+        "anchor_table": "sport_activity_new",
+        "metric_groups": [
+            {"source_tables": ["sport_activity_qzs_time"], "anchor_table": "sport_activity_new"},
+            {"source_tables": ["sport_order"], "anchor_table": "sport_activity_new"},
+        ],
+        "steps": [{"needs_tool": ["describe_table"]}],
+    }
+    tables = ["sport_activity_qzs_time", "sport_activity_new", "sport_order", "base_school"]
+    obs: list[dict] = []
+    seen: list[str] = []
+    for _ in range(5):
+        if _needs_tools_complete(plan, obs, default_tables=tables):
+            break
+        action = _fallback_action(plan, obs, default_tables=tables, question="按月统计")
+        assert action["action"] == "tool"
+        assert action["tool"] == "describe_table"
+        table = action["args"]["table"]
+        assert table not in seen
+        seen.append(table)
+        obs.append(
+            {
+                "tool": "describe_table",
+                "args": {"table": table},
+                "result": {"table": table, "column_count": 10},
+            }
+        )
+    assert seen == ["sport_activity_new", "sport_activity_qzs_time", "sport_order"]
+    assert _needs_tools_complete(plan, obs, default_tables=tables)
+    assert _next_describe_table(tables, obs, plan=plan) == ""
+    assert _fallback_action(plan, obs, default_tables=tables, question="按月统计")["action"] == "finish"
+
+
+def test_needs_tools_complete_blocks_extra_tools():
+    from app.agent.agent_llm import _needs_tools_complete
+
+    plan = {"steps": [{"needs_tool": ["describe_table"]}]}
+    tables = ["sport_activity_qzs_time"]
+    obs = [
+        {
+            "tool": "describe_table",
+            "args": {"table": "sport_activity_qzs_time"},
+            "result": {"table": "sport_activity_qzs_time", "column_count": 3},
+        }
+    ]
+    assert _needs_tools_complete(plan, obs, default_tables=tables) is True
+
+
 def test_validate_probe_sql_caps_limit():
     sql = validate_probe_sql(
         "SELECT COUNT(*) AS cnt FROM sport_activity_qzs_record",
