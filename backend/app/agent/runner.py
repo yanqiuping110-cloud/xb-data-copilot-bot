@@ -43,6 +43,20 @@ logger = get_logger("ask")
 USER_CANCELLED_MESSAGE = "用户主动中断"
 
 
+async def _turn_status_isolated(trace_id: str) -> str | None:
+    """
+    用独立短会话读取 turn status。
+
+    流式路径里图 worker 与主循环会并发跑；共用请求级 AsyncSession
+    会触发 concurrent operations are not permitted。
+    """
+    from app.db.copilot import get_session_factory
+
+    factory = get_session_factory()
+    async with factory() as session:
+        return await tracer.get_turn_status(session, trace_id)
+
+
 async def cancel_ask_run(
     copilot_session: AsyncSession,
     *,
@@ -194,9 +208,11 @@ async def stream_ask_graph(
         try:
             async for chunk in get_ask_graph().astream(initial, config, stream_mode="updates"):
                 await out_q.put(("chunk", chunk))
-                if await tracer.get_turn_status(copilot_session, trace_id) == "cancelled":
+                # 独立会话查取消态，避免与下一节点写库并发踩同一 AsyncSession
+                if await _turn_status_isolated(trace_id) == "cancelled":
                     break
         except Exception as exc:
+            logger.exception("[trace=%s] astream_worker 异常: %s", trace_id, exc)
             await out_q.put(("error", exc))
         finally:
             await out_q.put(("end", None))
@@ -216,7 +232,7 @@ async def stream_ask_graph(
                 break
             # chunk: 节点完成
             chunk = payload
-            if await tracer.get_turn_status(copilot_session, trace_id) == "cancelled":
+            if await _turn_status_isolated(trace_id) == "cancelled":
                 logger.info("[trace=%s] 检测到用户中断，停止流水线", trace_id)
                 break
             for node_name, update in chunk.items():
@@ -242,7 +258,7 @@ async def stream_ask_graph(
                     duration_ms=duration_ms,
                 )
 
-        if await tracer.get_turn_status(copilot_session, trace_id) == "cancelled":
+        if await _turn_status_isolated(trace_id) == "cancelled":
             yield done_event(_cancelled_response(trace_id, session_id, t0))
             return
 
@@ -689,18 +705,44 @@ async def _finish_turn_on_fatal(
         error_message=error_message,
         error_node=resolve_error_node(collector, error_code=error_code) or "fatal",
     )
-    await tracer.finish_turn(
-        copilot_session,
-        trace_id=trace_id,
-        status="fail",
-        final_sql=None,
-        latency_ms_total=latency_ms_total,
-        latency_ms_first_token=collector.latency_ms_first_token,
-        error_code=error_code,
-        trace_log=trace_log,
-        result_json=build_result_json(error_message=error_message),
-    )
-    await copilot_session.commit()
+    try:
+        await tracer.finish_turn(
+            copilot_session,
+            trace_id=trace_id,
+            status="fail",
+            final_sql=None,
+            latency_ms_total=latency_ms_total,
+            latency_ms_first_token=collector.latency_ms_first_token,
+            error_code=error_code,
+            trace_log=trace_log,
+            result_json=build_result_json(error_message=error_message),
+        )
+        await copilot_session.commit()
+    except Exception:
+        logger.exception(
+            "[trace=%s] finish_turn 失败，改用独立会话落库",
+            trace_id,
+        )
+        try:
+            await copilot_session.rollback()
+        except Exception:
+            pass
+        from app.db.copilot import get_session_factory
+
+        factory = get_session_factory()
+        async with factory() as session:
+            await tracer.finish_turn(
+                session,
+                trace_id=trace_id,
+                status="fail",
+                final_sql=None,
+                latency_ms_total=latency_ms_total,
+                latency_ms_first_token=collector.latency_ms_first_token,
+                error_code=error_code,
+                trace_log=trace_log,
+                result_json=build_result_json(error_message=error_message),
+            )
+            await session.commit()
 
 
 def _progress_detail(node_name: str, update: dict) -> dict | None:

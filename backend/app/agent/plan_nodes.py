@@ -220,6 +220,39 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
         }
 
     if plan.get("ready_to_execute") is False:
+        missing = list(plan.get("missing_slots") or [])
+        ask_user = plan.get("ask_user_question")
+        ask_user_dict = ask_user if isinstance(ask_user, dict) else None
+        # 仅有 soft ambiguity、无缺槽且无出题载荷：按规划默认口径继续，不打断追问
+        if not missing and not ask_user_dict:
+            await _span(
+                config,
+                "plan_question",
+                t0,
+                "success",
+                {
+                    "skipped": False,
+                    "ready_to_execute": True,
+                    "soft_ambiguities": plan.get("ambiguities") or [],
+                    **span_plan,
+                },
+            )
+            plan = _inject_code_sources(plan, merged)
+            return {
+                "plan_skipped": False,
+                "plan": plan,
+                "visualization_intent": plan.get("visualization"),
+                "tool_observations": [],
+                "agent_steps": [],
+                "agent_step_count": 0,
+                "agent_loop_done": False,
+                "use_agent_path": True,
+                "intermediate_results": [],
+                "sql_exec_step_index": 0,
+                "sql_steps": [],
+                "ready_to_execute": True,
+                "need_clarification": False,
+            }
         await _span(
             config,
             "plan_question",
@@ -228,11 +261,10 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
             {
                 "skipped": False,
                 "ready_to_execute": False,
-                "missing_slots": plan.get("missing_slots"),
+                "missing_slots": missing,
                 **span_plan,
             },
         )
-        ask_user = plan.get("ask_user_question")
         return {
             "plan_skipped": False,
             "plan": plan,
@@ -240,8 +272,8 @@ async def plan_question(state: AskGraphState, config: RunnableConfig) -> dict:
             "ready_to_execute": False,
             "need_clarification": True,
             "dialogue_act": "clarify",
-            "missing_slots": list(plan.get("missing_slots") or []),
-            "ask_user_question": ask_user if isinstance(ask_user, dict) else None,
+            "missing_slots": missing,
+            "ask_user_question": ask_user_dict,
             "clarify_question": (
                 "；".join(plan.get("ambiguities") or [])
                 or "查询条件存在歧义，请补充后再试。"

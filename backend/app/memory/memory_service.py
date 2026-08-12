@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import re
 
 from sqlalchemy import text
@@ -193,14 +194,29 @@ class MemoryService:
     ) -> None:
         """写入/更新 slot_json.pending_clarification（Fail-open）。"""
         if not session_id:
+            logger.info(
+                "save_pending_clarification skip: no session_id user_id=%s clear=%s",
+                user_id,
+                pending is None,
+            )
             return
+        t0 = time.perf_counter()
+        phase = "start"
         try:
+            logger.info(
+                "save_pending_clarification begin session_id=%s user_id=%s clear=%s",
+                session_id,
+                user_id,
+                pending is None,
+            )
+            phase = "load_summary"
             _summary, slot_json = await self._load_summary_and_slots(session_id, user_id)
             slot = dict(slot_json or {})
             if pending is None:
                 slot.pop("pending_clarification", None)
             else:
                 slot["pending_clarification"] = pending
+            phase = "execute_upsert"
             await self._session.execute(
                 text(
                     """
@@ -222,9 +238,24 @@ class MemoryService:
                     "slot_json": json.dumps(slot, ensure_ascii=False),
                 },
             )
+            phase = "commit"
             await self._session.commit()
+            logger.info(
+                "save_pending_clarification ok session_id=%s clear=%s duration_ms=%s",
+                session_id,
+                pending is None,
+                int((time.perf_counter() - t0) * 1000),
+            )
         except Exception as exc:
-            logger.warning("save_pending_clarification fail-open: %s", exc)
+            logger.warning(
+                "save_pending_clarification fail-open phase=%s session_id=%s "
+                "duration_ms=%s err=%s",
+                phase,
+                session_id,
+                int((time.perf_counter() - t0) * 1000),
+                exc,
+                exc_info=True,
+            )
 
     async def clear_pending_clarification(
         self,
@@ -232,6 +263,11 @@ class MemoryService:
         user_id: int,
     ) -> None:
         """清除 pending_clarification。"""
+        logger.info(
+            "clear_pending_clarification called session_id=%s user_id=%s",
+            session_id,
+            user_id,
+        )
         await self.save_pending_clarification(session_id, user_id, None)
 
     async def load_user_preferences(self, user_id: int) -> list[UserPreferenceItem]:

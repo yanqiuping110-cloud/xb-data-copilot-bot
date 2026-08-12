@@ -345,12 +345,17 @@ class Settings(BaseSettings):
     dialogue_recall_table_min: float = Field(
         default=0.15,
         alias="DIALOGUE_RECALL_TABLE_MIN",
-        description="表召回 top1 低于此分倾向澄清/未找到",
+        description="表召回 top1 低于此分触发召回闸门预筛",
     )
     dialogue_recall_metric_min: float = Field(
         default=0.12,
         alias="DIALOGUE_RECALL_METRIC_MIN",
-        description="指标召回 top1 低于此分倾向 AskUserQuestion",
+        description="指标召回 top1 低于此分触发召回闸门预筛",
+    )
+    dialogue_recall_llm_enabled: bool = Field(
+        default=True,
+        alias="DIALOGUE_RECALL_LLM_ENABLED",
+        description="召回二次闸门是否用 LLM 裁决 proceed/clarify/out_of_scope；false 时仅规则兜底",
     )
     dialogue_fail_open: bool = Field(
         default=True,

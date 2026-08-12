@@ -202,46 +202,79 @@ async def merge_retrieved_info_node(state: AskGraphState, config: RunnableConfig
     )
     out: dict = {"merged_recall": merged, "recall_code_artifacts": code_items}
 
-    # 召回二次闸门：低分 / 空结果 → AskUserQuestion
+    # 召回二次闸门：规则预筛 →（可选）LLM 裁决 proceed/clarify/out_of_scope
     if settings.dialogue_gate_enabled:
-        top_table = merged.recalled_tables[0].score if merged.recalled_tables else 0.0
-        top_metric = merged.metrics[0].score if merged.metrics else 0.0
-        empty_recall = not merged.recalled_tables and not merged.metrics
-        low_table = bool(merged.recalled_tables) and top_table < settings.dialogue_recall_table_min
-        # 问句像指标问但 metric top1 过低
-        q = state.get("normalized_question") or ""
-        looks_metric = any(
-            k in q
-            for k in ("人数", "人次", "数量", "次数", "金额", "销量", "订单", "占比", "趋势", "汇总")
+        from app.agent.ask_user_payload import flatten_ask_user
+        from app.agent.recall_gate_llm import (
+            adjudicate_recall_gate_llm,
+            build_rule_fallback_clarify,
+            recall_gate_rule_flags,
         )
-        low_metric = looks_metric and (
-            not merged.metrics or top_metric < settings.dialogue_recall_metric_min
-        )
-        if empty_recall or low_table or low_metric:
-            metric_opts = [m.metric_name or m.metric_code for m in merged.metrics[:4] if m]
-            from app.agent.ask_user_payload import build_ask_user_from_slots
 
-            reason = "未找到足够相关的数据表或指标，请补充或换一种问法"
-            if low_metric and metric_opts:
-                reason = "找到多个相近指标，请确认你关注哪一个"
-            ask_user = build_ask_user_from_slots(
-                missing_slots=["metric"] if low_metric else ["entity", "metric"],
-                clarify_question=reason,
-                metric_candidates=[str(x) for x in metric_opts if x],
-                reason=reason,
-                max_questions=settings.dialogue_ask_max_questions,
-                max_options=settings.dialogue_ask_max_options,
-            )
-            out.update(
-                {
-                    "need_clarification": True,
-                    "dialogue_act": "clarify",
-                    "ready_to_execute": False,
-                    "missing_slots": ["metric"] if low_metric else ["entity", "metric"],
-                    "ask_user_question": ask_user,
-                    "clarify_question": reason,
-                }
-            )
+        q = (
+            state.get("recall_question")
+            or state.get("normalized_question")
+            or state.get("question")
+            or ""
+        )
+        flags = recall_gate_rule_flags(merged, settings, q)
+        if flags["should_adjudicate"]:
+            decision: dict | None = None
+            if settings.dialogue_recall_llm_enabled:
+                decision = await adjudicate_recall_gate_llm(
+                    settings=settings,
+                    question=q,
+                    merged=merged,
+                    flags=flags,
+                    thinking_queue=c.get("thinking_delta_queue"),
+                )
+            if decision is None:
+                if settings.dialogue_fail_open:
+                    # 与门禁 fail-open 一致：继续问数，由 Plan/SQL 再兜底
+                    out["recall_gate_decision"] = "proceed"
+                    out["recall_gate_source"] = "fail_open"
+                else:
+                    decision = build_rule_fallback_clarify(merged, flags, settings)
+
+            if decision is not None:
+                kind = decision["decision"]
+                out["recall_gate_decision"] = kind
+                out["recall_gate_source"] = decision.get("source")
+                if kind == "proceed":
+                    pass
+                elif kind == "out_of_scope":
+                    answer = decision.get("answer") or decision.get("reason") or (
+                        "当前元数据无法支撑该问句，请换一种问法。"
+                    )
+                    out.update(
+                        {
+                            "status": "out_of_scope",
+                            "dialogue_act": "out_of_scope",
+                            "answer": answer,
+                            "need_clarification": False,
+                            "ready_to_execute": False,
+                            "missing_slots": [],
+                            "ask_user_question": None,
+                            "clarify_question": None,
+                        }
+                    )
+                else:
+                    ask_user = decision.get("ask_user_question")
+                    reason = decision.get("reason") or "召回结果与问句相关度不足，需要确认"
+                    flat_q, flat_opts = flatten_ask_user(ask_user)
+                    out.update(
+                        {
+                            "need_clarification": True,
+                            "dialogue_act": "clarify",
+                            "ready_to_execute": False,
+                            "missing_slots": list(
+                                decision.get("missing_slots") or ["metric"]
+                            ),
+                            "ask_user_question": ask_user,
+                            "clarify_question": flat_q or reason,
+                            "clarify_options": flat_opts or None,
+                        }
+                    )
     return out
 
 

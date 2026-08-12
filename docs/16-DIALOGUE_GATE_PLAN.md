@@ -650,17 +650,31 @@ load_session_memory
 
 前置门禁无法 100% 挡住「像问数但库里没有」的情况，故在召回与 Plan 后再挡一层。
 
-### 10.1 召回分数门槛
+### 10.1 召回分数门槛 + LLM 裁决（规则预筛）
 
 在 `merge_retrieved_info`（或紧随其后）：
 
+**Step A · 规则预筛**（不直接问用户）
+
 | 条件 | 动作 |
 |------|------|
-| 表 top1 score < `DIALOGUE_RECALL_TABLE_MIN` | 倾向 clarify / 「未找到相关表」 |
-| 指标问句且 metric top1 < `DIALOGUE_RECALL_METRIC_MIN` | AskUserQuestion（候选指标作 options） |
-| 召回结果为空 | 不进入 generate_sql |
+| 表 top1 score < `DIALOGUE_RECALL_TABLE_MIN` | 进入裁决 |
+| 指标问句且 metric top1 < `DIALOGUE_RECALL_METRIC_MIN` | 进入裁决 |
+| 召回结果为空 | 进入裁决 |
 
-具体分数口径与现有 hybrid 召回字段对齐（实现时读 `RecalledTable.score` 等）。
+**Step B · LLM 裁决**（`DIALOGUE_RECALL_LLM_ENABLED=true`，默认开）
+
+输入：用户问句 + 召回摘要（表分、字段清单 `prompt_columns`、指标候选）。
+
+| `decision` | 动作 |
+|------------|------|
+| `proceed` | 分虽低但表/字段可支撑问句 → **继续** L1 / Plan / SQL（禁止用无关指标追问） |
+| `clarify` | 确有歧义 → `AskUserQuestion`（选项须与问句语义相关） |
+| `out_of_scope` | 元数据无法支撑 → 直接说明，**不**塞假候选 |
+
+LLM 失败时：`DIALOGUE_FAIL_OPEN=true` → 降级 `proceed`；否则规则兜底 clarify（低分噪声指标不作为推荐选项）。
+
+具体分数口径与现有 hybrid 召回字段对齐（实现时读 `RecalledTable.score` 等）。实现见 `app/agent/recall_gate_llm.py`。
 
 ### 10.2 Plan 扩展
 
@@ -775,9 +789,10 @@ W4     P2 可选项 + 运营指标（按需）
 | `DIALOGUE_ASK_MAX_QUESTIONS` | `2` | 单次 AskUserQuestion 问题上限（硬顶 4） |
 | `DIALOGUE_ASK_MAX_OPTIONS` | `4` | 每题选项上限 |
 | `DIALOGUE_AGENT_ASK_ENABLED` | `true` | Agent Loop 是否允许调用 ask_user_question |
-| `DIALOGUE_RECALL_TABLE_MIN` | 待标定 | 表召回最低分 |
-| `DIALOGUE_RECALL_METRIC_MIN` | 待标定 | 指标召回最低分 |
-| `DIALOGUE_FAIL_OPEN` | `true` | 门禁 LLM 异常时是否降级继续问数 |
+| `DIALOGUE_RECALL_TABLE_MIN` | `0.15` | 表召回 top1 低于此分 → 进入召回闸门预筛 |
+| `DIALOGUE_RECALL_METRIC_MIN` | `0.12` | 指标召回 top1 低于此分 → 进入召回闸门预筛 |
+| `DIALOGUE_RECALL_LLM_ENABLED` | `true` | 召回闸门是否 LLM 裁决 proceed/clarify/out_of_scope |
+| `DIALOGUE_FAIL_OPEN` | `true` | 门禁/召回裁决 LLM 异常时是否降级继续问数 |
 | `DIALOGUE_REQUIRE_TIME_SLOT` | `true` | 无时间是否强制澄清 |
 
 实现落在 `config/settings.py`，与现有 Settings 风格一致。

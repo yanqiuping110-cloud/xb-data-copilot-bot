@@ -220,6 +220,18 @@ def rule_route_dialogue(
     return None
 
 
+def _residues_diverged(a: str, b: str) -> bool:
+    """两段内容残差是否明显不同（换题信号，不做行业词表）。"""
+    if not a or not b:
+        return False
+    if a == b:
+        return False
+    if a in b or b in a:
+        return False
+    # 极短残差不判分叉，避免噪声
+    return len(a) >= 2 and len(b) >= 2
+
+
 def detect_topic_switch(question: str, pending: dict[str, Any]) -> bool:
     """有 pending 时判定本轮是否换题（而非补槽）。不依赖具体行业实体表。"""
     q = (question or "").strip()
@@ -231,13 +243,19 @@ def detect_topic_switch(question: str, pending: dict[str, Any]) -> bool:
     filled = pending.get("filled_slots") or {}
     entity = str(filled.get("entity") or "").strip()
     residue = _content_residue(q)
+    original = str(pending.get("original_question") or "").strip()
+    orig_residue = _content_residue(original)
 
     # 纯时间/指标补槽：去掉时间指标后无实质内容 → 不换题
     if not residue:
         return False
 
-    # 完整新问句：自带时间+指标，且不含 pending 实体、残差也不同于该实体
+    # 完整新问句（自带时间+指标）：与原 pending 问句残差分叉 → 换题
+    # 覆盖 filled.entity 为空时「销售额澄清中又来学生人数完整问句」的串台
     if _TIME.search(q) and _METRIC.search(q) and len(q) >= 8:
+        if original and q != original and original not in q and q not in original:
+            if _residues_diverged(residue, orig_residue):
+                return True
         if entity and entity not in q and residue != entity:
             return True
 

@@ -57,6 +57,57 @@ def test_topic_switch_detect():
     assert detect_topic_switch("近7天数量", pending) is False
 
 
+def test_topic_switch_full_question_without_entity_slot():
+    """pending 无 entity 时，完整新问句不得并入旧销售额澄清。"""
+    pending = {
+        "original_question": "今年1到12月和去年1到12月销售额每个月去对比",
+        "filled_slots": {},
+        "missing_slots": ["entity", "metric"],
+    }
+    assert (
+        detect_topic_switch(
+            "今年的学生人数对比去年的学生人数增长了多少？只查基础数据就行了",
+            pending,
+        )
+        is True
+    )
+    assert detect_topic_switch("学生数据", pending) is False
+    assert detect_topic_switch("近7天", pending) is False
+
+
+def test_ask_clarification_empty_slots_does_not_invent_time_metric():
+    """空 missing_slots 时不得默认出时间/指标题。"""
+    from app.agent.ask_user_payload import build_ask_user_from_slots
+
+    ask = build_ask_user_from_slots(
+        missing_slots=[],
+        filled_slots={"entity": "学生数据"},
+        clarify_question="问句末尾与订单表无直连路径，请确认口径",
+        max_questions=2,
+        max_options=4,
+    )
+    ids = [q["id"] for q in ask["questions"]]
+    assert "time_range" not in ids
+    assert "metric" not in ids
+    assert ids == ["general"]
+
+
+def test_route_after_plan_soft_ambiguity_continues():
+    """plan 仅有 ambiguities、无缺槽/无出题 → 不应进 ask_clarification。"""
+    # soft path 在 plan_question 节点消化；路由侧 need_clarification 应为 False
+    assert (
+        route_after_plan(
+            {
+                "plan_skipped": False,
+                "ready_to_execute": True,
+                "need_clarification": False,
+                "plan": {"ready_to_execute": True, "ambiguities": ["软歧义"]},
+            }
+        )
+        == "agent_loop"
+    )
+
+
 def test_clip_ask_user_question_hard_limits():
     payload = {
         "title": "确认",
@@ -148,7 +199,130 @@ def test_route_after_plan_clarify():
 
 def test_route_after_merge_recall():
     assert route_after_merge_recall({"need_clarification": True}) == "ask_clarification"
+    assert route_after_merge_recall({"status": "out_of_scope"}) == "format_answer"
     assert route_after_merge_recall({}) == "do_recall_sql_examples"
+
+
+def test_recall_gate_rule_flags_low_score():
+    from app.agent.context_builder import MergedRecallContext
+    from app.agent.recall_gate_llm import recall_gate_rule_flags
+    from app.retrieval.hybrid import RecalledMetric, RecalledTable
+    from config.settings import Settings
+
+    settings = Settings(
+        DIALOGUE_RECALL_TABLE_MIN=0.15,
+        DIALOGUE_RECALL_METRIC_MIN=0.12,
+    )
+    merged = MergedRecallContext(
+        keywords=[],
+        recall_mode="hybrid",
+        recalled_tables=[
+            RecalledTable(
+                table_id=1,
+                table_name="sport_order",
+                search_text="订单",
+                score=0.03,
+                recall_mode="hybrid",
+            )
+        ],
+        metrics=[
+            RecalledMetric(
+                metric_id=1,
+                metric_code="qzs_month_participants",
+                metric_name="本校本月活动参与人数",
+                search_text="活动",
+                score=0.03,
+                recall_mode="hybrid",
+            )
+        ],
+    )
+    flags = recall_gate_rule_flags(merged, settings, "今年销售额同比")
+    assert flags["should_adjudicate"] is True
+    assert flags["low_table"] is True
+
+
+def test_recall_gate_normalize_proceed():
+    from app.agent.recall_gate_llm import _normalize_adjudication
+    from config.settings import Settings
+
+    settings = Settings()
+    out = _normalize_adjudication(
+        {
+            "decision": "proceed",
+            "reason": "有 sport_order.order_total 可支撑销售额",
+        },
+        question="销售额",
+        flags={"low_table": True, "low_metric": True},
+        settings=settings,
+    )
+    assert out["decision"] == "proceed"
+
+
+def test_recall_gate_normalize_clarify_builds_ask_user():
+    from app.agent.recall_gate_llm import _normalize_adjudication
+    from config.settings import Settings
+
+    settings = Settings()
+    out = _normalize_adjudication(
+        {
+            "decision": "clarify",
+            "reason": "金额口径不清",
+            "clarify_question": "看订单总额还是商品件数？",
+            "clarify_options": ["订单总额", "商品件数"],
+            "missing_slots": ["metric"],
+        },
+        question="本月销售怎么样",
+        flags={"low_metric": True, "low_table": False},
+        settings=settings,
+    )
+    assert out["decision"] == "clarify"
+    assert out["ask_user_question"] is not None
+    assert out["ask_user_question"]["questions"]
+
+
+def test_recall_gate_rule_fallback_skips_noise_metrics_when_low_table():
+    from app.agent.context_builder import MergedRecallContext
+    from app.agent.recall_gate_llm import build_rule_fallback_clarify
+    from app.retrieval.hybrid import RecalledMetric, RecalledTable
+    from config.settings import Settings
+
+    settings = Settings()
+    merged = MergedRecallContext(
+        keywords=[],
+        recall_mode="hybrid",
+        recalled_tables=[
+            RecalledTable(
+                table_id=1,
+                table_name="sport_order",
+                search_text="订单",
+                score=0.03,
+                recall_mode="hybrid",
+            )
+        ],
+        metrics=[
+            RecalledMetric(
+                metric_id=1,
+                metric_code="qzs_month_participants",
+                metric_name="本校本月活动参与人数",
+                search_text="活动",
+                score=0.03,
+                recall_mode="hybrid",
+            )
+        ],
+    )
+    flags = {
+        "low_table": True,
+        "low_metric": True,
+        "empty_recall": False,
+    }
+    fb = build_rule_fallback_clarify(merged, flags, settings)
+    assert fb["decision"] == "clarify"
+    # 低表分时不把噪声指标塞进推荐 options
+    labels = []
+    for q in (fb["ask_user_question"] or {}).get("questions") or []:
+        for opt in q.get("options") or []:
+            labels.append(opt.get("label"))
+    assert "本校本月活动参与人数" not in labels
 
 
 def test_graph_includes_dialogue_nodes():
