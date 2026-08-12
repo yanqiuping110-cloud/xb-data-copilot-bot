@@ -2,7 +2,7 @@
 MCP stdio 服务：对外暴露 copilot_ask / copilot_list_sessions。
 
 启动：cd backend && python -m app.mcp.server
-Cursor 配置见 docs/MCP.md
+Cursor 配置见 docs/94-MCP.md
 """
 
 from __future__ import annotations

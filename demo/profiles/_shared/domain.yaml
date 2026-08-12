@@ -1,0 +1,33 @@
+# ShopPulse shared domain (engine-agnostic)
+
+name: ShopPulse
+description: Fictional e-commerce demo for opensource / AI-agent bootstrap
+
+tables:
+  - name: users
+    comment: Registered customers
+    columns:
+      - { name: id, type: integer, comment: User id }
+      - { name: name, type: string, comment: Display name }
+      - { name: city, type: string, comment: City }
+      - { name: created_at, type: date, comment: Signup date }
+  - name: products
+    comment: Product catalog
+    columns:
+      - { name: id, type: integer, comment: Product id }
+      - { name: name, type: string, comment: Product name }
+      - { name: category, type: string, comment: Category }
+      - { name: price, type: number, comment: Unit price }
+  - name: orders
+    comment: Orders
+    columns:
+      - { name: id, type: integer, comment: Order id }
+      - { name: user_id, type: integer, comment: Buyer user id }
+      - { name: product_id, type: integer, comment: Product id }
+      - { name: qty, type: integer, comment: Quantity }
+      - { name: amount, type: number, comment: Order amount }
+      - { name: order_date, type: date, comment: Order date }
+      - { name: status, type: string, comment: Order status }
+
+roles_demo:
+  - admin

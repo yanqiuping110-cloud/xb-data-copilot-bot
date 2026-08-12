@@ -625,7 +625,7 @@ frontend/src/components/brief-report/
 frontend/src/api/briefReport.js
 frontend/src/views/Ask.vue         # 入口
 
-docs/BRIEF_REPORT_PLAN.md          # 本文档
+docs/14-BRIEF_REPORT_PLAN.md          # 本文档
 ```
 
 ---

@@ -3,7 +3,7 @@
 ### Enterprise Natural-Language Analytics · 企业级智能问数平台
 
 <p align="center">
-  <img src="https://img.shields.io/badge/License-Proprietary-blue?style=flat-square" alt="License"/>
+  <img src="https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square" alt="License"/>
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue"/>
   <img src="https://img.shields.io/badge/FastAPI-Async-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"/>
@@ -17,6 +17,8 @@
 </p>
 
 <p align="center">
+  <a href="AGENTS.md">For AI Agents</a> ·
+  <a href="docs/DEMO.md">Demo</a> ·
   <a href="#产品一览">产品一览</a> ·
   <a href="#系统配置--ai-模型与多引擎数据源">系统配置</a> ·
   <a href="#核心价值">核心价值</a> ·
@@ -24,6 +26,8 @@
   <a href="#问数链路langgraph">问数链路</a> ·
   <a href="#快速开始">快速开始</a>
 </p>
+
+> **Open Source Demo (Scheme A)** — `make demo-up && make demo-smoke` · UI http://localhost:8080 · `admin` / `demo123456` · no API key (Fixture). Details: [AGENTS.md](AGENTS.md) · [docs/DEMO.md](docs/DEMO.md)
 
 ---
 
@@ -81,7 +85,7 @@
 
 **典型场景**：「本部门本月核心指标是多少？」「最近 7 天每日趋势？」「全平台昨日汇总？」—— 系统自动理解意图、经动态权限校验后生成只读 SQL，返回表格与自然语言解读。
 
-**当前里程碑**：Agent Plan/Tool Loop、Git 代码知识图谱、配置驱动 DataScope、Prompt 定界与注入评测、**多引擎数据源 / LLM 管理台** 已落地；详见 [docs/PROGRESS.md](docs/PROGRESS.md)。
+**当前里程碑**：Agent Plan/Tool Loop、Git 代码知识图谱、配置驱动 DataScope、Prompt 定界与注入评测、**多引擎数据源 / LLM 管理台** 已落地；详见 [docs/02-PROGRESS.md](docs/02-PROGRESS.md)。
 
 ---
 
@@ -449,12 +453,14 @@ data-copilot-bot/
 │   └── src/
 │       ├── views/          # Ask、Login、AdminMeta*、AdminUsers、AdminCodeRepos
 │       └── api/            # 后端 API 封装
-└── docs/
-    ├── DEVELOPMENT_PLAN.md # 14 周设计与 API 契约
-    ├── CHART_VISUALIZATION_PLAN.md  # 图表展示功能详细开发计划
-    ├── PROGRESS.md         # 模块完成度
-    ├── EVAL_QUESTIONS.md   # 评测问句（含 inj-* 注入子集）
-    └── PROMPT_SECURITY.md  # Prompt Injection 威胁模型与运营规范
+└── docs/                   # 编号索引见 docs/README.md
+    ├── README.md           # 计划索引与阅读顺序
+    ├── 01-MVP_DEVELOPMENT_PLAN.md
+    ├── 02-PROGRESS.md
+    ├── 03-PHASE2_ROADMAP.md
+    ├── 16-DIALOGUE_GATE_PLAN.md
+    ├── 20-OPENSOURCE_GROWTH_PLAN.md  # 开源化与涨星
+    └── 90～94 规范 / 评测 / Embed / MCP
 ```
 
 ---
@@ -488,7 +494,16 @@ data-copilot-bot/
 
 ## 快速开始
 
-### 环境要求
+### 开源 Demo（推荐 · 无需宿主机 MySQL / API Key）
+
+```bash
+make demo-up && make demo-smoke
+# Windows: .\scripts\demo_up.ps1 ; .\scripts\demo_smoke.ps1
+```
+
+打开 http://localhost:8080 ，账号 `admin` / `demo123456`。详见 [AGENTS.md](AGENTS.md) · [docs/DEMO.md](docs/DEMO.md)。
+
+### 环境要求（本地开发 / 公司现网）
 
 | 组件 | 说明 |
 |------|------|
@@ -615,7 +630,7 @@ erDiagram
 
 - **单元测试**：SQL Guard、DataScope、Prompt 定界/注入、元数据、LangGraph、Agent 工具等 **180+** 用例
 - **评测回归**：`replay_eval.py` 支持 `memory` / `agent` / **`injection`** 子集
-- **badcase 闭环**：运营修正 SQL → 沉淀 L1 → 同类问句直出（Phase 2 将扩展为**术语库 + 审核发布台**，见 [PHASE2_ROADMAP.md](docs/PHASE2_ROADMAP.md)）
+- **badcase 闭环**：运营修正 SQL → 沉淀 L1 → 同类问句直出（Phase 2 将扩展为**术语库 + 审核发布台**，见 [03-PHASE2_ROADMAP.md](docs/03-PHASE2_ROADMAP.md)）
 - **安全回归**：`tests/test_prompt_injection.py` + `docs/eval/prompt_injection.json`
 
 ---
@@ -624,13 +639,15 @@ erDiagram
 
 | 文档 | 内容 |
 |------|------|
-| [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) | 完整架构、14 周里程碑、§14 Phase 2 backlog |
-| [docs/PHASE2_ROADMAP.md](docs/PHASE2_ROADMAP.md) | **Phase 2 三大优先级**：Chart SSR、运营闭环、MCP/iframe |
-| [docs/CHART_VISUALIZATION_PLAN.md](docs/CHART_VISUALIZATION_PLAN.md) | 图表展示：Plan 意图识别、chartSpec、历史回放；SSR 见 Phase 2 §P2-A |
-| [docs/DIALOGUE_GATE_PLAN.md](docs/DIALOGUE_GATE_PLAN.md) | 对话门禁与多轮澄清：闲聊短路、缺槽追问、召回/Plan 闸门 |
-| [docs/PROGRESS.md](docs/PROGRESS.md) | 模块完成度与联调清单 |
-| [docs/EVAL_QUESTIONS.md](docs/EVAL_QUESTIONS.md) | 评测问句（含 inj-* 注入子集） |
-| [docs/PROMPT_SECURITY.md](docs/PROMPT_SECURITY.md) | 威胁模型、定界符约定、运营规范 |
+| [docs/README.md](docs/README.md) | **文档索引**：编号规则与阅读顺序 |
+| [docs/01-MVP_DEVELOPMENT_PLAN.md](docs/01-MVP_DEVELOPMENT_PLAN.md) | 完整架构、14 周里程碑、§14 Phase 2 backlog |
+| [docs/03-PHASE2_ROADMAP.md](docs/03-PHASE2_ROADMAP.md) | **Phase 2 三大优先级**：Chart SSR、运营闭环、MCP/iframe |
+| [docs/12-CHART_VISUALIZATION_PLAN.md](docs/12-CHART_VISUALIZATION_PLAN.md) | 图表展示：Plan 意图识别、chartSpec、历史回放；SSR 见 Phase 2 §P2-A |
+| [docs/16-DIALOGUE_GATE_PLAN.md](docs/16-DIALOGUE_GATE_PLAN.md) | 对话门禁与多轮澄清：闲聊短路、缺槽追问、召回/Plan 闸门 |
+| [docs/20-OPENSOURCE_GROWTH_PLAN.md](docs/20-OPENSOURCE_GROWTH_PLAN.md) | **开源化与涨星**：方案 A（Compose MySQL 8）、**AI Agent 一键跑通**、评测、传播 |
+| [docs/02-PROGRESS.md](docs/02-PROGRESS.md) | 模块完成度与联调清单 |
+| [docs/92-EVAL_QUESTIONS.md](docs/92-EVAL_QUESTIONS.md) | 评测问句（含 inj-* 注入子集） |
+| [docs/91-PROMPT_SECURITY.md](docs/91-PROMPT_SECURITY.md) | 威胁模型、定界符约定、运营规范 |
 
 ---
 

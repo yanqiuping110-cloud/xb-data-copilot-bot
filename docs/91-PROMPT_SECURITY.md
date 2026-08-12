@@ -1,6 +1,6 @@
 # Prompt Injection 与数据权限运营规范
 
-> 第 13～14 周 · 与 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) §11.9 对齐。
+> 第 13～14 周 · 与 [01-MVP_DEVELOPMENT_PLAN.md](./01-MVP_DEVELOPMENT_PLAN.md) §11.9 对齐。
 
 ## 威胁模型
 

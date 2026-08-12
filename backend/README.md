@@ -44,7 +44,7 @@ python scripts/build_search_index.py
 # 可选：VECTOR_STORE=elasticsearch 时使用 ES（见 .env.example）
 ```
 
-数据库变更策略：[docs/DATABASE_CHANGE_POLICY.md](../docs/DATABASE_CHANGE_POLICY.md)  
+数据库变更策略：[docs/90-DATABASE_CHANGE_POLICY.md](../docs/90-DATABASE_CHANGE_POLICY.md)  
 问数库 DDL 版本目录：`scripts/sql/copilot/`（仅人工执行）。
 
-详见仓库根目录 [README.md](../README.md)、[docs/DEVELOPMENT_PLAN.md](../docs/DEVELOPMENT_PLAN.md)（**§5.1 中文注释规范**）、[docs/PROGRESS.md](../docs/PROGRESS.md)。
+详见仓库根目录 [README.md](../README.md)、[docs/01-MVP_DEVELOPMENT_PLAN.md](../docs/01-MVP_DEVELOPMENT_PLAN.md)（**§5.1 中文注释规范**）、[docs/02-PROGRESS.md](../docs/02-PROGRESS.md)。

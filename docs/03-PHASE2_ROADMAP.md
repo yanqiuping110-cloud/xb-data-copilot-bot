@@ -3,7 +3,7 @@
 > **状态**：已纳入开发计划（2026-07）  
 > **版本**：v1.0  
 > **定位**：MVP（14 周）完成后的 **Phase 2 三大优先级**，借鉴 [SQLBot](https://github.com/dataease/SQLBot) 的产品化思路，**不替代**现有 LangGraph / SQL Guard / DataScope 企业底座。  
-> **关联文档**：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) §14、[CHART_VISUALIZATION_PLAN.md](./CHART_VISUALIZATION_PLAN.md)、[DEEP_ANALYTICS_REPORT_PLAN.md](./DEEP_ANALYTICS_REPORT_PLAN.md)
+> **关联文档**：[01-MVP_DEVELOPMENT_PLAN.md](./01-MVP_DEVELOPMENT_PLAN.md) §14、[12-CHART_VISUALIZATION_PLAN.md](./12-CHART_VISUALIZATION_PLAN.md)、[15-DEEP_ANALYTICS_REPORT_PLAN.md](./15-DEEP_ANALYTICS_REPORT_PLAN.md)
 
 ---
 
@@ -44,7 +44,7 @@ Phase 2（约 6～8 周）
 
 | 现状 | 问题 |
 |------|------|
-| Ask 前端 | `ChartSpec` + 前端组件渲染（已实现，见 [CHART_VISUALIZATION_PLAN.md](./CHART_VISUALIZATION_PLAN.md)） |
+| Ask 前端 | `ChartSpec` + 前端组件渲染（已实现，见 [12-CHART_VISUALIZATION_PLAN.md](./12-CHART_VISUALIZATION_PLAN.md)） |
 | Insight PDF | `matplotlib` → PNG（`chart_png.py`），中文缺字、样式与在线不一致 |
 | 深度报告 | 在线内联图仅为 CSS 占位，与 PDF 脱节 |
 
@@ -226,7 +226,7 @@ SQLBot 支持 **Web 嵌入、弹窗嵌入、MCP**，便于接入 n8n、Dify、Ma
 |------|------|
 | `frontend/src/views/EmbedAsk.vue` | 精简 Ask UI（无侧栏 admin） |
 | `/embed/ask?token=...` | 路由 + `X-Frame-Options` / CSP `frame-ancestors` 可配置 |
-| `docs/EMBED.md` | 集成说明、示例 iframe 代码 |
+| `docs/93-EMBED.md` | 集成说明、示例 iframe 代码 |
 
 #### 4.4.2 MCP Server
 
@@ -256,7 +256,7 @@ SQLBot 支持 **Web 嵌入、弹窗嵌入、MCP**，便于接入 n8n、Dify、Ma
 | C3 | CSP / `frame-ancestors` 配置项 |
 | C4 | MCP Server 注册 `copilot_ask`（读-only 问数） |
 | C5 | MCP `copilot_research`（流式可选简化） |
-| C6 | `docs/EMBED.md` + `docs/MCP.md` + README 链接 |
+| C6 | `docs/93-EMBED.md` + `docs/94-MCP.md` + README 链接 |
 
 ### 4.6 验收标准（DoD）
 
@@ -280,7 +280,7 @@ SQLBot 支持 **Web 嵌入、弹窗嵌入、MCP**，便于接入 n8n、Dify、Ma
 
 1. 演示脚本：嵌入页问数 → 出 SSR 图 → badcase 沉淀 → 同问句 L1 命中  
 2. `replay_eval` 新增子集 `chart-ssr`、`ops-loop`（各 ≥5 条）  
-3. 文档齐全：`PHASE2_ROADMAP.md`、`EMBED.md`、`MCP.md` 与 `.env.example` 同步  
+3. 文档齐全：`03-PHASE2_ROADMAP.md`、`93-EMBED.md`、`94-MCP.md` 与 `.env.example` 同步  
 
 ---
 
@@ -318,4 +318,4 @@ MCP_API_KEY=
 
 ---
 
-**维护**：子项开工时在 [PROGRESS.md](./PROGRESS.md) 登记；完成后更新 [CHART_VISUALIZATION_PLAN.md](./CHART_VISUALIZATION_PLAN.md) §SSR 与本文里程碑勾选。
+**维护**：子项开工时在 [02-PROGRESS.md](./02-PROGRESS.md) 登记；完成后更新 [12-CHART_VISUALIZATION_PLAN.md](./12-CHART_VISUALIZATION_PLAN.md) §SSR 与本文里程碑勾选。

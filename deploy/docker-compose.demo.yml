@@ -1,0 +1,80 @@
+# Data Copilot — opensource demo stack (Scheme A)
+# Governance DB: MySQL 8 in Compose. Business sample: Excel ShopPulse + Fixture LLM.
+#
+#   make demo-up
+#   make demo-smoke
+
+name: datacopilot-demo
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: datacopilot-demo-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: demo_root
+      MYSQL_DATABASE: copilot
+      MYSQL_USER: copilot
+      MYSQL_PASSWORD: demo_copilot
+    ports:
+      - "3307:3306"
+    volumes:
+      - demo_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pdemo_root"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      args:
+        INSTALL_EXTRAS: db-excel
+    container_name: datacopilot-demo-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file:
+      - ../backend/.env.demo
+    environment:
+      APP_ENV: demo
+      MYSQL_COPILOT_HOST: mysql
+      MYSQL_COPILOT_PORT: "3306"
+      MYSQL_COPILOT_USER: copilot
+      MYSQL_COPILOT_PASSWORD: demo_copilot
+      MYSQL_COPILOT_DATABASE: copilot
+      LLM_MODE: fixture
+      DEMO_PROFILE: excel
+      DEMO_ROOT: /workspace
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../demo:/workspace/demo:ro
+      - ../.demo:/workspace/.demo
+      - demo_zvec:/app/data/zvec
+      - demo_excel_mirror:/app/data/excel_ds
+    command: ["python", "scripts/demo_entrypoint.py"]
+
+  web:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: datacopilot-demo-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  demo_mysql_data:
+  demo_zvec:
+  demo_excel_mirror:

@@ -26,6 +26,10 @@ async def handle_ask(
     settings: Settings,
 ) -> AskResponse:
     """处理单次问数请求（一次性 JSON 响应）。"""
+    if (settings.llm_mode or "").strip().lower() == "fixture":
+        from app.demo.fixture_ask import handle_fixture_ask
+
+        return await handle_fixture_ask(body, ctx, copilot_session, settings)
     return await run_ask_graph(body, ctx, copilot_session, settings)
 
 
@@ -36,6 +40,14 @@ async def handle_ask_stream(
     settings: Settings,
 ) -> AsyncIterator[str]:
     """处理流式问数请求（SSE 文本帧）。"""
+    if (settings.llm_mode or "").strip().lower() == "fixture":
+        import json
+
+        from app.demo.fixture_ask import handle_fixture_ask
+
+        resp = await handle_fixture_ask(body, ctx, copilot_session, settings)
+        yield f"event: done\ndata: {json.dumps(resp.model_dump(by_alias=True), ensure_ascii=False)}\n\n"
+        return
     async for frame in stream_ask_graph(body, ctx, copilot_session, settings):
         yield frame
 

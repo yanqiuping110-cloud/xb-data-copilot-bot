@@ -29,6 +29,9 @@ build/
 frontend/node_modules/
 frontend/dist/
 
+# Opensource demo runtime markers
+.demo/
+
 # IDE / 日志
 .idea/
 .vscode/*

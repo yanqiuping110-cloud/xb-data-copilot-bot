@@ -2,7 +2,7 @@
 
 > **状态**：P0～P3 + P1.5 已落地（P4 Excel/Oracle 等仍按计划不做）  
 > **版本**：v1.1 · 2026-08  
-> **前置**：一期已落地 — 见 [LLM_DATASOURCE_CONFIG_PLAN.md](./LLM_DATASOURCE_CONFIG_PLAN.md)（V016 + Admin CRUD + runtime_config）  
+> **前置**：一期已落地 — 见 [10-LLM_DATASOURCE_CONFIG_PLAN.md](./10-LLM_DATASOURCE_CONFIG_PLAN.md)（V016 + Admin CRUD + runtime_config）  
 > **对标**：[SQLBot](https://github.com/dataease/SQLBot) · [AI 模型配置](https://dataease.cn/sqlbot/v1/system/model/) · [数据源概览](https://dataease.cn/sqlbot/v1/user_manual/datasource_description/)  
 > **目标**：模型供应商可选、业务库类型可选；配置界面达到 SQLBot 级专业观感（卡片 / 向导 / 供应商墙），并贯通本仓库 Ask / Meta / Guard 链路  
 > **硬性原则（v1.1）**：  
@@ -672,10 +672,10 @@ ClickHouse / Doris / StarRocks；委托关系留在 connector 内部，Catalog �
 
 | 文档 | 关系 |
 |------|------|
-| [LLM_DATASOURCE_CONFIG_PLAN.md](./LLM_DATASOURCE_CONFIG_PLAN.md) | 一期基座 |
+| [10-LLM_DATASOURCE_CONFIG_PLAN.md](./10-LLM_DATASOURCE_CONFIG_PLAN.md) | 一期基座 |
 | **本文 v1.1** | 多供应商、多库、专业 UI、反写死、方言/版本感知 SQL |
-| [DATABASE_CHANGE_POLICY.md](./DATABASE_CHANGE_POLICY.md) | 只读策略 |
-| [PROGRESS.md](./PROGRESS.md) | 进度 |
+| [90-DATABASE_CHANGE_POLICY.md](./90-DATABASE_CHANGE_POLICY.md) | 只读策略 |
+| [02-PROGRESS.md](./02-PROGRESS.md) | 进度 |
 
 ## 附录 B · 建议排期
 

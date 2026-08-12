@@ -11,4 +11,4 @@ npm run dev
 
 需先启动 [backend](../backend/) API。
 
-**注释**：业务逻辑须写中文注释，规范见 [DEVELOPMENT_PLAN.md §5.1](../docs/DEVELOPMENT_PLAN.md)。
+**注释**：业务逻辑须写中文注释，规范见 [01-MVP_DEVELOPMENT_PLAN.md §5.1](../docs/01-MVP_DEVELOPMENT_PLAN.md)。

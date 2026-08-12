@@ -1,6 +1,6 @@
 # 问数评测问句集
 
-> 与 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 对齐。第 6 周先交付 **多轮 Memory 子集**；第 8 周扩展至 15～30 条开放域 + `replay_eval.py` 全量回归。
+> 与 [01-MVP_DEVELOPMENT_PLAN.md](./01-MVP_DEVELOPMENT_PLAN.md) 对齐。第 6 周先交付 **多轮 Memory 子集**；第 8 周扩展至 15～30 条开放域 + `replay_eval.py` 全量回归。
 
 ## 使用方式
 

@@ -63,7 +63,7 @@ async def main(manual_confirm: bool) -> None:
     if not manual_confirm:
         print("错误：问数库 DDL 只能人工确认后执行。")
         print("用法: python scripts/apply_ddl_to_env_db.py --manual-confirm")
-        print("策略: docs/DATABASE_CHANGE_POLICY.md")
+        print("策略: docs/90-DATABASE_CHANGE_POLICY.md")
         sys.exit(1)
 
     settings = get_settings()

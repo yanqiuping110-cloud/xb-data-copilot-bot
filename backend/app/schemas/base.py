@@ -1,7 +1,7 @@
 """
 API 请求/响应模型基类。
 
-JSON 字段使用 camelCase（与前端、DEVELOPMENT_PLAN §10 一致），
+JSON 字段使用 camelCase（与前端、01-MVP_DEVELOPMENT_PLAN §10 一致），
 Python 属性仍用 snake_case，通过 alias_generator 映射。
 """
 

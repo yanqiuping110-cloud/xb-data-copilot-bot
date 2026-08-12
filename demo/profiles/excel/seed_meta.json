@@ -1,0 +1,54 @@
+{
+  "profile": "excel",
+  "datasource": {
+    "name": "ShopPulse Excel Demo",
+    "db_type": "excel",
+    "host": "local",
+    "port": 0,
+    "database_name": "demo/profiles/excel/data/shop_pulse.xlsx",
+    "username": "demo",
+    "password": "",
+    "is_default": true
+  },
+  "tables": [
+    {
+      "table_name": "users",
+      "table_role": "dim",
+      "biz_domain": "shop",
+      "description_manual": "Registered customers",
+      "columns": [
+        { "column_name": "id", "data_type": "INTEGER", "description_manual": "User id", "column_role": "id" },
+        { "column_name": "name", "data_type": "TEXT", "description_manual": "Display name", "column_role": "attr" },
+        { "column_name": "city", "data_type": "TEXT", "description_manual": "City", "column_role": "filter" },
+        { "column_name": "created_at", "data_type": "TEXT", "description_manual": "Signup date", "column_role": "time" }
+      ]
+    },
+    {
+      "table_name": "products",
+      "table_role": "dim",
+      "biz_domain": "shop",
+      "description_manual": "Product catalog",
+      "columns": [
+        { "column_name": "id", "data_type": "INTEGER", "description_manual": "Product id", "column_role": "id" },
+        { "column_name": "name", "data_type": "TEXT", "description_manual": "Product name", "column_role": "attr" },
+        { "column_name": "category", "data_type": "TEXT", "description_manual": "Category", "column_role": "filter" },
+        { "column_name": "price", "data_type": "REAL", "description_manual": "Unit price", "column_role": "metric" }
+      ]
+    },
+    {
+      "table_name": "orders",
+      "table_role": "fact",
+      "biz_domain": "shop",
+      "description_manual": "Orders",
+      "columns": [
+        { "column_name": "id", "data_type": "INTEGER", "description_manual": "Order id", "column_role": "id" },
+        { "column_name": "user_id", "data_type": "INTEGER", "description_manual": "Buyer user id", "column_role": "fk" },
+        { "column_name": "product_id", "data_type": "INTEGER", "description_manual": "Product id", "column_role": "fk" },
+        { "column_name": "qty", "data_type": "INTEGER", "description_manual": "Quantity", "column_role": "metric" },
+        { "column_name": "amount", "data_type": "REAL", "description_manual": "Order amount", "column_role": "metric" },
+        { "column_name": "order_date", "data_type": "TEXT", "description_manual": "Order date", "column_role": "time" },
+        { "column_name": "status", "data_type": "TEXT", "description_manual": "Order status", "column_role": "filter" }
+      ]
+    }
+  ]
+}

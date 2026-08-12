@@ -1613,7 +1613,7 @@ docs/eval/research_report.json
 
 ---
 
-## 附录 B · 与 DEVELOPMENT_PLAN 的衔接
+## 附录 B · 与 01-MVP_DEVELOPMENT_PLAN 的衔接
 
 | 现有计划项 | DAR 关系 |
 |-----------|----------|

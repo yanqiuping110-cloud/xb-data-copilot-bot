@@ -1,7 +1,7 @@
 """
 JWT 访问令牌签发与解析（HS256）。
 
-Payload 约定见 DEVELOPMENT_PLAN §2.5.2：
+Payload 约定见 01-MVP_DEVELOPMENT_PLAN §2.5.2：
 - 所有角色：sub（user_id）、role、exp
 - SCHOOL 额外：active_sch_id、bound_sch_ids
 """

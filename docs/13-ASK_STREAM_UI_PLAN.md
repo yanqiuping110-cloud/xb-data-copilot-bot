@@ -4,7 +4,7 @@
 > **版本**：v1.0 · 2026-07  
 > **范围**：`POST /api/v1/ask` 流式问数（SSE）的前端布局重组 + 后端进度事件增强  
 > **原则**：复用 Insight Engine 已有流水线组件；思考过程 **仅 ADMIN 可见**（防泄露表名/字段名）  
-> **非目标**：Insight Engine（DAR）报告页改造（见 [DEEP_ANALYTICS_REPORT_PLAN.md](./DEEP_ANALYTICS_REPORT_PLAN.md)）
+> **非目标**：Insight Engine（DAR）报告页改造（见 [15-DEEP_ANALYTICS_REPORT_PLAN.md](./15-DEEP_ANALYTICS_REPORT_PLAN.md)）
 
 ---
 
@@ -512,7 +512,7 @@ frontend/
   src/styles/ask-stream.css        # 可选：流式主题
 
 docs/
-  ASK_STREAM_UI_PLAN.md            # 本文档
+  13-ASK_STREAM_UI_PLAN.md            # 本文档
 ```
 
 ---
@@ -521,7 +521,7 @@ docs/
 
 | 文档 | 关系 |
 |------|------|
-| [DEEP_ANALYTICS_REPORT_PLAN.md](./DEEP_ANALYTICS_REPORT_PLAN.md) §6.9 | SSE `text_delta` / 活动 Feed 理念一致；DAR 用 `scope` 字段，Ask 用 `phase` |
-| [CHART_VISUALIZATION_PLAN.md](./CHART_VISUALIZATION_PLAN.md) | `build_chart` 节点在时间线「回答」阶段展示 |
-| [PROMPT_SECURITY.md](./PROMPT_SECURITY.md) | 思考过程视为高敏感 Prompt 泄漏面，纳入 ADMIN 门控 |
-| [PROGRESS.md](./PROGRESS.md) | Phase 0 完成后更新问数 UI 完成度 |
+| [15-DEEP_ANALYTICS_REPORT_PLAN.md](./15-DEEP_ANALYTICS_REPORT_PLAN.md) §6.9 | SSE `text_delta` / 活动 Feed 理念一致；DAR 用 `scope` 字段，Ask 用 `phase` |
+| [12-CHART_VISUALIZATION_PLAN.md](./12-CHART_VISUALIZATION_PLAN.md) | `build_chart` 节点在时间线「回答」阶段展示 |
+| [91-PROMPT_SECURITY.md](./91-PROMPT_SECURITY.md) | 思考过程视为高敏感 Prompt 泄漏面，纳入 ADMIN 门控 |
+| [02-PROGRESS.md](./02-PROGRESS.md) | Phase 0 完成后更新问数 UI 完成度 |

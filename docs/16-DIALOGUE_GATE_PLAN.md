@@ -4,7 +4,7 @@
 > **版本**：v1.4 · 2026-08-11  
 > **范围**：闲聊短路、域外拒答、缺槽澄清、低置信召回闸门；多轮半截问句合并后再执行；**AskUserQuestion 主动提问工具**；**澄清线程与成功问数隔离**；**与 L1 短期记忆协同**；开源参考（门禁 + AskUser）  
 > **原则**：在现有 LangGraph 问数图上**加门禁**，不推倒 Plan / Agent Loop / 分步 SQL  
-> **关联文档**：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) §11.5（会话记忆）、[ASK_STREAM_UI_PLAN.md](./ASK_STREAM_UI_PLAN.md)、[EVAL_QUESTIONS.md](./EVAL_QUESTIONS.md)  
+> **关联文档**：[01-MVP_DEVELOPMENT_PLAN.md](./01-MVP_DEVELOPMENT_PLAN.md) §11.5（会话记忆）、[13-ASK_STREAM_UI_PLAN.md](./13-ASK_STREAM_UI_PLAN.md)、[92-EVAL_QUESTIONS.md](./92-EVAL_QUESTIONS.md)  
 > **参考**：[WorkBuddy · AskUserQuestion 设计哲学](https://cloud.tencent.com/developer/article/2703129)（结构化提问、选项克制、人机协作）
 
 ---
@@ -729,7 +729,7 @@ else → agent_loop
 | 3 | `reply_chat` / `ask_clarification` + 图边；输出 AskUserQuestion 或扁平兼容 | 闲聊/澄清短路 |
 | 4 | `NODE_LABELS` + SSE progress | 可观测 |
 | 5 | 前端：`need_clarification` 卡片（单题/多题均可渲染） | Ask.vue / Embed |
-| 6 | 评测集：闲聊 / 半截 / 域外各 ≥5 条 | `docs/EVAL_QUESTIONS.md` 或独立 json |
+| 6 | 评测集：闲聊 / 半截 / 域外各 ≥5 条 | `docs/92-EVAL_QUESTIONS.md` 或独立 json |
 | 7 | Feature flag：`DIALOGUE_GATE_ENABLED` | 可回滚 |
 
 **P0 验收**：闲聊不进召回 span；半截问返回 `need_clarification`（含可点选选项）且无 SQL 执行 span。
@@ -855,7 +855,7 @@ W4     P2 可选项 + 运营指标（按需）
 | 配置 | `backend/config/settings.py` |
 | 前端 | `frontend/src/views/Ask.vue`、`EmbedAsk.vue`、AskUserQuestion 组件、ask API 类型 |
 | 测试 | `backend/tests/test_dialogue_gate.py`、`test_ask_user_question.py` 等 |
-| 评测 | `docs/EVAL_QUESTIONS.md` 或 `docs/eval/dialogue_gate.json` |
+| 评测 | `docs/92-EVAL_QUESTIONS.md` 或 `docs/eval/dialogue_gate.json` |
 
 ## 附录 B · 决策摘要
 
