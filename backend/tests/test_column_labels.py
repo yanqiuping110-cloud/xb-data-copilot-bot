@@ -77,7 +77,20 @@ def test_localize_english_aliases_to_chinese():
         ["date", "participant_count", "sport_count"],
         question="对比每日参与人数与运动个数",
     )
-    assert cols == ["日期", "参与人数", "运动个数"]
+    assert cols == ["日期", "参与人数", "运动次数"]
+
+
+def test_localize_monthly_sport_aliases():
+    cols = localize_result_columns(
+        ["month", "participants", "total_sport_time", "total_sport_count"],
+        question="2026年每个月的活动运动人数、累计运动时间、累计运动次数",
+        state={
+            "plan": {
+                "metrics": ["月份", "运动人数", "累计运动时间", "累计运动次数"],
+            }
+        },
+    )
+    assert cols == ["月份", "运动人数", "累计运动时间", "累计运动次数"]
 
 
 def test_localize_entity_prefixed_english_columns():

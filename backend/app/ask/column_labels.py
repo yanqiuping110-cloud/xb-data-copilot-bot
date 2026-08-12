@@ -110,13 +110,20 @@ _COMMON_ALIAS_LABELS: dict[str, str] = {
     "total_minutes": "总时长(分钟)",
     "total_duration": "总时长",
     "total_sport_value": "总运动量",
+    "total_sport_time": "累计运动时间",
+    "total_sport_count": "累计运动次数",
+    "sport_time": "运动时间",
     "sport_value": "运动量",
-    "sport_count": "运动个数",
+    "sport_count": "运动次数",
     "people_count": "人数",
+    "participants": "运动人数",
     "participant_count": "参与人数",
     "join_cnt": "参与人次",
     "check_in_count": "打卡人数",
     "punch_count": "打卡人数",
+    "growth_amount": "增长量",
+    "current_year_students": "今年学生人数",
+    "last_year_students": "去年学生人数",
     "row_count": "行数",
     "sch_id": "学校ID",
     "school_id": "学校ID",
@@ -162,6 +169,7 @@ _TOKEN_LABELS: dict[str, str] = {
     "school": "学校",
     "class": "班级",
     "participant": "参与",
+    "participants": "人数",
     "distinct": "去重",
     "check": "打卡",
     "punch": "打卡",
@@ -175,6 +183,10 @@ _TOKEN_LABELS: dict[str, str] = {
     "week": "周",
     "project": "项目",
     "grade": "年级",
+    "growth": "增长",
+    "current": "今年",
+    "last": "去年",
+    "students": "学生人数",
 }
 
 
@@ -347,7 +359,8 @@ def _plan_metric_label_map(
     """
     用 plan.metrics（中文语义）弱映射未命中元数据的英文结果列。
 
-    仅在「可本地化英文列」与「中文 metrics」数量一致时按出现顺序配对，避免误伤。
+    先跳过维度列与已有 common/token 标签的列，再把剩余英文列与
+    尚未被这些标签覆盖的中文 metrics 按出现顺序配对。
     """
     plan = state.get("plan") or {}
     metrics = plan.get("metrics") if isinstance(plan, dict) else None
@@ -381,22 +394,42 @@ def _plan_metric_label_map(
         "周",
     }
     pending_cols: list[str] = []
+    covered_labels: list[str] = []
     for col in columns:
         _prefix, base = _split_entity_prefix(col)
         if base.lower() in join_like or base in join_like:
+            if base.lower() in _COMMON_ALIAS_LABELS:
+                covered_labels.append(_COMMON_ALIAS_LABELS[base.lower()])
             continue
         if _CJK_RE.search(base) and not re.search(r"[a-zA-Z]", base):
+            covered_labels.append(base)
             continue
-        # 已能被 common/meta 覆盖的不参与弱映射
+        # 已能被 common/token 覆盖的不参与弱映射，但其标签可消耗对应 metric
         if base.lower() in _COMMON_ALIAS_LABELS:
+            covered_labels.append(_COMMON_ALIAS_LABELS[base.lower()])
             continue
-        if _label_from_tokens(base.lower()):
+        token_label = _label_from_tokens(base.lower())
+        if token_label:
+            covered_labels.append(token_label)
             continue
         pending_cols.append(col)
 
-    if not pending_cols or len(pending_cols) != len(zh_metrics):
+    if not pending_cols:
         return {}
-    return {col: zh_metrics[i] for i, col in enumerate(pending_cols)}
+
+    remaining_metrics = list(zh_metrics)
+    for label in covered_labels:
+        for i, metric in enumerate(remaining_metrics):
+            if metric == label or metric in label or label in metric:
+                remaining_metrics.pop(i)
+                break
+
+    if not remaining_metrics:
+        return {}
+    pair_n = min(len(pending_cols), len(remaining_metrics))
+    if pair_n <= 0:
+        return {}
+    return {pending_cols[i]: remaining_metrics[i] for i in range(pair_n)}
 
 
 def _aliases_from_search_text(search_text: str) -> list[str]:

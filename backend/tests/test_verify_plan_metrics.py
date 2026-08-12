@@ -62,3 +62,36 @@ def test_verify_passes_when_ratio_metric_split_across_columns():
     )
     assert result["passed"] is True
     assert result["reason"] == "ok"
+
+
+def test_verify_passes_english_aliases_mapped_to_plan_metrics():
+    """SQL 英文别名经展示映射后应覆盖 plan 中文指标，且不要求中文 AS。"""
+    plan = {
+        "metrics": ["月份", "运动人数", "累计运动时间", "累计运动次数"],
+        "steps": [
+            {
+                "id": 1,
+                "metrics": ["月份", "运动人数", "累计运动时间", "累计运动次数"],
+            }
+        ],
+    }
+    result = verify_answer_heuristic(
+        "用图表展示 2026年每个月的活动运动人数、累计运动时间、累计运动次数",
+        ["month", "participants", "total_sport_time", "total_sport_count"],
+        [["2026-03", 1, 4160.0, 7.0]],
+        plan=plan,
+    )
+    assert result["passed"] is True
+    assert result["reason"] == "ok"
+
+
+def test_verify_passes_student_growth_english_aliases():
+    plan = {"metrics": ["今年学生人数", "去年学生人数", "增长量"]}
+    result = verify_answer_heuristic(
+        "今年的学生人数对比去年的学生人数增长了多少？",
+        ["current_year_students", "last_year_students", "growth_amount"],
+        [[16, 34, -18]],
+        plan=plan,
+    )
+    assert result["passed"] is True
+    assert result["reason"] == "ok"

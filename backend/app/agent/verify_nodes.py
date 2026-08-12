@@ -65,6 +65,33 @@ _TIME_GRAIN_PREFIXES = (
     "最近",
 )
 
+# 匹配时忽略的修饰词（英文 AS ↔ 中文 plan 指标）
+_METRIC_FLUFF = (
+    "累计",
+    "合计",
+    "总计",
+    "总数",
+    "总",
+    "的",
+    "活动",
+    "本月",
+    "每月",
+    "每日",
+    "每天",
+)
+
+# 同义归一，便于「运动人数」↔「参与人数」、「次数」↔「个数」
+_METRIC_SYNONYMS: tuple[tuple[str, str], ...] = (
+    ("参与人数", "人数"),
+    ("运动人数", "人数"),
+    ("打卡人数", "人数"),
+    ("人次", "人数"),
+    ("个数", "次数"),
+    ("数量", "次数"),
+    ("时长", "时间"),
+    ("分钟", "时间"),
+)
+
 
 def _strip_metric_noise(label: str) -> str:
     """去掉时间粒度等修饰，便于列名模糊匹配。"""
@@ -78,6 +105,16 @@ def _strip_metric_noise(label: str) -> str:
                 changed = True
                 break
     return text
+
+
+def _canonical_metric_key(label: str) -> str:
+    """将中文/本地化列名压成可比对的核心语义键。"""
+    text = _strip_metric_noise(label)
+    for src, dst in _METRIC_SYNONYMS:
+        text = text.replace(src, dst)
+    for fluff in _METRIC_FLUFF:
+        text = text.replace(fluff, "")
+    return text.strip()
 
 
 def _column_text(columns: list[str]) -> str:
@@ -111,6 +148,35 @@ def _expected_metrics_from_plan(plan: dict[str, Any] | None) -> list[str]:
     return labels
 
 
+def _columns_with_display_labels(
+    columns: list[str],
+    *,
+    plan: dict[str, Any] | None = None,
+    label_state: dict[str, Any] | None = None,
+) -> list[str]:
+    """
+    结果列 + 中文展示名，供 plan 指标校验。
+
+    SQL 别名保持英文；校验时用展示层映射后的中文名做等价匹配。
+    """
+    cols = [str(c) for c in columns]
+    out = list(cols)
+    state: dict[str, Any] = dict(label_state or {})
+    if plan is not None:
+        state.setdefault("plan", plan)
+    try:
+        from app.ask.column_labels import build_column_label_map
+
+        label_map = build_column_label_map(cols, state)
+    except Exception:
+        return out
+    for col in cols:
+        label = label_map.get(col)
+        if label and label not in out:
+            out.append(label)
+    return out
+
+
 def _metric_reflected_in_columns(metric: str, columns: list[str]) -> bool:
     """
     指标是否在列名中有体现。
@@ -118,6 +184,7 @@ def _metric_reflected_in_columns(metric: str, columns: list[str]) -> bool:
     支持：
     - 列名包含完整指标或关键子串
     - 去掉「每日/本月」等时间粒度后与列名相等/互含（如 每日参与人数 ↔ 参与人数）
+    - 中文 plan 指标 ↔ 英文别名本地化后的展示名（如 运动人数 ↔ participants）
     - 复合占比指标拆列，如 plan「活动运动人数占比」← 列「活动运动人数」+「占比」
     """
     m = metric.strip()
@@ -126,6 +193,7 @@ def _metric_reflected_in_columns(metric: str, columns: list[str]) -> bool:
     col_list = [str(c) for c in columns]
     m_lower = m.lower()
     m_core = _strip_metric_noise(m)
+    m_key = _canonical_metric_key(m)
 
     for col in col_list:
         c_lower = col.lower()
@@ -140,6 +208,23 @@ def _metric_reflected_in_columns(metric: str, columns: list[str]) -> bool:
                 return True
             if any(head == p or head.endswith(p) for p in _TIME_GRAIN_PREFIXES):
                 return True
+        c_key = _canonical_metric_key(col)
+        if m_key and c_key and len(m_key) >= 2 and len(c_key) >= 2:
+            if m_key == c_key:
+                return True
+            # 仅允许时间/累计等修饰差；禁止「跳绳运动个数」被「运动个数」吞掉
+            if m_key.endswith(c_key):
+                head = m_key[: -len(c_key)]
+                if (not head) or head in _METRIC_FLUFF or any(
+                    head == p or head.endswith(p) for p in _TIME_GRAIN_PREFIXES
+                ):
+                    return True
+            if c_key.endswith(m_key):
+                head = c_key[: -len(m_key)]
+                if (not head) or head in _METRIC_FLUFF or any(
+                    head == p or head.endswith(p) for p in _TIME_GRAIN_PREFIXES
+                ):
+                    return True
         core = (
             m_core.replace("项目", "")
             .replace("个数", "")
@@ -185,6 +270,8 @@ def verify_answer_heuristic(
     columns: list[str] | None,
     rows: list[list] | None,
     plan: dict[str, Any] | None = None,
+    *,
+    label_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     规则验证：空结果 / 列名未覆盖问句维度词。
@@ -205,9 +292,10 @@ def verify_answer_heuristic(
             "row_count": 0,
         }
 
+    check_cols = _columns_with_display_labels(cols, plan=plan, label_state=label_state)
     plan_metrics = _expected_metrics_from_plan(plan)
     if plan_metrics:
-        missing_plan = [m for m in plan_metrics if not _metric_reflected_in_columns(m, cols)]
+        missing_plan = [m for m in plan_metrics if not _metric_reflected_in_columns(m, check_cols)]
         if missing_plan:
             return {
                 "passed": False,
@@ -227,7 +315,7 @@ def verify_answer_heuristic(
             "row_count": row_count,
         }
 
-    col_text = _column_text(cols)
+    col_text = _column_text(check_cols)
     # 列名多为英文/SQL 字段名，中文维度词不一定出现在列名中；此处仅记录，不因此判定失败
     missing = [t for t in terms if t not in col_text]
     _ = missing  # 预留 span/LLM 参考，避免误触发 verify→correct 长循环
@@ -309,6 +397,12 @@ async def verify_answer(state: AskGraphState, config: RunnableConfig) -> dict:
         columns,
         rows,
         plan=state.get("plan"),
+        label_state={
+            "plan": state.get("plan"),
+            "merged_recall": state.get("merged_recall"),
+            "final_sql": state.get("final_sql") or state.get("raw_sql"),
+            "raw_sql": state.get("raw_sql"),
+        },
     )
     result = heuristic
     if settings.verify_answer_llm_enabled and not heuristic.get("passed"):
