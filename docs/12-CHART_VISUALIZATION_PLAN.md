@@ -1,6 +1,6 @@
 # 图表展示功能 · 开发计划
 
-> 与 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) Phase 2「图表（AntV）」对齐的详细实现方案。  
+> 与 [01-MVP_DEVELOPMENT_PLAN.md](./01-MVP_DEVELOPMENT_PLAN.md) Phase 2「图表（AntV）」对齐的详细实现方案。  
 > **状态**：已实现（2026-06-27）
 
 ---
@@ -10,7 +10,7 @@
 | 项 | 现状 |
 |----|------|
 | 产品宣传 | README / showcase 已提及「自动图表」 |
-| 总体规划 | `DEVELOPMENT_PLAN.md` §14 列为 Phase 2 backlog（AntV） |
+| 总体规划 | `01-MVP_DEVELOPMENT_PLAN.md` §14 列为 Phase 2 backlog（AntV） |
 | 前端 | `Ask.vue` 仅 `el-table` 展示；`package.json` 无图表库 |
 | Plan LLM | `plan_llm.py` 输出 complexity / multi_sql / steps，**无图表字段** |
 | API | `AskResponse` 仅有 `columns` / `rows`，**无 chartSpec** |
@@ -374,7 +374,7 @@ frontend/src/utils/
 
 | 层级 | 文件 | 改动摘要 |
 |------|------|----------|
-| 文档 | `docs/CHART_VISUALIZATION_PLAN.md` | 本文 |
+| 文档 | `docs/12-CHART_VISUALIZATION_PLAN.md` | 本文 |
 | Schema | `backend/app/schemas/ask.py` | chart_spec 字段 |
 | Schema | `backend/app/schemas/chart.py` | 新建 |
 | Plan | `backend/app/agent/plan_llm.py` | visualization 意图 |
@@ -423,7 +423,7 @@ runner._finish_turn
 - **Ask**、**Insight PDF**、长报告 HTML **共用同一出图链路**  
 - 替代/降级现有 `matplotlib`（`chart_png.py`），解决中文与样式不一致  
 
-详见 **[PHASE2_ROADMAP.md §2](./PHASE2_ROADMAP.md#2-p2-a--chart-ssr-统一渲染)**。
+详见 **[03-PHASE2_ROADMAP.md §2](./03-PHASE2_ROADMAP.md#2-p2-a--chart-ssr-统一渲染)**。
 
 ---
 

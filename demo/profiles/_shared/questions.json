@@ -1,0 +1,32 @@
+{
+  "questions": [
+    {
+      "id": "q_order_count",
+      "text": "How many orders are there?",
+      "text_zh": "一共有多少订单？",
+      "sql": "SELECT COUNT(*) AS order_count FROM orders",
+      "answer_template": "There are {order_count} orders in total."
+    },
+    {
+      "id": "q_revenue",
+      "text": "What is the total order amount?",
+      "text_zh": "订单总金额是多少？",
+      "sql": "SELECT ROUND(SUM(amount), 2) AS total_amount FROM orders",
+      "answer_template": "Total order amount is {total_amount}."
+    },
+    {
+      "id": "q_top_city",
+      "text": "Which city has the most users?",
+      "text_zh": "哪个城市用户最多？",
+      "sql": "SELECT city, COUNT(*) AS user_count FROM users GROUP BY city ORDER BY user_count DESC LIMIT 5",
+      "answer_template": "Top cities by user count are listed in the table."
+    },
+    {
+      "id": "q_orders_by_status",
+      "text": "Show order counts by status",
+      "text_zh": "按状态统计订单数",
+      "sql": "SELECT status, COUNT(*) AS cnt FROM orders GROUP BY status ORDER BY cnt DESC",
+      "answer_template": "Order counts by status are listed in the table."
+    }
+  ]
+}

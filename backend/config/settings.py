@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     )
 
     # ---------- LLM（OpenAI 兼容，本机多为 Ollama）----------
+    llm_mode: str = Field(
+        default="openai",
+        alias="LLM_MODE",
+        description="openai | fixture；fixture 用于开源 Demo 无 Key 烟测",
+    )
     llm_api_base: str = Field(
         default="http://127.0.0.1:11434/v1",
         alias="LLM_API_BASE",
@@ -427,6 +432,14 @@ class Settings(BaseSettings):
     brief_report_pdf_url_prefix: str = Field(
         default="/api/v1/ask/brief-report",
         alias="BRIEF_REPORT_PDF_URL_PREFIX",
+    )
+
+    # ---------- Opensource Demo ----------
+    demo_profile: str = Field(default="excel", alias="DEMO_PROFILE")
+    demo_root: str = Field(
+        default="",
+        alias="DEMO_ROOT",
+        description="Demo 资源根目录（compose 内多为 /workspace）；空则仓库根",
     )
 
     # ---------- Phase 2 · Chart PNG（仅 PDF 导出等服务端场景；问数对话页用前端 ECharts）----------

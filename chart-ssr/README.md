@@ -47,4 +47,4 @@ CHART_SSR_ENABLED=true
 CHART_SSR_URL=http://127.0.0.1:3001
 ```
 
-详见 [docs/PHASE2_ROADMAP.md](../docs/PHASE2_ROADMAP.md) §P2-A。
+详见 [docs/03-PHASE2_ROADMAP.md](../docs/03-PHASE2_ROADMAP.md) §P2-A。

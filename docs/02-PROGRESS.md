@@ -1,6 +1,6 @@
 # 问数项目 · 开发进度
 
-> 与 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) **14 周计划**对照更新（v2.7：Agent + Git 代码知识图谱 + DataScope/评测顺延）。  
+> 与 [01-MVP_DEVELOPMENT_PLAN.md](./01-MVP_DEVELOPMENT_PLAN.md) **14 周计划**对照更新（v2.7：Agent + Git 代码知识图谱 + DataScope/评测顺延）。  
 > **代码注释规范**：所有业务代码须写**中文注释**（见开发计划 §0、§5.1）。
 
 ---
@@ -35,9 +35,9 @@
 | **Git 代码知识图谱（第 10～12 周）** | ✅ 完成 | V009 + sync/解析 + ES + 代码 Agent 工具 + `AdminCodeRepos.vue` |
 | **动态 DataScope（第 13 周）** | ✅ 完成 | `V010` + `EffectivePolicy` + `ScopeInjector` + admin API |
 | **Prompt Injection（第 13～14 周）** | ✅ 完成 | `prompt_boundary` + LLM/Memory 触点 + `inj-*` 评测 |
-| **MVP 评测（第 14 周）** | ✅ 文档/脚本 | `replay_eval --subset injection` + `PROMPT_SECURITY.md` |
-| **AI 模型 / 业务数据源配置化（一期）** | ✅ 完成 | V016 + Admin 两页 + runtime_config；见 [LLM_DATASOURCE_CONFIG_PLAN.md](./LLM_DATASOURCE_CONFIG_PLAN.md) |
-| **多供应商 × 多库 × 专业 UI（二期）** | ✅ 完成（P4 不做） | Catalog/Registry、`ResolvedSqlContext`、V017、P2/P3 连接器；见 [SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md](./SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md) |
+| **MVP 评测（第 14 周）** | ✅ 文档/脚本 | `replay_eval --subset injection` + `91-PROMPT_SECURITY.md` |
+| **AI 模型 / 业务数据源配置化（一期）** | ✅ 完成 | V016 + Admin 两页 + runtime_config；见 [10-LLM_DATASOURCE_CONFIG_PLAN.md](./10-LLM_DATASOURCE_CONFIG_PLAN.md) |
+| **多供应商 × 多库 × 专业 UI（二期）** | ✅ 完成（P4 不做） | Catalog/Registry、`ResolvedSqlContext`、V017、P2/P3 连接器；见 [11-SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md](./11-SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md) |
 
 ---
 
@@ -117,7 +117,7 @@
 | 问数页左侧对话栏 + 偏好抽屉 | ✅ | 新对话 / 切换 / 删除 / 偏好设置 |
 | 本机执行 V007 迁移 | ✅ | 用户已执行 |
 | badcase → L1 一键草稿（P3） | ✅ | `POST .../draft-sql-example`；`draft` 样例不参与匹配 |
-| `EVAL_QUESTIONS.md` + `replay_eval.py` | ✅ | 8 条多轮用例 `docs/eval/memory_multiturn.json` |
+| `92-EVAL_QUESTIONS.md` + `replay_eval.py` | ✅ | 8 条多轮用例 `docs/eval/memory_multiturn.json` |
 
 ---
 
@@ -227,8 +227,8 @@
 |------|------|------|
 | `docs/eval/prompt_injection.json` | ✅ | inj-01～08 机器可读 |
 | `replay_eval.py --subset injection` | ✅ | `injection_blocked_rate` / `leaked_sql_count` |
-| `docs/PROMPT_SECURITY.md` | ✅ | 威胁模型与运营规范 |
-| `EVAL_QUESTIONS.md` §七 | ✅ | 注入子集说明 |
+| `docs/91-PROMPT_SECURITY.md` | ✅ | 威胁模型与运营规范 |
+| `92-EVAL_QUESTIONS.md` §七 | ✅ | 注入子集说明 |
 
 ---
 
@@ -354,13 +354,28 @@ python scripts/build_search_index.py
 
 ---
 
-## Phase 2 规划（2026-07 起 · 详见 [PHASE2_ROADMAP.md](./PHASE2_ROADMAP.md)）
+## 文档索引
+
+计划与规范已统一编号，入口：[README.md](./README.md)。
+
+## Phase 2 规划（2026-07 起 · 详见 [03-PHASE2_ROADMAP.md](./03-PHASE2_ROADMAP.md)）
 
 | 代号 | 主题 | 状态 | 目标里程碑 |
 |------|------|------|------------|
 | **P2-A** | Chart SSR 统一渲染（Ask + Insight PDF） | ⬜ 未开始 | M2.1 · +3 周 |
 | **P2-B** | Badcase → L1/术语 运营闭环 | ⬜ 未开始 | M2.2 · +3 周 |
 | **P2-C** | MCP / iframe 对外集成 | ⬜ 未开始 | M2.3 · +5 周 |
+
+## 开源增长（2026-08 · 详见 [20-OPENSOURCE_GROWTH_PLAN.md](./20-OPENSOURCE_GROWTH_PLAN.md)）
+
+| 阶段 | 主题 | 状态 |
+|------|------|------|
+| **P0** | License / GitHub About / 脱敏 | ✅ LICENSE + badge（About 需在 GitHub 设置） |
+| **P1** | 一键 Demo（方案 A：Compose MySQL 8 + excel + Fixture） | ✅ 代码已合入，待本机 `demo-up` 验证 |
+| **P1.5** | **AI 友好**：`AGENTS.md` + `make demo-up/smoke` + 盲测 | ✅ 入口已就绪 |
+| **P2** | 中英 README + Demo GIF | ⬜ 未开始 |
+| **P3** | 公开评测报告 + 竞品对比 | ⬜ 未开始 |
+| **P4～P5** | 社区模板 / 发文 / 月度运营 | ⬜ 未开始 |
 
 **已有基础（P2-B 可复用）**：
 

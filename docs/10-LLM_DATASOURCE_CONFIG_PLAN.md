@@ -55,8 +55,8 @@
 
 ### 1.3 与总纲关系
 
-- 总纲 [`DEVELOPMENT_PLAN.md`](./DEVELOPMENT_PLAN.md) 仍以 env 描述双库与 LLM；**本专项完成后**运行时以 UI/库配置为准，env 降为冷启动与回退。
-- 业务库只读策略不变：见 [`DATABASE_CHANGE_POLICY.md`](./DATABASE_CHANGE_POLICY.md)。
+- 总纲 [`01-MVP_DEVELOPMENT_PLAN.md`](./01-MVP_DEVELOPMENT_PLAN.md) 仍以 env 描述双库与 LLM；**本专项完成后**运行时以 UI/库配置为准，env 降为冷启动与回退。
+- 业务库只读策略不变：见 [`90-DATABASE_CHANGE_POLICY.md`](./90-DATABASE_CHANGE_POLICY.md)。
 - 语义层（表定义、术语、L1）已有页面，**本期不重做**，只补「连哪里 / 用哪个模型」。
 
 ### 1.4 对标 SQLBot（样式与业务）
@@ -175,7 +175,7 @@ flowchart LR
 
 ## 5. 数据模型
 
-新增迁移（手工执行，见 [`DATABASE_CHANGE_POLICY.md`](./DATABASE_CHANGE_POLICY.md)）：
+新增迁移（手工执行，见 [`90-DATABASE_CHANGE_POLICY.md`](./90-DATABASE_CHANGE_POLICY.md)）：
 
 `backend/scripts/sql/copilot/V016__system_llm_and_datasource.sql`
 
@@ -498,7 +498,7 @@ await seed_system_config_from_env()
 |---|------|
 | 5.1 | 更新 `.env.example`、本计划状态改为「开发中/已落地」 |
 | 5.2 | 手工验收清单（§13.2）打勾 |
-| 5.3 | （可选）`PROGRESS.md` 增加一行进度 |
+| 5.3 | （可选）`02-PROGRESS.md` 增加一行进度 |
 
 ---
 
@@ -543,7 +543,7 @@ await seed_system_config_from_env()
 
 > 一期表结构不引入半吊子多源字段。  
 > **多供应商 / 多库类型 / 专业配置 UI** 已单独立项，见：  
-> **[SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md](./SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md)**
+> **[11-SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md](./11-SYSTEM_CONFIG_PROVIDERS_UI_PLAN.md)**
 
 其余预留：
 
@@ -574,14 +574,14 @@ frontend/src/
   views/AdminSystemLlm.vue
   views/AdminSystemDatasources.vue
 docs/
-  LLM_DATASOURCE_CONFIG_PLAN.md    # 本文件
+  10-LLM_DATASOURCE_CONFIG_PLAN.md    # 本文件
 ```
 
 ## 附录 B · 相关文档
 
 | 文档 | 关系 |
 |------|------|
-| [`DEVELOPMENT_PLAN.md`](./DEVELOPMENT_PLAN.md) | 总纲（env 双库与 LLM 基线） |
-| [`DATABASE_CHANGE_POLICY.md`](./DATABASE_CHANGE_POLICY.md) | 业务库只读 / 问数库 DDL 策略 |
-| [`PROGRESS.md`](./PROGRESS.md) | 进度表（落地后更新） |
+| [`01-MVP_DEVELOPMENT_PLAN.md`](./01-MVP_DEVELOPMENT_PLAN.md) | 总纲（env 双库与 LLM 基线） |
+| [`90-DATABASE_CHANGE_POLICY.md`](./90-DATABASE_CHANGE_POLICY.md) | 业务库只读 / 问数库 DDL 策略 |
+| [`02-PROGRESS.md`](./02-PROGRESS.md) | 进度表（落地后更新） |
 | SQLBot 文档 | [AI 模型配置](https://dataease.cn/sqlbot/v1/system/model/)、[数据源概览](https://dataease.cn/sqlbot/v1/user_manual/datasource_description/) |

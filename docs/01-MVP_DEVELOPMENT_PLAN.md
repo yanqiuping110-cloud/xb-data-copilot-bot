@@ -435,16 +435,16 @@ Memory 中的 `last_sql` 等槽位 **不得** 绕过 Scope 校验；第 13 周�
 ```text
 data-copilot-bot/
 ├── docs/                            # 设计与规范（仓库级）
-│   ├── DEVELOPMENT_PLAN.md
+│   ├── 01-MVP_DEVELOPMENT_PLAN.md
 │   ├── ROLE_PERMISSION.md           # 待写
 │   ├── TABLE_WHITELIST.md           # 初始表白名单参考（逐步迁入 copilot_table_meta）
 │   ├── META_KNOWLEDGE.md            # 元数据/语义库字段说明与维护规范
 │   ├── CODE_KNOWLEDGE.md            # Git 仓库与代码 artifact 维护规范（第 12 周）
 │   ├── AGENT_OPS.md                 # Plan/Tool Agent 运营规范（第 14 周）
 │   ├── MEMORY_OPS.md                # Agent Memory 运营规范（第 14 周）
-│   ├── PROMPT_SECURITY.md           # Prompt Injection 威胁模型与运营规范（第 14 周）
+│   ├── 91-PROMPT_SECURITY.md           # Prompt Injection 威胁模型与运营规范（第 14 周）
 │   ├── DATA_SCOPE.md                # 动态数据权限运营规范（第 13 周）
-│   └── EVAL_QUESTIONS.md            # 待写
+│   └── 92-EVAL_QUESTIONS.md            # 待写
 ├── backend/                         # Python 问数 API
 │   ├── app/
 │   │   ├── main.py
@@ -504,7 +504,7 @@ def require_school_scope(ctx: UserContext) -> int:
     ...
 ```
 
-进度跟踪见 [docs/PROGRESS.md](./PROGRESS.md)。
+进度跟踪见 [docs/02-PROGRESS.md](./02-PROGRESS.md)。
 
 > **说明**：不修改 `sport-plantform` / `youplus-base`。若将来嵌入体育后台，用 **iframe 打开问数前端**，使用问数**自有 JWT**（不与体育 token 混用，除非二期做 SSO）。
 
@@ -831,7 +831,7 @@ effective_column_description =
 
 ### 9.6 评测问句（开放域为主）
 
-L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **15～30 条** → `docs/EVAL_QUESTIONS.md`）：
+L1 仅覆盖 subset；评测集侧重 **LLM + 混合召回** 路径（目标 **15～30 条** → `docs/92-EVAL_QUESTIONS.md`）：
 
 1. 本校本月跳绳活动参与人数是多少？（可 L1 或 LLM）  
 2. 本校最近 7 天每日参与人数趋势？  
@@ -1342,7 +1342,7 @@ plan_question
 - [ ] 复杂多维问句（≥5 表 JOIN / 动态列）span 含 plan + ≥2 次 tool 调用  
 - [ ] sch_id Flag 关闭时 SCHOOL 账户 **不因 MISSING_SCH_ID 失败**  
 - [ ] 仍 **无** Codegraph / SQLite 依赖；工具只读 MySQL  
-- [ ] 评测子集（复杂报表）完成率较第 5 周基线 **可量化提升**（目标 +15pp，见 `EVAL_QUESTIONS.md`）
+- [ ] 评测子集（复杂报表）完成率较第 5 周基线 **可量化提升**（目标 +15pp，见 `92-EVAL_QUESTIONS.md`）
 
 ---
 
@@ -1669,7 +1669,7 @@ app/policy/effective_policy.py
 
 ### 11.9.4 评测与回归（第 14 周）
 
-**评测集**：`docs/EVAL_QUESTIONS.md` 新增 **Prompt Injection 子集**（建议 ≥10 条），编号 `inj-01`～`inj-10`，覆盖：
+**评测集**：`docs/92-EVAL_QUESTIONS.md` 新增 **Prompt Injection 子集**（建议 ≥10 条），编号 `inj-01`～`inj-10`，覆盖：
 
 | 编号 | 场景 | 期望 |
 |------|------|------|
@@ -1686,14 +1686,14 @@ app/policy/effective_policy.py
 
 **脚本**：`replay_eval.py --subset injection`；报告字段：`injection_blocked_rate`、`leaked_sql_count`（应为 0）。
 
-**文档**：`docs/PROMPT_SECURITY.md`（威胁模型、定界符约定、运营勿在 meta 备注写指令、badcase 处理）。
+**文档**：`docs/91-PROMPT_SECURITY.md`（威胁模型、定界符约定、运营勿在 meta 备注写指令、badcase 处理）。
 
 ### 11.9.5 分周交付
 
 | 周 | 交付 | 验收 |
 |----|------|------|
 | **第 13 周** | `app/security/prompt_boundary.py`；LLM / context / memory 触点改造；与 DataScope Prompt 联调 | 定界符在 span 可观测；策略块优先于问句；清洗命中可记录 |
-| **第 14 周** | `inj-*` 评测子集 + `test_prompt_injection.py` + `PROMPT_SECURITY.md` + replay 报告 | 注入子集 **阻断率 100%**（无越权 SQL 执行）；`leaked_sql_count=0` |
+| **第 14 周** | `inj-*` 评测子集 + `test_prompt_injection.py` + `91-PROMPT_SECURITY.md` + replay 报告 | 注入子集 **阻断率 100%**（无越权 SQL 执行）；`leaked_sql_count=0` |
 
 ---
 
@@ -1770,7 +1770,7 @@ app/policy/effective_policy.py
 | 5 | 前端：问数页 **左侧对话栏**（列表 + 切换 + 删除）；「新对话」；「偏好设置」抽屉；刷新恢复 `activeSessionId` | 用户可自助 |
 | 5～6 | **P3** badcase 审核 → 样例入库流程（运营在 badcase 页一键「转为 L1 样例」草稿） | 闭环文档 |
 | 6 | L1 命中路径 **跳过** Memory 注入；Feature Flag 组合测试 | 路由单测 |
-| 6～7 | **鲁棒性**：DB 超时/空 session/超长历史/Memory 全关；多轮评测子集 5～8 条写入 `EVAL_QUESTIONS.md` | 回归通过 |
+| 6～7 | **鲁棒性**：DB 超时/空 session/超长历史/Memory 全关；多轮评测子集 5～8 条写入 `92-EVAL_QUESTIONS.md` | 回归通过 |
 
 **周验收标准（第 6 周末）**：
 
@@ -1831,7 +1831,7 @@ app/policy/effective_policy.py
 |----|------|--------|
 | 1～2 | `verify_answer` 节点（空结果 / 列不匹配 → 回 Agent） | `AGENT_MAX_CORRECT=3` |
 | 2～3 | `format_answer` 复杂路径 LLM 解读（可选 Flag） | 动态列报表可读摘要 |
-| 3～4 | `EVAL_QUESTIONS.md` 新增 **复杂报表** 15 条 + `replay_eval.py --subset agent` | 基线报告 |
+| 3～4 | `92-EVAL_QUESTIONS.md` 新增 **复杂报表** 15 条 + `replay_eval.py --subset agent` | 基线报告 |
 | 4～5 | Top5 badcase → 补 meta / L1 / relation | 运营闭环 |
 | 5～7 | 性能与降级：Agent 超步数 fallback 到单次 generate | degrade_level 可追踪 |
 
@@ -1939,10 +1939,10 @@ app/policy/effective_policy.py
 
 | 天 | 任务 | 交付物 |
 |----|------|--------|
-| 1 | `EVAL_QUESTIONS.md` 新增 **Prompt Injection 子集** `inj-01`～`inj-10`（§11.9.4） | 注入评测用例 |
-| 1～2 | `EVAL_QUESTIONS.md` 扩至 **30+** 条 + `replay_eval.py`（L1 / Agent / **Code** / Memory / Scope / **Injection**） | 基线报告 |
+| 1 | `92-EVAL_QUESTIONS.md` 新增 **Prompt Injection 子集** `inj-01`～`inj-10`（§11.9.4） | 注入评测用例 |
+| 1～2 | `92-EVAL_QUESTIONS.md` 扩至 **30+** 条 + `replay_eval.py`（L1 / Agent / **Code** / Memory / Scope / **Injection**） | 基线报告 |
 | 2 | **`tests/test_prompt_injection.py`**：inj 场景单测（guard 拒绝、Memory 零注入、清洗命中） | CI 可跑 |
-| 2～3 | `META_KNOWLEDGE.md`；`MEMORY_OPS.md`；`DATA_SCOPE.md`；`AGENT_OPS.md`；`CODE_KNOWLEDGE.md`；**`PROMPT_SECURITY.md`** 定稿 | 运营文档 |
+| 2～3 | `META_KNOWLEDGE.md`；`MEMORY_OPS.md`；`DATA_SCOPE.md`；`AGENT_OPS.md`；`CODE_KNOWLEDGE.md`；**`91-PROMPT_SECURITY.md`** 定稿 | 运营文档 |
 | 3～4 | 周报 SQL：P95、agent_steps、**code_recall_hit_rate**、no_grant 403 率、**injection_blocked_rate** | 模板 |
 | 4～5 | `.env.example` 补 Agent + Git sync + Policy + **`PROMPT_BOUNDARY_*`** 变量 | 可复现 |
 | 5～7 | 修 Top5 badcase；含 **代码口径 + Scope + 注入拒答** 场景 | **MVP 演示** |
@@ -1979,7 +1979,7 @@ app/policy/effective_policy.py
 | SQL 注入 | sqlglot 解析 + 参数化 scope 占位符 + 只读账号 |
 | **Memory 污染 Prompt** | 结构化槽位 + 字符上限；L1 路径不注入；第 13 周槽位定界（§11.9） |
 | **直接 Prompt 劫持** | System 拒令 + 不可信定界符；**最终兜底 sql_guard**；第 14 周 `inj-*` 回归 |
-| **间接注入（召回/代码片段）** | `sanitize_recall_text` + 8KB 截断；运营规范见 `PROMPT_SECURITY.md` |
+| **间接注入（召回/代码片段）** | `sanitize_recall_text` + 8KB 截断；运营规范见 `91-PROMPT_SECURITY.md` |
 | **伪造策略块** | EffectivePolicy 仅服务端生成，与用户问句分节且优先排序 |
 | **Memory 读失败拖垮问数** | Fail-open + `memory_skipped` span |
 | **会话越权** | `load_session_memory` / Session API 校验 `user_id` |
@@ -1997,13 +1997,13 @@ app/policy/effective_policy.py
 
 ## 14. Phase 2 backlog（MVP 之后）
 
-> **Phase 2 三大优先级**（Chart SSR、运营闭环、对外集成）详见 **[PHASE2_ROADMAP.md](./PHASE2_ROADMAP.md)**（v1.0，借鉴 [SQLBot](https://github.com/dataease/SQLBot) 产品化思路）。
+> **Phase 2 三大优先级**（Chart SSR、运营闭环、对外集成）详见 **[03-PHASE2_ROADMAP.md](./03-PHASE2_ROADMAP.md)**（v1.0，借鉴 [SQLBot](https://github.com/dataease/SQLBot) 产品化思路）。
 
 | 代号 | 主题 | 文档章节 |
 |------|------|----------|
-| **P2-A** | Chart SSR 统一渲染（Ask + Insight PDF） | [PHASE2_ROADMAP §2](./PHASE2_ROADMAP.md#2-p2-a--chart-ssr-统一渲染) |
-| **P2-B** | Badcase → L1/术语 运营闭环（越问越准） | [PHASE2_ROADMAP §3](./PHASE2_ROADMAP.md#3-p2-b--badcase--l1术语-运营闭环) |
-| **P2-C** | MCP / iframe 问数嵌入 | [PHASE2_ROADMAP §4](./PHASE2_ROADMAP.md#4-p2-c--mcp--iframe-对外集成) |
+| **P2-A** | Chart SSR 统一渲染（Ask + Insight PDF） | [PHASE2_ROADMAP §2](./03-PHASE2_ROADMAP.md#2-p2-a--chart-ssr-统一渲染) |
+| **P2-B** | Badcase → L1/术语 运营闭环（越问越准） | [PHASE2_ROADMAP §3](./03-PHASE2_ROADMAP.md#3-p2-b--badcase--l1术语-运营闭环) |
+| **P2-C** | MCP / iframe 问数嵌入 | [PHASE2_ROADMAP §4](./03-PHASE2_ROADMAP.md#4-p2-c--mcp--iframe-对外集成) |
 
 **排期（估）**：约 6～8 周；P2-A 与 P2-B 可并行，P2-C 建议滞后 1～2 周。
 
@@ -2014,11 +2014,11 @@ app/policy/effective_policy.py
 - **Git 业务仓库同步 + 代码知识图谱深化**（更多语言/parser、自动 suggestion 写 relation/metric）  
 - ~~**SSE 流式**问数进度~~（MVP 已实现）  
 - Langfuse / OpenTelemetry  
-- **图表展示前端 AntV**（在线交互；SSR 见 P2-A，详见 [CHART_VISUALIZATION_PLAN.md](./CHART_VISUALIZATION_PLAN.md)）  
+- **图表展示前端 AntV**（在线交互；SSR 见 P2-A，详见 [12-CHART_VISUALIZATION_PLAN.md](./12-CHART_VISUALIZATION_PLAN.md)）  
 - 可选 Qdrant 替代 ES 向量（大规模字段时）  
 - **P4 向量 episodic Memory**（全量对话 embedding 召回；须独立评测、合规与 **Prompt Injection** 评审）  
 - RAGFlow 文档问答与问数并列（仍与 meta 库解耦）  
-- Insight Engine Phase 2（邮件定时报告、Word 导出等，见 [DEEP_ANALYTICS_REPORT_PLAN.md](./DEEP_ANALYTICS_REPORT_PLAN.md)）
+- Insight Engine Phase 2（邮件定时报告、Word 导出等，见 [15-DEEP_ANALYTICS_REPORT_PLAN.md](./15-DEEP_ANALYTICS_REPORT_PLAN.md)）
 
 ---
 
@@ -2213,9 +2213,9 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 **变更（v2.5）**：新增 **§11.5.6 对话历史管理**——左侧对话栏、每用户 20 session、`/api/v1/sessions` API。  
 **变更（v2.6）**：总周期 **11 周**；**§11.7** Cursor 式 Agent（MySQL 工具）；sch_id 暂停；DataScope/评测顺延。  
 **变更（v2.7）**：总周期 **14 周**；新增 **§11.8 Git 业务代码知识图谱**（MySQL 图 + ES + 与 meta 融合，**不用 Codegraph/SQLite**）；**第 10～12 周**代码索引与 Agent 代码工具；DataScope → **第 13 周**，MVP → **第 14 周**；DDL 编号 `V009` 代码知识、`V010` DataScope。  
-**变更（v2.8）**：新增 **§11.9 Prompt Injection 防护**（威胁模型、Prompt 定界/召回清洗、与 DataScope/Memory 协同）；**第 13 周**并行落地 `app/security/` 与 LLM 触点改造；**第 14 周**增 `inj-*` 评测子集、`PROMPT_SECURITY.md`、阻断率 100% 验收。  
-**变更（v2.9）**：新增 **Phase 2 三大优先级** — [PHASE2_ROADMAP.md](./PHASE2_ROADMAP.md)：**P2-A Chart SSR**、**P2-B Badcase/L1/术语运营闭环**、**P2-C MCP/iframe 嵌入**；§14 重组为优先级表 + 原 backlog §14.1。  
-**维护**：随 meta、Memory、Agent、Code、DataScope、**Prompt Security**、**Phase 2 路线图** 更新同步改第 2.6、6、9、11.5～11.9、12、14、15 节；每完成里程碑更新 [PROGRESS.md](./PROGRESS.md)。
+**变更（v2.8）**：新增 **§11.9 Prompt Injection 防护**（威胁模型、Prompt 定界/召回清洗、与 DataScope/Memory 协同）；**第 13 周**并行落地 `app/security/` 与 LLM 触点改造；**第 14 周**增 `inj-*` 评测子集、`91-PROMPT_SECURITY.md`、阻断率 100% 验收。  
+**变更（v2.9）**：新增 **Phase 2 三大优先级** — [03-PHASE2_ROADMAP.md](./03-PHASE2_ROADMAP.md)：**P2-A Chart SSR**、**P2-B Badcase/L1/术语运营闭环**、**P2-C MCP/iframe 嵌入**；§14 重组为优先级表 + 原 backlog §14.1。  
+**维护**：随 meta、Memory、Agent、Code、DataScope、**Prompt Security**、**Phase 2 路线图** 更新同步改第 2.6、6、9、11.5～11.9、12、14、15 节；每完成里程碑更新 [02-PROGRESS.md](./02-PROGRESS.md)。
 
 ---
 
@@ -2232,4 +2232,4 @@ RAGFLOW_BASE_URL=https://ragflow.xiaoben.internal
 | [backend/deploy/docker-compose.yml](../backend/deploy/docker-compose.yml) | API 容器部署 |
 | [frontend/](../frontend/) | Vue3 + Vite 骨架（登录、路由、Axios） |
 | [README.md](../README.md) | 前后端启动步骤 |
-| [docs/PROGRESS.md](./PROGRESS.md) | 开发进度与里程碑 |
+| [docs/02-PROGRESS.md](./02-PROGRESS.md) | 开发进度与里程碑 |

@@ -1,6 +1,6 @@
 # 问数库 / 业务库 · SQL 版本变更（仅人工执行）
 
-> 策略详见 [docs/DATABASE_CHANGE_POLICY.md](../../docs/DATABASE_CHANGE_POLICY.md)
+> 策略详见 [docs/90-DATABASE_CHANGE_POLICY.md](../../docs/90-DATABASE_CHANGE_POLICY.md)
 
 ## 目录
 
