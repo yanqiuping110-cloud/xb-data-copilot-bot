@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.context import UserContext
 from app.schemas.ask import AskRequest, AskResponse
 from app.sql.executor import execute_readonly
+from app.system.runtime_config import resolve_sql_max_rows
 from config.settings import Settings, ROOT_DIR
 
 
@@ -105,7 +106,7 @@ async def handle_fixture_ask(
 
     sql = str(matched.get("sql") or "").strip()
     try:
-        columns, rows = await execute_readonly(sql, max_rows=settings.sql_default_limit)
+        columns, rows = await execute_readonly(sql, max_rows=resolve_sql_max_rows(settings))
     except Exception as exc:  # noqa: BLE001 — demo path: surface to client
         return AskResponse(
             trace_id=trace_id,

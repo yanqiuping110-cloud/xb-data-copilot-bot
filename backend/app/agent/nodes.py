@@ -31,6 +31,7 @@ from app.meta.repository import MetaRepository
 from app.sql.column_guard import validate_sql_columns
 from app.sql.guard import SqlGuardError, validate_sql
 from app.sql.whitelist import refresh_allowed_tables
+from app.system.runtime_config import resolve_sql_max_rows
 from config.settings import Settings, get_settings
 
 _MAX_QUESTION_LEN = 2000
@@ -270,7 +271,7 @@ async def validate_sql_node(state: AskGraphState, config: RunnableConfig) -> dic
         final_sql = validate_sql(
             raw,
             ctx,
-            max_rows=settings.sql_max_rows,
+            max_rows=resolve_sql_max_rows(settings),
             settings=settings,
             policy=policy,
             sql_ctx=sql_ctx,
@@ -431,7 +432,7 @@ async def execute_sql(state: AskGraphState, config: RunnableConfig) -> dict:
         columns, rows = await execute_readonly(
             final_sql,
             params,
-            max_rows=settings.sql_max_rows,
+            max_rows=resolve_sql_max_rows(settings),
         )
         exec_ms = int((time.perf_counter() - t0) * 1000)
         await _span(

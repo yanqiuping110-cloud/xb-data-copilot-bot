@@ -1,5 +1,5 @@
 /**
- * 系统配置：AI 模型 / 业务数据源（仅 ADMIN）。
+ * 系统配置：AI 模型 / 业务数据源 / 系统参数（仅 ADMIN）。
  */
 import request from '../utils/request'
 
@@ -61,4 +61,12 @@ export function testDatasourceSaved(id) {
 
 export function testDatasourceDraft(data) {
   return request.post('/api/v1/admin/system/datasources/test', data)
+}
+
+export function listSysParams() {
+  return request.get('/api/v1/admin/system/params')
+}
+
+export function updateSysParam(key, value) {
+  return request.put(`/api/v1/admin/system/params/${encodeURIComponent(key)}`, { value: String(value) })
 }

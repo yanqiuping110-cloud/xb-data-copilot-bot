@@ -1,5 +1,5 @@
 """
-系统管理：AI 模型 + 业务数据源配置（仅 ADMIN）。
+系统管理：AI 模型 + 业务数据源 + 系统参数（仅 ADMIN）。
 
 对标 SQLBot 系统管理 / 数据源；运行时经 runtime_config 生效。
 """
@@ -23,10 +23,13 @@ from app.api.schemas_system import (
     LlmModelResponse,
     LlmProviderCatalogItem,
     LlmProviderCatalogResponse,
+    SysParamListResponse,
+    SysParamResponse,
     TestDatasourceRequest,
     TestResultResponse,
     UpdateDatasourceRequest,
     UpdateLlmModelRequest,
+    UpdateSysParamRequest,
 )
 from app.core.context import UserContext
 from app.core.security import require_admin
@@ -43,6 +46,8 @@ from app.system.catalog_loader import (
 from app.system.datasource_repository import DatasourceRepository, DatasourceRow
 from app.system.exceptions import SystemConfigError
 from app.system.llm_repository import LlmModelRepository, LlmModelRow
+from app.system.param_repository import SysParamRepository, require_spec
+from app.system.param_specs import SYS_PARAM_SPECS
 from app.system.runtime_config import refresh_runtime_config
 from config.settings import Settings, get_settings
 
@@ -549,3 +554,82 @@ async def test_datasource_saved(
     if result.ok and row.is_default == 1:
         await refresh_runtime_config(session, settings)
     return result
+
+
+def _sys_param_response(spec, db_value: str | None, updated_at) -> SysParamResponse:
+    return SysParamResponse(
+        key=spec.key,
+        value=db_value if db_value is not None else spec.default,
+        value_type=spec.value_type,
+        display_name=spec.display_name,
+        description=spec.description or "",
+        min_value=spec.min_value,
+        max_value=spec.max_value,
+        updated_at=_iso(updated_at) if updated_at else None,
+    )
+
+
+@router.get("/params", response_model=SysParamListResponse, response_model_by_alias=True)
+async def list_sys_params(
+    _ctx: Annotated[UserContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_copilot_session)],
+) -> SysParamListResponse:
+    repo = SysParamRepository(session)
+    try:
+        rows = {r.param_key: r for r in await repo.list_all()}
+    except Exception as exc:
+        raise SystemConfigError(
+            "SYS_PARAM_UNAVAILABLE",
+            "系统参数表未就绪，请先执行 V018__sys_param.sql",
+            503,
+        ) from exc
+    items = []
+    for spec in SYS_PARAM_SPECS.values():
+        row = rows.get(spec.key)
+        items.append(
+            _sys_param_response(
+                spec,
+                row.param_value if row else None,
+                row.updated_at if row else None,
+            )
+        )
+    return SysParamListResponse(items=items)
+
+
+@router.put(
+    "/params/{param_key}",
+    response_model=SysParamResponse,
+    response_model_by_alias=True,
+)
+async def update_sys_param(
+    param_key: str,
+    body: UpdateSysParamRequest,
+    ctx: Annotated[UserContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_copilot_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SysParamResponse:
+    spec = require_spec(param_key)
+    repo = SysParamRepository(session)
+    try:
+        row = await repo.upsert(
+            spec=spec,
+            value=body.value,
+            updated_by=ctx.user_id,
+        )
+    except SystemConfigError:
+        raise
+    except Exception as exc:
+        raise SystemConfigError(
+            "SYS_PARAM_UNAVAILABLE",
+            "系统参数表未就绪，请先执行 V018__sys_param.sql",
+            503,
+        ) from exc
+    await log_system_config_event(
+        session,
+        ctx=ctx,
+        action="sys_param.update",
+        detail=f"{param_key}={row.param_value}",
+    )
+    await session.commit()
+    await refresh_runtime_config(session, settings)
+    return _sys_param_response(spec, row.param_value, row.updated_at)

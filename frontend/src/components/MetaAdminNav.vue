@@ -10,6 +10,7 @@
     <el-menu-item index="/admin/meta/ops">运营中心</el-menu-item>
     <el-menu-item v-if="showSystem" index="/admin/system/llm">AI 模型配置</el-menu-item>
     <el-menu-item v-if="showSystem" index="/admin/system/datasources">数据源</el-menu-item>
+    <el-menu-item v-if="showSystem" index="/admin/system/params">系统参数</el-menu-item>
     <el-menu-item v-if="showGitRepos" index="/admin/code/repos">Git 仓库</el-menu-item>
   </el-menu>
 </template>

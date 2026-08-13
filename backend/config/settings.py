@@ -122,7 +122,7 @@ class Settings(BaseSettings):
 
     # ---------- SQL 执行安全（问数链路使用）----------
     sql_dialect: str = Field(default="mysql", alias="SQL_DIALECT")
-    sql_max_rows: int = Field(default=5000, alias="SQL_MAX_ROWS")
+    sql_max_rows: int = Field(default=100, alias="SQL_MAX_ROWS")
     sql_timeout_sec: int = Field(default=10, alias="SQL_TIMEOUT_SEC")
     ask_rate_limit_per_user_per_min: int = Field(
         default=20,

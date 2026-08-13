@@ -151,3 +151,22 @@ class DatasourceTypeCatalogItem(CamelModel):
 
 class DatasourceTypeCatalogResponse(CamelModel):
     items: list[DatasourceTypeCatalogItem]
+
+
+class SysParamResponse(CamelModel):
+    key: str
+    value: str
+    value_type: str
+    display_name: str
+    description: str = ""
+    min_value: int | None = None
+    max_value: int | None = None
+    updated_at: str | None = None
+
+
+class SysParamListResponse(CamelModel):
+    items: list[SysParamResponse]
+
+
+class UpdateSysParamRequest(CamelModel):
+    value: str

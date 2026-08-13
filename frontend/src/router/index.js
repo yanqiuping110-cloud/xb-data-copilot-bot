@@ -109,6 +109,12 @@ const routes = [
     meta: { requiresAdmin: true },
   },
   {
+    path: '/admin/system/params',
+    name: 'AdminSystemParams',
+    component: () => import('../views/AdminSystemParams.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
     path: '/embed/ask',
     name: 'EmbedAsk',
     component: () => import('../views/EmbedAsk.vue'),

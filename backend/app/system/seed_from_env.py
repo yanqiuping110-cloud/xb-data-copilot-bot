@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.system.datasource_repository import DatasourceRepository
 from app.system.llm_repository import LlmModelRepository
+from app.system.param_repository import SysParamRepository
+from app.system.param_specs import PARAM_SQL_MAX_ROWS, SYS_PARAM_SPECS
 from app.system.runtime_config import refresh_runtime_config
 from config.settings import Settings, get_settings
 
@@ -78,6 +80,16 @@ async def seed_system_config_from_env(
                 status=1,
             )
             logger.info("seeded default business datasource from env")
+
+        try:
+            param_repo = SysParamRepository(session)
+            spec = SYS_PARAM_SPECS[PARAM_SQL_MAX_ROWS]
+            if await param_repo.get_by_key(PARAM_SQL_MAX_ROWS) is None:
+                seed_limit = str(int(getattr(s, "sql_max_rows", 100) or spec.default))
+                await param_repo.upsert(spec=spec, value=seed_limit, updated_by=None)
+                logger.info("seeded sys_param %s=%s", PARAM_SQL_MAX_ROWS, seed_limit)
+        except Exception:
+            logger.warning("seed sys_param skipped (table missing?)", exc_info=True)
 
         await session.commit()
     except Exception:

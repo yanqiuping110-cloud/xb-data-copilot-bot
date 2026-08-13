@@ -52,3 +52,6 @@ htmlcov/
 interview/
 resume_extract.txt
 .codegraph/daemon.pid
+
+# 本地技术博客草稿（不提交；仅保留写作空间）
+tech-blog/

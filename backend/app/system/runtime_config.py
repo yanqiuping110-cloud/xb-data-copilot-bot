@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.system.datasource_repository import DatasourceRepository
 from app.system.llm_repository import LlmModelRepository
 from app.system.models import ResolvedBusinessDsn, ResolvedLlmConfig
+from app.system.param_repository import SysParamRepository
+from app.system.param_specs import PARAM_SQL_MAX_ROWS, clamp_sql_max_rows
 from config.settings import Settings, get_settings
 
 # 确保连接器已注册
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 _chat: ResolvedLlmConfig | None = None
 _embedding: ResolvedLlmConfig | None = None
 _business: ResolvedBusinessDsn | None = None
+_sql_max_rows: int | None = None
 
 
 def _env_chat(settings: Settings) -> ResolvedLlmConfig:
@@ -96,12 +99,26 @@ def resolve_business_dsn(settings: Settings | None = None) -> ResolvedBusinessDs
     return _env_business(s)
 
 
+def _env_sql_max_rows(settings: Settings) -> int:
+    return clamp_sql_max_rows(int(getattr(settings, "sql_max_rows", 100) or 100))
+
+
+def resolve_sql_max_rows(settings: Settings | None = None) -> int:
+    """同步读取生效的问数 SQL LIMIT（缓存 miss 时回退 env / 默认 100）。"""
+    global _sql_max_rows
+    if _sql_max_rows is not None:
+        return _sql_max_rows
+    s = settings or get_settings()
+    return _env_sql_max_rows(s)
+
+
 def invalidate_runtime_cache() -> None:
     """清空进程缓存（随后 resolve 暂回退 env，直至 refresh）。"""
-    global _chat, _embedding, _business
+    global _chat, _embedding, _business, _sql_max_rows
     _chat = None
     _embedding = None
     _business = None
+    _sql_max_rows = None
 
 
 async def refresh_runtime_config(
@@ -109,7 +126,7 @@ async def refresh_runtime_config(
     settings: Settings | None = None,
 ) -> None:
     """从 copilot 库加载默认配置写入缓存；无记录则用 env。"""
-    global _chat, _embedding, _business
+    global _chat, _embedding, _business, _sql_max_rows
     s = settings or get_settings()
     try:
         llm_repo = LlmModelRepository(session, s)
@@ -176,3 +193,17 @@ async def refresh_runtime_config(
         _chat = _env_chat(s)
         _embedding = _env_embedding(s)
         _business = _env_business(s)
+
+    try:
+        param_repo = SysParamRepository(session)
+        param_row = await param_repo.get_by_key(PARAM_SQL_MAX_ROWS)
+        if param_row is not None:
+            try:
+                _sql_max_rows = clamp_sql_max_rows(int(str(param_row.param_value).strip()))
+            except (TypeError, ValueError):
+                _sql_max_rows = _env_sql_max_rows(s)
+        else:
+            _sql_max_rows = _env_sql_max_rows(s)
+    except Exception:
+        logger.warning("sys_param load failed; using env SQL_MAX_ROWS", exc_info=True)
+        _sql_max_rows = _env_sql_max_rows(s)

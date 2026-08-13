@@ -31,6 +31,7 @@ from app.sql.column_guard import validate_sql_columns
 from app.sql.executor import execute_readonly
 from app.sql.guard import SqlGuardError, validate_sql
 from app.agent.plan_compare import get_sql_execution_steps
+from app.system.runtime_config import resolve_sql_max_rows
 from config.settings import Settings, get_settings
 
 
@@ -77,7 +78,7 @@ async def _prepare_final_sql(
     final_sql = validate_sql(
         raw_sql,
         ctx,
-        max_rows=settings.sql_max_rows,
+        max_rows=resolve_sql_max_rows(settings),
         settings=settings,
         sql_ctx=sql_ctx,
     )
@@ -192,7 +193,7 @@ async def execute_plan_sql_step(state: AskGraphState, config: RunnableConfig) ->
         columns, rows = await execute_readonly(
             final_sql,
             params,
-            max_rows=settings.sql_max_rows,
+            max_rows=resolve_sql_max_rows(settings),
         )
     except Exception as exc:
         await _span(

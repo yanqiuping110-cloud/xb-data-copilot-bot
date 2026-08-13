@@ -11,6 +11,7 @@ from app.system.runtime_config import (
     resolve_business_dsn,
     resolve_chat_llm,
     resolve_embedding,
+    resolve_sql_max_rows,
 )
 
 
@@ -33,6 +34,7 @@ def _settings(**kwargs):
         "mysql_business_user": "ro",
         "mysql_business_password": "pw",
         "mysql_business_database": "biz",
+        "sql_max_rows": 100,
     }
     base.update(kwargs)
     return SimpleNamespace(**base)
@@ -70,3 +72,5 @@ def test_resolve_falls_back_to_env_when_cache_empty():
     assert biz.source == "env"
     assert biz.database == "biz"
     assert "mysql+aiomysql://" in biz.sqlalchemy_url
+
+    assert resolve_sql_max_rows(settings) == 100
