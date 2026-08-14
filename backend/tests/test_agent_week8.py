@@ -134,6 +134,79 @@ def test_needs_tools_complete_blocks_extra_tools():
     assert _needs_tools_complete(plan, obs, default_tables=tables) is True
 
 
+def test_tool_call_fingerprint_dedup_same_table_and_join_pair():
+    from app.agent.agent_llm import (
+        is_duplicate_tool_call,
+        tool_call_fingerprint,
+        _avoid_duplicate_action,
+        _fallback_action,
+    )
+
+    assert tool_call_fingerprint("describe_table", {"table": "Orders"}) == tool_call_fingerprint(
+        "describe_table", {"table": "orders"}
+    )
+    assert tool_call_fingerprint(
+        "get_join_path", {"from_table": "a", "to_table": "b"}
+    ) == tool_call_fingerprint("get_join_path", {"from_table": "b", "to_table": "a"})
+
+    obs = [
+        {
+            "tool": "list_relations",
+            "args": {"table": "orders"},
+            "result": {"count": 2},
+        },
+        {
+            "tool": "search_metrics",
+            "args": {"query": "销售额"},
+            "result": {"count": 1},
+        },
+    ]
+    assert is_duplicate_tool_call("list_relations", {"table": "Orders"}, obs)
+    assert is_duplicate_tool_call("search_metrics", {"query": "  销售额  "}, obs)
+    assert not is_duplicate_tool_call("list_relations", {"table": "users"}, obs)
+
+    dup = {"action": "tool", "tool": "list_relations", "args": {"table": "orders"}}
+    plan = {"steps": [{"needs_tool": ["list_relations", "describe_table"]}]}
+    fb = _fallback_action(plan, obs, default_tables=["orders", "users"], question="q")
+    out = _avoid_duplicate_action(dup, observations=obs, fallback=fb)
+    assert out["action"] == "tool"
+    assert out["tool"] == "describe_table"
+    assert out["args"]["table"] in ("orders", "users")
+
+    only_dup_obs = [
+        {
+            "tool": "describe_table",
+            "args": {"table": "orders"},
+            "result": {"column_count": 1},
+        }
+    ]
+    plan2 = {"steps": [{"needs_tool": ["describe_table"]}]}
+    fb2 = _fallback_action(plan2, only_dup_obs, default_tables=["orders"], question="q")
+    out2 = _avoid_duplicate_action(
+        {"action": "tool", "tool": "describe_table", "args": {"table": "orders"}},
+        observations=only_dup_obs,
+        fallback=fb2,
+    )
+    assert out2["action"] == "finish"
+
+
+def test_format_observations_includes_ban_list():
+    from app.agent.agent_llm import _format_observations
+
+    text = _format_observations(
+        [
+            {
+                "tool": "describe_table",
+                "args": {"table": "orders"},
+                "result": {"column_count": 5},
+            }
+        ]
+    )
+    assert "describe_table(table=orders)" in text
+    assert "禁止重复调用" in text
+    assert "describe_table|orders" in text
+
+
 def test_validate_probe_sql_caps_limit():
     sql = validate_probe_sql(
         "SELECT COUNT(*) AS cnt FROM sport_activity_qzs_record",

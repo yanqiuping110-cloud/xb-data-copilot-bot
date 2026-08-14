@@ -13,6 +13,7 @@ from app.agent.agent_llm import (
     _fallback_action,
     _needs_tools_complete,
     decide_agent_action,
+    is_duplicate_tool_call,
 )
 from app.agent.context_builder import build_agent_context_text
 from app.agent.l1_nodes import _dicts_to_candidates
@@ -153,6 +154,50 @@ async def agent_loop(state: AskGraphState, config: RunnableConfig) -> dict:
 
     tool_name = action.get("tool") or ""
     args = action.get("args") or {}
+
+    # 执行前硬拦截：同 fingerprint 禁止再跑（防 LLM/路径漏网）
+    if tool_name and is_duplicate_tool_call(tool_name, args, observations):
+        forced = _fallback_action(plan, observations, default_tables=default_tables, question=question)
+        if (
+            forced.get("action") == "tool"
+            and forced.get("tool")
+            and not is_duplicate_tool_call(
+                str(forced.get("tool") or ""),
+                forced.get("args") if isinstance(forced.get("args"), dict) else {},
+                observations,
+            )
+        ):
+            action = forced
+            tool_name = action.get("tool") or ""
+            args = action.get("args") or {}
+        else:
+            obs = {
+                "tool": tool_name,
+                "args": args,
+                "result": {"skipped": "duplicate", "fingerprint": True},
+            }
+            observations.append(obs)
+            agent_steps.append({"phase": "agent_loop", "tool": tool_name, "step": step_count + 1})
+            await _span(
+                config,
+                "agent_loop",
+                t0,
+                "success",
+                {
+                    "done": True,
+                    "reason": "duplicate_tool_call",
+                    "tool": tool_name,
+                    "step_count": step_count + 1,
+                },
+            )
+            return {
+                "tool_observations": observations,
+                "agent_steps": agent_steps,
+                "agent_step_count": step_count + 1,
+                "agent_loop_done": True,
+                "use_agent_path": True,
+            }
+
     result = await execute_tool_span(
         config,
         tool_name=tool_name,
