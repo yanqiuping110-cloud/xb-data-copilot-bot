@@ -1,5 +1,6 @@
--- V016：AI 模型配置 + 业务数据源配置（管理台可改，env 作冷启动种子与回退）
--- 执行：在 copilot 库手工运行（见 docs/DATABASE_CHANGE_POLICY.md、docs/LLM_DATASOURCE_CONFIG_PLAN.md）
+-- V016：AI 模型配置 + 业务数据源配置表结构（仅 DDL）
+-- 初始数据勿写入本脚本：由管理台配置，或空表时由 seed_from_env / demo bootstrap 注入。
+-- 执行：在 copilot 库手工运行（见 docs/90-DATABASE_CHANGE_POLICY.md、docs/10-LLM_DATASOURCE_CONFIG_PLAN.md）
 
 CREATE TABLE IF NOT EXISTS copilot_llm_model (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -40,67 +41,3 @@ CREATE TABLE IF NOT EXISTS copilot_business_datasource (
     KEY idx_ds_default (is_default, deleted, status),
     KEY idx_ds_deleted (deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='业务只读数据源配置';
-
--- ---------- 初始数据（来自当前 .env.development 生效配置；api_key_enc / password_enc 为 Fernet，依赖现网 JWT_SECRET）----------
--- 幂等：表中尚无未删除记录时才插入。更换 JWT_SECRET 后须在管理台重填 Key/密码。
-
-INSERT INTO copilot_llm_model (
-    name, provider, api_base, api_key_enc, model_name, role,
-    timeout_sec, temperature, extra_json, is_default, status
-)
-SELECT
-    'DeepSeek Chat（当前）',
-    'openai_compatible',
-    'https://api.deepseek.com',
-    'REDACTED_FERNET_SECRET',
-    'deepseek-v4-flash',
-    'chat',
-    120,
-    0,
-    '{"thinking_enabled": true, "reasoning_effort": "high"}',
-    1,
-    1
-FROM DUAL
-WHERE NOT EXISTS (
-    SELECT 1 FROM copilot_llm_model WHERE deleted = 0 AND role = 'chat' LIMIT 1
-);
-
-INSERT INTO copilot_llm_model (
-    name, provider, api_base, api_key_enc, model_name, role,
-    timeout_sec, temperature, extra_json, is_default, status
-)
-SELECT
-    'Ollama Embedding（当前）',
-    'openai_compatible',
-    'http://127.0.0.1:11434/v1',
-    'REDACTED_FERNET_SECRET',
-    'qwen3-embedding:4b',
-    'embedding',
-    120,
-    0,
-    '{"embedding_dims": 2560}',
-    1,
-    1
-FROM DUAL
-WHERE NOT EXISTS (
-    SELECT 1 FROM copilot_llm_model WHERE deleted = 0 AND role = 'embedding' LIMIT 1
-);
-
-INSERT INTO copilot_business_datasource (
-    name, db_type, host, port, database_name, username, password_enc,
-    is_default, status
-)
-SELECT
-    'stugrow_sport（当前）',
-    'mysql',
-    'REDACTED_HOST',
-    18306,
-    'stugrow_sport',
-    'REDACTED_USER',
-    'REDACTED_FERNET_SECRET',
-    1,
-    1
-FROM DUAL
-WHERE NOT EXISTS (
-    SELECT 1 FROM copilot_business_datasource WHERE deleted = 0 LIMIT 1
-);

@@ -13,6 +13,9 @@ COPY config ./config
 COPY app ./app
 COPY scripts ./scripts
 
+# Hatch requires readme inside the build context; repo root README is outside Docker COPY.
+RUN sed -i 's|readme = "../README.md"|readme = "README.md"|' pyproject.toml
+
 RUN if [ -n "$INSTALL_EXTRAS" ]; then \
       pip install --no-cache-dir -e ".[${INSTALL_EXTRAS}]"; \
     else \

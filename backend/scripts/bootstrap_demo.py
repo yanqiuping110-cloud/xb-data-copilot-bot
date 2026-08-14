@@ -271,16 +271,15 @@ async def seed_meta_and_datasource(
 
     ds_cfg = seed_meta.get("datasource") or {}
     repo = DatasourceRepository(session)
-    # Soft-delete previous demo excel defaults then insert
+    # Demo 仅保留 Excel 样例源：清掉问数库中既有业务源（避免 SQL/历史种子残留）
     await session.execute(
         text(
             """
             UPDATE copilot_business_datasource
             SET deleted = 1, is_default = 0
-            WHERE name = :name AND deleted = 0
+            WHERE deleted = 0
             """
-        ),
-        {"name": ds_cfg.get("name") or "ShopPulse Excel Demo"},
+        )
     )
     await repo.insert(
         name=str(ds_cfg.get("name") or "ShopPulse Excel Demo"),
