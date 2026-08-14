@@ -14,6 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.meta.effective import effective_description
 from app.meta.introspector import IntrospectedColumn, IntrospectedTable
 
+# 问数/LLM/工具可见字段：三条件缺一不可（deleted=0 AND status=1 AND recall_enabled=1）
+
+
+def _ask_column_sql_filter(alias: str = "") -> str:
+    """生成 ask 字段过滤 SQL；alias 如 ``c`` → ``c.deleted = 0 AND ...``。"""
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"{prefix}deleted = 0 AND {prefix}status = 1 AND {prefix}recall_enabled = 1"
+    )
+
 
 @dataclass
 class TableMetaRow:
@@ -210,6 +220,14 @@ class ColumnMetaRow:
     def effective_description(self) -> str | None:
         return effective_description(self.description_manual, self.column_comment_auto)
 
+    @property
+    def is_ask_visible(self) -> bool:
+        """问数可见（内存判定）：status=1 且 recall_enabled=1。
+
+        deleted=0 由查询层 ``list_recall_columns`` 的 SQL 过滤保证。
+        """
+        return self.status == 1 and self.recall_enabled == 1
+
 
 class MetaRepository:
     """元数据 CRUD（copilot 库）。"""
@@ -366,6 +384,7 @@ class MetaRepository:
         )
 
     async def list_columns(self, table_id: int) -> list[ColumnMetaRow]:
+        """管理端/同步用：返回表下全部未删除字段（含未参与召回）。"""
         result = await self._session.execute(
             text(
                 """
@@ -381,41 +400,45 @@ class MetaRepository:
         )
         return [_map_column(r) for r in result.mappings().all()]
 
+    async def list_recall_columns(self, table_id: int) -> list[ColumnMetaRow]:
+        """问数/LLM/工具用字段：deleted=0 AND status=1 AND recall_enabled=1。"""
+        result = await self._session.execute(
+            text(
+                f"""
+                SELECT id, table_id, column_name, ordinal_position, data_type,
+                       column_comment_auto, description_manual, column_role, alias_json,
+                       is_nullable, status, recall_enabled
+                FROM copilot_column_meta
+                WHERE table_id = :table_id
+                  AND {_ask_column_sql_filter()}
+                ORDER BY ordinal_position, column_name
+                """
+            ),
+            {"table_id": table_id},
+        )
+        return [_map_column(r) for r in result.mappings().all()]
+
     async def get_column_map(self, table_id: int) -> dict[str, ColumnMetaRow]:
         cols = await self.list_columns(table_id)
         return {c.column_name: c for c in cols}
 
+    async def get_recall_column_map(self, table_id: int) -> dict[str, ColumnMetaRow]:
+        """问数用列名映射（仅 deleted=0 AND status=1 AND recall_enabled=1）。"""
+        cols = await self.list_recall_columns(table_id)
+        return {c.column_name: c for c in cols}
+
     async def load_active_column_names(self, table_names: list[str]) -> dict[str, set[str]]:
-        """批量加载表可用于 SQL 的字段名（参与召回 + JOIN 键 + filter 角色）。"""
+        """SQL 字段白名单：仅 deleted=0 AND status=1 AND recall_enabled=1。"""
         resolved: dict[str, tuple[str, int]] = {}
         for name in table_names:
             table = await self.find_table_by_name(name)
             if table:
                 resolved[name.lower()] = (table.table_name, table.id)
 
-        table_name_set = {t[0] for t in resolved.values()}
-        join_keys: set[tuple[str, str]] = set()
-        if table_name_set:
-            relations = await self.list_relations()
-            for rel in relations:
-                if rel.status != 1:
-                    continue
-                if rel.from_table_name in table_name_set:
-                    join_keys.add((rel.from_table_name, rel.from_column))
-                if rel.to_table_name in table_name_set:
-                    join_keys.add((rel.to_table_name, rel.to_column))
-
         result: dict[str, set[str]] = {}
-        for key, (table_name, table_id) in resolved.items():
-            cols = await self.list_columns(table_id)
-            allowed: set[str] = set()
-            for col in cols:
-                if col.status != 1:
-                    continue
-                is_join_key = (table_name, col.column_name) in join_keys
-                if col.recall_enabled == 1 or is_join_key or col.column_role == "filter":
-                    allowed.add(col.column_name)
-            result[key] = allowed
+        for key, (_table_name, table_id) in resolved.items():
+            cols = await self.list_recall_columns(table_id)
+            result[key] = {col.column_name for col in cols}
         return result
 
     async def insert_column(
@@ -610,10 +633,10 @@ class MetaRepository:
         return result
 
     async def list_indexable_tables(self) -> list[IndexableTableRow]:
-        """启用表及其 recall_enabled 字段摘要，供 ES 表级向量索引。"""
+        """启用表及其问数字段摘要（字段须 deleted=0 AND status=1 AND recall_enabled=1）。"""
         result = await self._session.execute(
             text(
-                """
+                f"""
                 SELECT t.id AS table_id, t.table_name, t.table_role, t.biz_domain,
                        t.description_manual, t.table_comment_auto, t.grain,
                        GROUP_CONCAT(
@@ -627,7 +650,7 @@ class MetaRepository:
                 FROM copilot_table_meta t
                 LEFT JOIN copilot_column_meta c
                     ON c.table_id = t.id
-                   AND c.deleted = 0 AND c.status = 1 AND c.recall_enabled = 1
+                   AND {_ask_column_sql_filter("c")}
                 WHERE t.deleted = 0 AND t.status = 1
                 GROUP BY t.id, t.table_name, t.table_role, t.biz_domain,
                          t.description_manual, t.table_comment_auto, t.grain
@@ -655,15 +678,15 @@ class MetaRepository:
         return rows
 
     async def list_indexable_columns(self) -> list[IndexableColumnRow]:
-        """启用表下有效字段，供 ES 向量索引。"""
+        """启用表下问数字段（deleted=0 AND status=1 AND recall_enabled=1），供向量索引。"""
         result = await self._session.execute(
             text(
-                """
+                f"""
                 SELECT c.id AS column_id, c.table_id, t.table_name, c.column_name,
                        c.description_manual, c.column_comment_auto, c.alias_json, c.column_role
                 FROM copilot_column_meta c
                 INNER JOIN copilot_table_meta t ON t.id = c.table_id
-                WHERE c.deleted = 0 AND c.status = 1 AND c.recall_enabled = 1
+                WHERE {_ask_column_sql_filter("c")}
                   AND t.deleted = 0 AND t.status = 1
                 ORDER BY t.table_name, c.ordinal_position, c.column_name
                 """
@@ -710,17 +733,17 @@ class MetaRepository:
         ]
 
     async def list_indexable_field_values(self) -> list[IndexableFieldValueRow]:
-        """启用字段取值，供 ES 全文索引。"""
+        """启用字段取值（所属列须 deleted=0 AND status=1 AND recall_enabled=1），供索引。"""
         result = await self._session.execute(
             text(
-                """
+                f"""
                 SELECT fv.id AS field_value_id, fv.column_id, t.table_name, c.column_name,
                        fv.value_text, fv.display_label, fv.alias_json
                 FROM copilot_field_value fv
                 INNER JOIN copilot_column_meta c ON c.id = fv.column_id
                 INNER JOIN copilot_table_meta t ON t.id = c.table_id
                 WHERE fv.deleted = 0 AND fv.status = 1
-                  AND c.deleted = 0 AND c.status = 1 AND c.recall_enabled = 1
+                  AND {_ask_column_sql_filter("c")}
                   AND t.deleted = 0 AND t.status = 1
                 ORDER BY t.table_name, c.column_name, fv.value_text
                 """

@@ -133,7 +133,7 @@ async def link_artifact_to_meta(
         table = await meta.find_table_by_name(table_name)
         if not table:
             continue
-        cols = await meta.list_columns(table.id)
+        cols = await meta.list_recall_columns(table.id)
         tables_meta.append(
             {
                 "table_name": table_name,
@@ -145,7 +145,6 @@ async def link_artifact_to_meta(
                         "description": c.description_manual or c.column_comment_auto,
                     }
                     for c in cols[:20]
-                    if c.status == 1
                 ],
             }
         )

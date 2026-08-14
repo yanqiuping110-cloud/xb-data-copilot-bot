@@ -28,7 +28,7 @@ async def describe_table(
     table: str,
 ) -> dict[str, Any]:
     """
-    返回单表字段清单：meta 人工定义 + 类型/备注。
+    返回单表字段清单：仅 deleted=0 AND status=1 AND recall_enabled=1。
 
     数据源：copilot_table_meta + copilot_column_meta（不 probe 业务库）。
     """
@@ -40,8 +40,7 @@ async def describe_table(
     if not _table_allowed(row.table_name):
         return {"error": "TABLE_NOT_ALLOWED", "table": row.table_name}
 
-    columns = await repo.list_columns(row.id)
-    active_cols = [c for c in columns if c.status == 1]
+    columns = await repo.list_recall_columns(row.id)
     return {
         "table": row.table_name,
         "table_role": row.table_role,
@@ -49,7 +48,7 @@ async def describe_table(
         "description": table_effective_description(row),
         "default_where": table_default_where(row),
         "sch_id_column": row.sch_id_column,
-        "column_count": len(active_cols),
+        "column_count": len(columns),
         "columns": [
             {
                 "name": c.column_name,
@@ -58,9 +57,9 @@ async def describe_table(
                 "description": c.effective_description,
                 "aliases": parse_alias_json(c.alias_json),
                 "alias_json": c.alias_json,
-                "recall_enabled": bool(c.recall_enabled),
+                "recall_enabled": True,
             }
-            for c in active_cols[:50]
+            for c in columns[:50]
         ],
     }
 

@@ -97,9 +97,9 @@ async def _collect_default_filter_hints(
         where = table_default_where(table)
         if where:
             hints.append(f"- 使用 {table_name} 时必须附加 WHERE 条件：{where}")
-        cols = await repo.list_columns(table.id)
+        cols = await repo.list_recall_columns(table.id)
         for col in cols:
-            if col.status != 1 or col.column_role != "filter":
+            if col.column_role != "filter":
                 continue
             desc = effective_description(col.description_manual, col.column_comment_auto)
             if not desc:
@@ -151,7 +151,7 @@ async def build_prompt_columns_from_kb_recall(
     repo: MetaRepository,
     settings: Settings,
 ) -> dict[str, list[str]]:
-    """从知识库字段召回 + 元数据必留列组装 Prompt 字段清单。"""
+    """从知识库字段召回组装 Prompt 字段清单（deleted=0 AND status=1 AND recall_enabled=1）。"""
     table_names = merged.table_names
     prompt_columns: dict[str, list[str]] = {name: [] for name in table_names}
     recalled_by_table: dict[str, list[str]] = {}
@@ -168,12 +168,11 @@ async def build_prompt_columns_from_kb_recall(
         if not table or table.status != 1:
             prompt_columns[table_name] = recalled_by_table.get(table_name, [])
             continue
-        cols = await repo.list_columns(table.id)
+        cols = await repo.list_recall_columns(table.id)
+        recall_names = {c.column_name for c in cols}
         must_include: list[str] = []
         scored_names: list[str] = []
         for col in cols:
-            if col.status != 1:
-                continue
             is_join = (table_name, col.column_name) in join_keys
             is_must = (
                 is_join
@@ -182,13 +181,13 @@ async def build_prompt_columns_from_kb_recall(
             )
             if is_must:
                 must_include.append(col.column_name)
-            elif col.recall_enabled == 1:
+            else:
                 scored_names.append(col.column_name)
 
         selected: list[str] = []
         seen: set[str] = set()
         for name in must_include + recalled_by_table.get(table_name, []) + scored_names:
-            if name in seen:
+            if name in seen or name not in recall_names:
                 continue
             seen.add(name)
             selected.append(name)
@@ -377,7 +376,7 @@ async def filter_columns_for_prompt(
     *,
     relations: list[RelationRow] | None = None,
 ) -> MergedRecallContext:
-    """在候选表内筛选 Prompt 字段（recall_enabled + 召回得分 + JOIN 键/角色必留）。"""
+    """在候选表内筛选 Prompt 字段（deleted=0 AND status=1 AND recall_enabled=1）。"""
     rels = relations if relations is not None else await repo.list_relations()
     table_set = set(merged.table_names)
     join_keys = _join_key_columns(rels, table_set)
@@ -388,18 +387,12 @@ async def filter_columns_for_prompt(
         table = await repo.find_table_by_name(table_name)
         if not table or table.status != 1:
             continue
-        cols = await repo.list_columns(table.id)
+        cols = await repo.list_recall_columns(table.id)
         scored: list[tuple[float, str, ColumnMetaRow]] = []
 
         for col in cols:
-            if col.status != 1:
-                continue
             score = recalled_scores.get((table_name, col.column_name), 0.0)
             is_join_key = (table_name, col.column_name) in join_keys
-            is_enabled = col.recall_enabled == 1
-
-            if not is_enabled and not is_join_key:
-                continue
 
             if col.column_role in ("pk", "fk", "time", "filter"):
                 score += 50.0
@@ -551,7 +544,7 @@ async def build_llm_context_text(
             parts.append("【候选表字段清单（只能使用下列真实列名，禁止编造）】")
             col_map: dict[str, dict[str, ColumnMetaRow]] = {}
             for table in merged.tables:
-                col_map[table.table_name] = await meta_repo.get_column_map(table.id)
+                col_map[table.table_name] = await meta_repo.get_recall_column_map(table.id)
 
             for table_name in merged.table_names:
                 names = merged.prompt_columns.get(table_name, [])
@@ -865,7 +858,7 @@ async def build_agent_context_text(
             meta_repo = MetaRepository(copilot_session)
             col_map: dict[str, dict[str, ColumnMetaRow]] = {}
             for table in merged.tables:
-                col_map[table.table_name] = await meta_repo.get_column_map(table.id)
+                col_map[table.table_name] = await meta_repo.get_recall_column_map(table.id)
             for table_name in merged.table_names[:6]:
                 names = merged.prompt_columns.get(table_name, [])
                 if names:

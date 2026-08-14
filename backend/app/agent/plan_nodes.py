@@ -46,7 +46,7 @@ async def _analyze_plan_structure(
         if row is None:
             continue
         table_meta[row.table_name] = row
-        column_map[row.table_name] = await repo.get_column_map(row.id)
+        column_map[row.table_name] = await repo.get_recall_column_map(row.id)
 
     analysis = detect_multi_branch_aggregate(
         recalled_tables=merged.table_names,
